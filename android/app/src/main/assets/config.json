@@ -12,7 +12,7 @@
       },
       {
         "tag": "dns-proxy",
-        "address": "tls://1.1.1.1",
+        "address": "https://1.1.1.1/dns-query",
         "detour": "proxy"
       },
       {
@@ -34,7 +34,7 @@
         "server": "dns-proxy"
       }
     ],
-    "final": "dns-direct",
+    "final": "dns-proxy",
     "strategy": "prefer_ipv4",
     "disable_cache": false,
     "disable_expire": false,
@@ -46,7 +46,7 @@
       "tag": "tun-in",
       "interface_name": "tun0",
       "inet4_address": "172.19.0.1/30",
-      "mtu": 1400,
+      "mtu": 1420,
       "auto_route": true,
       "strict_route": true,
       "stack": "mixed",
@@ -64,7 +64,7 @@
     {
       "type": "urltest",
       "tag": "auto",
-      "outbounds": ["wireguard-device1", "wireguard-device2", "wireguard-device3", "hysteria2"],
+      "outbounds": ["hysteria2", "wireguard-device1", "wireguard-device2", "wireguard-device3"],
       "url": "https://www.gstatic.com/generate_204",
       "interval": "10m",
       "tolerance": 50
@@ -74,39 +74,35 @@
       "tag": "wireguard-device1",
       "server": "51.75.126.238",
       "server_port": 53050,
+      "system_interface": false,
+      "interface_name": "wg0",
       "local_address": ["10.155.0.2/32"],
       "private_key": "QNfDN54TBS7znkepTc5DTyKJZbOb/Wo3j8gExmfTTGc=",
       "peer_public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-      "mtu": 1280,
-      "detour": "ss-out",
-      "system_interface": false,
-      "gso": false
+      "mtu": 1420,
+      "detour": "ss-out"
     },
     {
       "type": "wireguard",
       "tag": "wireguard-device2",
       "server": "51.75.126.238",
       "server_port": 53050,
-      "local_address": ["10.155.0.4/32"],
+      "local_address": ["10.155.0.3/32"],
       "private_key": "SDQWsGLhy744maFA/WpgkPWAw7UKfc+UCCwXBalEm1s=",
       "peer_public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-      "mtu": 1280,
-      "detour": "ss-out",
-      "system_interface": false,
-      "gso": false
+      "mtu": 1420,
+      "detour": "ss-out"
     },
     {
       "type": "wireguard",
       "tag": "wireguard-device3",
       "server": "51.75.126.238",
       "server_port": 53050,
-      "local_address": ["10.155.0.3/32"],
+      "local_address": ["10.155.0.4/32"],
       "private_key": "mMYiyJnyb317OsVZkf2PG9MTOWqLwC749mFHmaf1o30=",
       "peer_public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-      "mtu": 1280,
-      "detour": "ss-out",
-      "system_interface": false,
-      "gso": false
+      "mtu": 1420,
+      "detour": "ss-out"
     },
     {
       "type": "shadowsocks",
@@ -132,9 +128,9 @@
       "password": "kvAsyCT3ZsYAz22J/fC5T6i35jmxNvEfZcmRpWBCm40=",
       "tls": {
         "enabled": true,
-        "server_name": "server.vulcainvpn.com",
+        "server_name": "www.cloudflare.com",
         "alpn": ["h3"],
-        "insecure": false
+        "insecure": true
       },
       "up_mbps": 100,
       "down_mbps": 100,

@@ -67,12 +67,20 @@ flutter:
 flutter_icons:
   android: true
   ios: true
+  image_path: "assets/icon/icon.png"
   remove_alpha_ios: true
   adaptive_icon_background: "#432923"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
   #   - images/a_dot_ham.jpeg
+
+flutter_native_splash:
+  color: "#000000"  # Black background
+  image: assets/icon/icon_foreground.png  # Your logo with transparent background
+  android: true
+  ios: true
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -1,24 +1,16 @@
-import 'package:flutter/services.dart';
+import 'dart:io';
+import 'vpn_service_android.dart';
+import 'vpn_service_windows.dart';
 
-class VpnService {
-  static const MethodChannel _platform =
-      MethodChannel('com.vulcain.vpn/control');
-
-  static const EventChannel _statusChannel =
-      EventChannel('com.vulcain.vpn/status');
-
-  static Stream<bool> get statusStream =>
-      _statusChannel.receiveBroadcastStream().map((event) => event as bool);
-
-  static Future<bool> startVpn() async {
-    return await _platform.invokeMethod('startVpn');
+abstract class VpnService {
+  static VpnService get instance {
+    if (Platform.isAndroid) return AndroidVpnService();
+    if (Platform.isWindows) return WindowsVpnService();
+    throw UnsupportedError('Platform not supported');
   }
 
-  static Future<bool> stopVpn() async {
-    return await _platform.invokeMethod('stopVpn');
-  }
-
-  static Future<bool> getStatus() async {
-    return await _platform.invokeMethod('getStatus');
-  }
+  Stream<bool> get statusStream;
+  Future<bool> startVpn();
+  Future<void> stopVpn();
+  Future<bool> checkNotificationPermission(); // ← was missing
 }

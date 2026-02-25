@@ -1,0 +1,28 @@
+import 'package:flutter/services.dart';
+
+class VpnService {
+  static const MethodChannel _platform =
+      MethodChannel('com.vulcain.vpn/control');
+
+  static const EventChannel _statusChannel =
+      EventChannel('com.vulcain.vpn/status');
+
+  static Stream<bool> get statusStream =>
+      _statusChannel.receiveBroadcastStream().map((event) => event as bool);
+
+  static Future<bool> startVpn() async {
+    return await _platform.invokeMethod('startVpn');
+  }
+
+  static Future<bool> stopVpn() async {
+    return await _platform.invokeMethod('stopVpn');
+  }
+
+  static Future<bool> getStatus() async {
+    return await _platform.invokeMethod('getStatus');
+  }
+
+  static Future<bool> checkNotificationPermission() async {
+    return await _platform.invokeMethod('checkNotificationPermission');
+  }
+}

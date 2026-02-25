@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'colors.dart';
 import 'dart:async';
+import 'dart:io';
 import 'l10n/app_localizations.dart';
 import 'services/ip_service.dart';
 import 'services/vpn_service.dart';
@@ -69,15 +71,31 @@ class _VpnHomePageState extends State<VpnHomePage> {
   Timer? _timer;
   Timer? _ipCheckTimer;
   String _currentIp = '';
+  String _currentCountry = '';
+  String _currentCountryCode = '';
   bool _isLoadingIp = true;
   StreamSubscription<bool>? _vpnSubscription;
+
+  // Single instance used throughout
+  late final VpnService _vpnService = VpnService.instance;
 
   @override
   void initState() {
     super.initState();
-    _fetchCurrentIp();
+    _init();
+  }
 
-    _vpnSubscription = VpnService.statusStream.listen((isConnected) {
+  Future<void> _init() async {
+    // On Windows, check for admin rights early
+    if (Platform.isWindows) {
+      await _checkAdminRights();
+    }
+
+    await Future.delayed(const Duration(seconds: 5));
+
+    _fetchCurrentIpAndLocation();
+
+    _vpnSubscription = _vpnService.statusStream.listen((isConnected) async {
       if (!mounted) return;
 
       setState(() {
@@ -98,34 +116,107 @@ class _VpnHomePageState extends State<VpnHomePage> {
         }
       });
 
-      _fetchCurrentIp();
+      if (isConnected) {
+        await Future.delayed(const Duration(seconds: 5));
+      }
+      _fetchCurrentIpAndLocationWithRetry();
     });
   }
 
-  Future<void> _fetchCurrentIp() async {
+  Future<void> _checkAdminRights() async {
+    try {
+      final result = await Process.run('net', ['session'], runInShell: true);
+      if (result.exitCode != 0 && mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Admin Rights Required'),
+            content: const Text(
+              'Managing VPN tunnels on Windows requires administrator privileges. '
+              'Please restart the app as administrator.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      print('Admin check failed: $e');
+    }
+  }
+
+  Future<void> _fetchCurrentIpAndLocation() async {
     setState(() {
       _isLoadingIp = true;
     });
 
-    final ip = await IpService.getPublicIp();
+    for (int i = 0; i < 5; i++) {
+      try {
+        final result = await IpService.getPublicIpAndLocation();
+        if (result['ip'] != 'Unknown') {
+          setState(() {
+            _currentIp = result['ip'];
+            _currentCountry = result['country'];
+            _currentCountryCode = result['countryCode'];
+            _isLoadingIp = false;
+          });
+          return;
+        }
+      } catch (e) {
+        print('Attempt $i failed: $e');
+      }
+      await Future.delayed(const Duration(seconds: 2));
+    }
 
     setState(() {
-      _currentIp = ip;
+      _currentIp = 'Unknown';
+      _currentCountry = '';
+      _currentCountryCode = '';
       _isLoadingIp = false;
     });
+  }
 
-    if (_currentIp == 'Unknown') {
-      _ipCheckTimer?.cancel();
-      _ipCheckTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
-        final newIp = await IpService.getPublicIp();
-        if (newIp != 'Unknown') {
+  String _getFlag(String countryCode) {
+    if (countryCode.isEmpty) return '';
+    return String.fromCharCodes(
+      Runes('${countryCode.toUpperCase().replaceAllMapped(RegExp(r'[A-Z]'), (match) => String.fromCharCode(match.group(0)!.codeUnitAt(0) + 127397))}'),
+    );
+  }
+
+  Future<void> _fetchCurrentIpAndLocationWithRetry() async {
+    setState(() {
+      _isLoadingIp = true;
+    });
+
+    await Future.delayed(const Duration(seconds: 2));
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final result = await IpService.getPublicIpAndLocation();
+        if (result['ip'] != 'Unknown') {
           setState(() {
-            _currentIp = newIp;
+            _currentIp = result['ip'];
+            _currentCountry = result['country'];
+            _currentCountryCode = result['countryCode'];
+            _isLoadingIp = false;
           });
-          timer.cancel();
+          return;
         }
-      });
+      } catch (e) {
+        print('Attempt ${attempt + 1} failed: $e');
+      }
+      await Future.delayed(const Duration(seconds: 3));
     }
+
+    setState(() {
+      _currentIp = 'Unknown';
+      _currentCountry = '';
+      _currentCountryCode = '';
+      _isLoadingIp = false;
+    });
   }
 
   @override
@@ -138,20 +229,27 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   void _toggleConnection() async {
     if (_connectionState == 'disconnected') {
+      // Android-only: check notification permission before connecting
+      if (Platform.isAndroid) {
+        final hasPermission = await _vpnService.checkNotificationPermission();
+        if (!hasPermission) {
+          await _showEnableNotificationsDialog();
+          return;
+        }
+      }
+
       setState(() {
         _connectionState = 'connecting';
       });
 
       try {
-        final success = await VpnService.startVpn();
+        final success = await _vpnService.startVpn();
 
         if (success) {
           setState(() {
             _connectionState = 'connected';
             _connectionSeconds = 0;
           });
-
-          _fetchCurrentIp();
 
           _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
             setState(() {
@@ -201,7 +299,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
         }
       }
     } else {
-      await VpnService.stopVpn();
+      await _vpnService.stopVpn();
 
       _timer?.cancel();
       setState(() {
@@ -209,8 +307,15 @@ class _VpnHomePageState extends State<VpnHomePage> {
         _connectionSeconds = 0;
       });
 
-      _fetchCurrentIp();
+      await Future.delayed(const Duration(seconds: 2));
+      _fetchCurrentIpAndLocation();
     }
+  }
+
+  // Android-only helpers
+  Future<String> _getPackageName() async {
+    return await MethodChannel('com.vulcain.vpn/package')
+        .invokeMethod('getPackageName');
   }
 
   Future<void> _showEnableNotificationsDialog() async {
@@ -218,7 +323,11 @@ class _VpnHomePageState extends State<VpnHomePage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Notifications Required"),
-        content: const Text("Please enable notifications in settings to use the VPN."),
+        content: const Text(
+          "Android requires notifications for VPN services. "
+          "This ensures the VPN stays active and protects your connection. "
+          "Please enable notifications in settings.",
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -227,12 +336,14 @@ class _VpnHomePageState extends State<VpnHomePage> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              const String url = 'android.settings.APP_NOTIFICATION_SETTINGS';
               try {
-                if (await canLaunchUrl(Uri.parse(url))) {
-                  await launchUrl(Uri.parse(url));
+                final packageName = await _getPackageName();
+                final url = Uri.parse('android.settings.APP_NOTIFICATION_SETTINGS')
+                    .replace(queryParameters: {'package': packageName});
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url);
                 } else {
-                  throw 'Could not launch $url';
+                  throw 'Could not launch settings URL';
                 }
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -339,7 +450,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  '${loc.location}: ${loc.france} 🇫🇷 ',
+                  '${loc.location}: $_currentCountry ${_getFlag(_currentCountryCode)} ',
                   style: TextStyle(
                     fontSize: 18,
                     color: Colors.grey[700],

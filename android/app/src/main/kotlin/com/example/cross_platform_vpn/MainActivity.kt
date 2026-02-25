@@ -13,6 +13,9 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
+import android.content.Context
+import android.app.NotificationManager
+
 
 class MainActivity : FlutterActivity() {
 
@@ -37,16 +40,20 @@ class MainActivity : FlutterActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             CONTROL_CHANNEL
         ).setMethodCallHandler { call, result ->
-
             when (call.method) {
-
+                "checkNotificationPermission" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                        result.success(notificationManager.areNotificationsEnabled())
+                    } else {
+                        result.success(true) // No permission needed for older Android versions
+                    }
+                }
+                "getPackageName" -> getPackageName(result)
                 "startVpn" -> {
                     pendingResult = result
-
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                            != PackageManager.PERMISSION_GRANTED) {
-
+                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                             requestPermissions(
                                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                                 NOTIFICATION_REQUEST_CODE
@@ -54,18 +61,10 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
                     }
-
                     requestVpnPermission()
                 }
-
-                "stopVpn" -> {
-                    stopVpnInternal(result)
-                }
-
-                "getStatus" -> {
-                    result.success(MyVpnService.isRunning)
-                }
-
+                "stopVpn" -> stopVpnInternal(result)
+                "getStatus" -> result.success(MyVpnService.isRunning)
                 else -> result.notImplemented()
             }
         }
@@ -78,16 +77,28 @@ class MainActivity : FlutterActivity() {
             override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                 statusSink = events
             }
-
             override fun onCancel(arguments: Any?) {
                 statusSink = null
             }
         })
     }
 
-    private fun requestVpnPermission() {
-        val intent = VpnService.prepare(this)
+    private fun getPackageName(result: MethodChannel.Result) { // <-- Add this method
+        result.success(packageName)
+    }
 
+    private fun requestVpnPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_REQUEST_CODE
+                )
+                return
+            }
+        }
+        // If permission is already granted or not needed, proceed to VPN permission
+        val intent = VpnService.prepare(this)
         if (intent != null) {
             startActivityForResult(intent, VPN_REQUEST_CODE)
         } else {

@@ -11,7 +11,7 @@ android {
     defaultConfig {
         applicationId = "com.example.cross_platform_vpn"
         minSdk = flutter.minSdkVersion
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -45,12 +45,6 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            jniLibs.srcDirs("src/main/jniLibs")
-        }
-    }
-
     packagingOptions {
         jniLibs {
             useLegacyPackaging = false
@@ -66,5 +60,4 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation(files("libs/libbox.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
 }

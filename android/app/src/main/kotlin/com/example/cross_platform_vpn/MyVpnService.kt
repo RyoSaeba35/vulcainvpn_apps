@@ -248,11 +248,65 @@ class MyVpnService : VpnService(), PlatformInterface {
         // Register callback to pre-cache interfaces BEFORE sing-box gets notified
         DefaultNetworkMonitor.onInterfaceCacheRequest = { network ->
             Log.d(TAG, "📦 Building interface cache for network: $network")
-            // Call getInterfaces() to build the cache
-            getInterfaces()
+            // Call buildInterfaces() to build the cache
+            cachedInterfaces = null
+            buildInterfaceCacheForNetwork(network)
         }
 
         DefaultNetworkMonitor.setListener(listener)
+    }
+
+    private fun buildInterfaceCacheForNetwork(network: android.net.Network?) {
+        try {
+            val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+            val networkInterfaces = NetworkInterface.getNetworkInterfaces().toList()
+            val interfaces = mutableListOf<LibboxNetworkInterface>()
+
+            // Priority 1: Use the specific network we were given
+            if (network != null) {
+                val linkProperties = connectivityManager.getLinkProperties(network)
+                val networkCapabilities = connectivityManager.getNetworkCapabilities(network)
+                val interfaceName = linkProperties?.interfaceName
+
+                if (interfaceName != null &&
+                    !interfaceName.startsWith("tun") &&
+                    !interfaceName.startsWith("ppp") &&
+                    networkCapabilities != null
+                ) {
+                    val networkInterface = networkInterfaces.find { it.name == interfaceName }
+                    if (networkInterface != null) {
+                        val boxInterface = buildInterfaceInfo(interfaceName, networkInterface, networkCapabilities, linkProperties)
+                        interfaces.add(boxInterface)
+                        Log.d(TAG, "✅ Cached active network interface: $interfaceName type=${boxInterface.type}")
+                    }
+                }
+            }
+
+            // Priority 2: Fallback - scan all networks if active network gave nothing
+            if (interfaces.isEmpty()) {
+                Log.w(TAG, "⚠️ Active network gave no interface, scanning all networks as fallback")
+                for (n in connectivityManager.allNetworks) {
+                    val linkProperties = connectivityManager.getLinkProperties(n) ?: continue
+                    val networkCapabilities = connectivityManager.getNetworkCapabilities(n) ?: continue
+                    val interfaceName = linkProperties.interfaceName ?: continue
+
+                    if (interfaceName.startsWith("tun") || interfaceName.startsWith("ppp")) continue
+
+                    val networkInterface = networkInterfaces.find { it.name == interfaceName } ?: continue
+                    val boxInterface = buildInterfaceInfo(interfaceName, networkInterface, networkCapabilities, linkProperties)
+                    interfaces.add(boxInterface)
+                    Log.d(TAG, "✅ Fallback interface: $interfaceName type=${boxInterface.type}")
+                    break
+                }
+            }
+
+            cachedInterfaces = interfaces
+            Log.d(TAG, "✅ Interface cache built: ${interfaces.size} interfaces")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to build interface cache", e)
+            cachedInterfaces = emptyList()
+        }
     }
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
