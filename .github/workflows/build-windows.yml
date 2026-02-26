@@ -22,14 +22,18 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-arm64.zip" -OutFile "arm64.zip"
           Expand-Archive -Path "amd64.zip" -DestinationPath "amd64"
           Expand-Archive -Path "arm64.zip" -DestinationPath "arm64"
-          Copy-Item "amd64\sing-box-1.12.22-windows-amd64\sing-box.exe" -Destination "windows\runner\sing-box-amd64.exe"
-          Copy-Item "arm64\sing-box-1.12.22-windows-arm64\sing-box.exe" -Destination "windows\runner\sing-box-arm64.exe"
 
       - name: Install dependencies
         run: flutter pub get
 
       - name: Build Windows
         run: flutter build windows --release
+
+      - name: Copy sing-box binaries to output
+        shell: powershell
+        run: |
+          Copy-Item "amd64\sing-box-1.12.22-windows-amd64\sing-box.exe" -Destination "build\windows\x64\runner\Release\sing-box-amd64.exe"
+          Copy-Item "arm64\sing-box-1.12.22-windows-arm64\sing-box.exe" -Destination "build\windows\x64\runner\Release\sing-box-arm64.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
