@@ -27,7 +27,6 @@ class WindowsVpnService extends VpnService {
   @override
   Future<bool> startVpn() async {
     try {
-      // Write hardcoded config to temp file
       final tempDir = await getTemporaryDirectory();
       final configFile = File('${tempDir.path}\\config.json');
       await configFile.writeAsString(vpnConfig);
@@ -37,9 +36,18 @@ class WindowsVpnService extends VpnService {
         ['run', '-c', configFile.path],
       );
 
-      await configFile.delete();
+      // Log output so we can see what's happening
+      _singBoxProcess!.stdout
+          .transform(SystemEncoding().decoder)
+          .listen((data) => print('sing-box: $data'));
+      _singBoxProcess!.stderr
+          .transform(SystemEncoding().decoder)
+          .listen((data) => print('sing-box ERR: $data'));
 
-      _singBoxProcess!.exitCode.then((_) {
+      _singBoxProcess!.exitCode.then((code) {
+        print('sing-box exited with code: $code');
+        // Delete config when process exits
+        configFile.delete();
         if (_isConnected) {
           _isConnected = false;
           _statusController.add(false);
@@ -55,7 +63,7 @@ class WindowsVpnService extends VpnService {
       return false;
     }
   }
-
+  
   @override
   Future<void> stopVpn() async {
     _singBoxProcess?.kill();
