@@ -16,14 +16,14 @@ jobs:
           channel: 'stable'
 
       - name: Download sing-box binaries
-        run: |
-          curl -L "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-amd64.zip" -o amd64.zip
-          curl -L "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-arm64.zip" -o arm64.zip
-          Expand-Archive -Path amd64.zip -DestinationPath amd64
-          Expand-Archive -Path arm64.zip -DestinationPath arm64
-          copy amd64\sing-box-1.12.22-windows-amd64\sing-box.exe windows\runner\sing-box-amd64.exe
-          copy arm64\sing-box-1.12.22-windows-arm64\sing-box.exe windows\runner\sing-box-arm64.exe
         shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-amd64.zip" -OutFile "amd64.zip"
+          Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-arm64.zip" -OutFile "arm64.zip"
+          Expand-Archive -Path "amd64.zip" -DestinationPath "amd64"
+          Expand-Archive -Path "arm64.zip" -DestinationPath "arm64"
+          Copy-Item "amd64\sing-box-1.12.22-windows-amd64\sing-box.exe" -Destination "windows\runner\sing-box-amd64.exe"
+          Copy-Item "arm64\sing-box-1.12.22-windows-arm64\sing-box.exe" -Destination "windows\runner\sing-box-arm64.exe"
 
       - name: Install dependencies
         run: flutter pub get
