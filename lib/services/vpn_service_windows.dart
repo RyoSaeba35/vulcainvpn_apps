@@ -9,6 +9,13 @@ class WindowsVpnService extends VpnService {
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
+  static final _logFile = File('C:\\Users\\Pierre\\Downloads\\windows-build\\vpn_log.txt');
+
+  static Future<void> _log(String message) async {
+    final timestamp = DateTime.now().toIso8601String();
+    await _logFile.writeAsString('$timestamp: $message\n', mode: FileMode.append);
+  }
+
   static String get _singBoxPath {
     final exeDir = File(Platform.resolvedExecutable).parent.path;
 
@@ -27,26 +34,30 @@ class WindowsVpnService extends VpnService {
   @override
   Future<bool> startVpn() async {
     try {
+      await _log('startVpn called');
+      await _log('sing-box path: $_singBoxPath');
+      await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
+
       final tempDir = await getTemporaryDirectory();
       final configFile = File('${tempDir.path}\\config.json');
       await configFile.writeAsString(vpnConfig);
+      await _log('config written to: ${configFile.path}');
 
       _singBoxProcess = await Process.start(
         _singBoxPath,
         ['run', '-c', configFile.path],
       );
+      await _log('process started with pid: ${_singBoxProcess!.pid}');
 
-      // Log output so we can see what's happening
       _singBoxProcess!.stdout
           .transform(SystemEncoding().decoder)
-          .listen((data) => print('sing-box: $data'));
+          .listen((data) => _log('sing-box: $data'));
       _singBoxProcess!.stderr
           .transform(SystemEncoding().decoder)
-          .listen((data) => print('sing-box ERR: $data'));
+          .listen((data) => _log('sing-box ERR: $data'));
 
       _singBoxProcess!.exitCode.then((code) {
-        print('sing-box exited with code: $code');
-        // Delete config when process exits
+        _log('sing-box exited with code: $code');
         configFile.delete();
         if (_isConnected) {
           _isConnected = false;
@@ -59,13 +70,14 @@ class WindowsVpnService extends VpnService {
       _statusController.add(true);
       return true;
     } catch (e) {
-      print('Windows VPN error: $e');
+      await _log('Windows VPN error: $e');
       return false;
     }
   }
-  
+
   @override
   Future<void> stopVpn() async {
+    await _log('stopVpn called');
     _singBoxProcess?.kill();
     _singBoxProcess = null;
     _isConnected = false;
