@@ -21,7 +21,7 @@ PrivilegesRequired=admin
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:";
 
 [Files]
 Source: "build\windows\x64\runner\Release\cross_platform_vpn.exe"; DestDir: "{app}"; Flags: ignoreversion
