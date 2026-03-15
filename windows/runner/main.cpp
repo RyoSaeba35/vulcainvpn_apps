@@ -49,7 +49,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(400, 650);
-  if (!window.Create(L"cross_platform_vpn", origin, size)) {
+  if (!window.Create(L"Vulcain VPN", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);
