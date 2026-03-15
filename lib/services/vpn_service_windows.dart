@@ -9,23 +9,24 @@ class WindowsVpnService extends VpnService {
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
-  static final _logFile = File('C:\\Users\\Pierre\\Downloads\\windows-build\\vpn_log.txt');
+  static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
+
+  static String get _logPath => '$_exeDir\\vpn_log.txt';
 
   static Future<void> _log(String message) async {
+    final logFile = File(_logPath);
     final timestamp = DateTime.now().toIso8601String();
-    await _logFile.writeAsString('$timestamp: $message\n', mode: FileMode.append);
+    await logFile.writeAsString('$timestamp: $message\n', mode: FileMode.append);
   }
 
   static String get _singBoxPath {
-    final exeDir = File(Platform.resolvedExecutable).parent.path;
-
     final arch = Platform.environment['PROCESSOR_ARCHITECTURE'] ?? '';
     final arch2 = Platform.environment['PROCESSOR_ARCHITEW6432'] ?? '';
     final isArm = arch.toUpperCase().contains('ARM') ||
                   arch2.toUpperCase().contains('ARM');
 
     final binary = isArm ? 'sing-box-arm64.exe' : 'sing-box-amd64.exe';
-    return '$exeDir\\$binary';
+    return '$_exeDir\\$binary';
   }
 
   @override
@@ -35,6 +36,7 @@ class WindowsVpnService extends VpnService {
   Future<bool> startVpn() async {
     try {
       await _log('startVpn called');
+      await _log('exe dir: $_exeDir');
       await _log('sing-box path: $_singBoxPath');
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
 
