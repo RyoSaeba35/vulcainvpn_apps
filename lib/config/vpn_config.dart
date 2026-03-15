@@ -72,7 +72,7 @@ const String vpnConfig = '''
       "address": ["10.155.0.3/32"],
       "private_key": "SDQWsGLhy744maFA/WpgkPWAw7UKfc+UCCwXBalEm1s=",
       "mtu": 1420,
-      "detour": "ss-out"
+      "detour": "ss-out",
       "peers": [
         {
           "address": "51.75.126.238",
@@ -88,7 +88,7 @@ const String vpnConfig = '''
       "address": ["10.155.0.4/32"],
       "private_key": "mMYiyJnyb317OsVZkf2PG9MTOWqLwC749mFHmaf1o30=",
       "mtu": 1420,
-      "detour": "ss-out"
+      "detour": "ss-out",
       "peers": [
         {
           "address": "51.75.126.238",
