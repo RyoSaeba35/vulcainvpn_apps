@@ -7,25 +7,25 @@ const String vpnConfig = '''
   "dns": {
     "servers": [
       {
+        "type": "udp",
         "tag": "dns-direct",
-        "address": "223.5.5.5",
+        "server": "223.5.5.5",
         "detour": "direct"
       },
       {
+        "type": "https",
         "tag": "dns-proxy",
-        "address": "https://1.1.1.1/dns-query",
+        "server": "1.1.1.1",
+        "path": "/dns-query",
         "detour": "proxy"
       },
       {
+        "type": "rcode",
         "tag": "dns-block",
-        "address": "rcode://success"
+        "rcode": "success"
       }
     ],
     "rules": [
-      {
-        "outbound": "any",
-        "server": "dns-direct"
-      },
       {
         "clash_mode": "direct",
         "server": "dns-direct"
@@ -46,7 +46,7 @@ const String vpnConfig = '''
       "type": "tun",
       "tag": "tun-in",
       "interface_name": "tun0",
-      "inet4_address": "172.19.0.1/30",
+      "address": ["172.19.0.1/30"],
       "mtu": 1420,
       "auto_route": true,
       "strict_route": true,
