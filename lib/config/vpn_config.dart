@@ -9,8 +9,7 @@ const String vpnConfig = '''
       {
         "type": "udp",
         "tag": "dns-direct",
-        "server": "223.5.5.5",
-        "detour": "direct"
+        "server": "223.5.5.5"
       },
       {
         "type": "https",
@@ -155,6 +154,7 @@ const String vpnConfig = '''
     }
   ],
   "route": {
+    "default_domain_resolver": "dns-direct",
     "rules": [
       {
         "protocol": "dns",
