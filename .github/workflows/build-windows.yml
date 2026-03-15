@@ -35,8 +35,14 @@ jobs:
           Copy-Item "amd64\sing-box-1.12.22-windows-amd64\sing-box.exe" -Destination "build\windows\x64\runner\Release\sing-box-amd64.exe"
           Copy-Item "arm64\sing-box-1.12.22-windows-arm64\sing-box.exe" -Destination "build\windows\x64\runner\Release\sing-box-arm64.exe"
 
-      - name: Upload artifact
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build Installer
+        run: iscc installer.iss
+
+      - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
-          path: build/windows/x64/runner/Release/
+          name: windows-installer
+          path: installer-output/CrossPlatformVPN-Setup.exe
