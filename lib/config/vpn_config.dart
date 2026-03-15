@@ -72,13 +72,13 @@ const String vpnConfig = '''
       "address": ["10.155.0.3/32"],
       "private_key": "SDQWsGLhy744maFA/WpgkPWAw7UKfc+UCCwXBalEm1s=",
       "mtu": 1420,
+      "detour": "ss-out"
       "peers": [
         {
           "address": "51.75.126.238",
           "port": 53050,
           "public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
           "allowed_ips": ["0.0.0.0/0", "::/0"],
-          "detour": "ss-out"
         }
       ]
     },
@@ -88,13 +88,13 @@ const String vpnConfig = '''
       "address": ["10.155.0.4/32"],
       "private_key": "mMYiyJnyb317OsVZkf2PG9MTOWqLwC749mFHmaf1o30=",
       "mtu": 1420,
+      "detour": "ss-out"
       "peers": [
         {
           "address": "51.75.126.238",
           "port": 53050,
           "public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
           "allowed_ips": ["0.0.0.0/0", "::/0"],
-          "detour": "ss-out"
         }
       ]
     }
