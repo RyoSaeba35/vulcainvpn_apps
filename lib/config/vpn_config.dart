@@ -5,26 +5,6 @@ const String vpnConfig = '''
     "timestamp": true
   },
   "dns": {
-    "servers": [
-      {
-        "type": "udp",
-        "tag": "dns-direct",
-        "server": "223.5.5.5",
-        "detour": "direct"
-      },
-      {
-        "type": "https",
-        "tag": "dns-proxy",
-        "server": "1.1.1.1",
-        "path": "/dns-query",
-        "detour": "proxy"
-      },
-      {
-        "type": "rcode",
-        "tag": "dns-block",
-        "rcode": "success"
-      }
-    ],
     "rules": [
       {
         "clash_mode": "direct",
