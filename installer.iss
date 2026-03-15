@@ -4,7 +4,7 @@
 #define MyAppExeName "cross_platform_vpn.exe"
 
 [Setup]
-AppId={B7F3A1C9-D24E-4B8F-9E6D-3C5A2F1E0D7B}
+AppId={{B7F3A1C9-D24E-4B8F-9E6D-3C5A2F1E0D7B}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
