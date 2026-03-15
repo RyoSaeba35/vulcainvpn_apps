@@ -22,7 +22,6 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: checked
-Name: "startmenuicon"; Description: "Create a Start Menu shortcut"; GroupDescription: "Additional icons:"; Flags: checked
 
 [Files]
 Source: "build\windows\x64\runner\Release\cross_platform_vpn.exe"; DestDir: "{app}"; Flags: ignoreversion
