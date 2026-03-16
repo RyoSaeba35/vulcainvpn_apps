@@ -8,7 +8,7 @@ AppId={{B7F3A1C9-D24E-4B8F-9E6D-3C5A2F1E0D7B}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={autopf64}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=installer-output
 OutputBaseFilename=VulcainVPN-Setup
@@ -16,6 +16,7 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+ArchitecturesInstallIn64BitMode=x64
 SetupIconFile=windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
@@ -36,12 +37,8 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "schtasks.exe"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"; Tasks: desktopicon
 
 [Run]
-; Register the scheduled task
-Filename: "schtasks"; Parameters: "/Create /TN ""VulcainVPN\Launch"" /TR ""{app}\vulcain_vpn.exe"" /SC ONDEMAND /RL HIGHEST /F"; Flags: runhidden waituntilterminated
-
-; Launch app after install via the task
-Filename: "schtasks"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; Flags: runhidden; Description: "Launching {#MyAppName}..."; StatusMsg: "Starting Vulcain VPN..."
+Filename: "{cmd}"; Parameters: "/c schtasks /Create /TN ""VulcainVPN\Launch"" /TR ""{app}\vulcain_vpn.exe"" /SC ONCE /ST 00:00 /RL HIGHEST /F"; Flags: runhidden waituntilterminated
+Filename: "{cmd}"; Parameters: "/c schtasks /Run /TN ""VulcainVPN\Launch"""; Flags: runhidden; Description: "Launching {#MyAppName}..."; StatusMsg: "Starting Vulcain VPN..."
 
 [UninstallRun]
-; Remove the scheduled task on uninstall
-Filename: "schtasks"; Parameters: "/Delete /TN ""VulcainVPN\Launch"" /F"; Flags: runhidden
+Filename: "{cmd}"; Parameters: "/c schtasks /Delete /TN ""VulcainVPN\Launch"" /F"; Flags: runhidden
