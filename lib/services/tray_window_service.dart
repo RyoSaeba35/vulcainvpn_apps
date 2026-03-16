@@ -29,7 +29,7 @@ class TrayWindowService with TrayListener, WindowListener {
         await windowManager.show();
         await windowManager.focus();
       }
-      return null;
+      return '';
     });
 
     final exeDir = File(Platform.resolvedExecutable).parent.path;
