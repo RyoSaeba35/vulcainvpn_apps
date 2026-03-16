@@ -30,7 +30,7 @@ jobs:
         run: dart run flutter_launcher_icons
 
       - name: Build Windows
-        run: flutter build windows --release --target-platform windows-x64
+        run: flutter build windows --release
 
       - name: Copy sing-box binaries to output
         shell: powershell
