@@ -6,7 +6,9 @@ import 'package:window_manager/window_manager.dart';
 class TrayWindowService with TrayListener, WindowListener {
   final Function() onToggleConnection;
   final Function() onQuit;
-  ServerSocket? _server;
+  Timer? _pollTimer;
+
+  static const _flagPath = r'C:\ProgramData\VulcainVPN\show.flag';
 
   TrayWindowService({
     required this.onToggleConnection,
@@ -19,22 +21,17 @@ class TrayWindowService with TrayListener, WindowListener {
     windowManager.addListener(this);
     await windowManager.setPreventClose(true);
 
-    // Listen on local port for show command from second instance
-    try {
-      _server = await ServerSocket.bind('127.0.0.1', 45678);
-      _server!.listen((socket) async {
-        socket.listen((data) async {
-          final message = String.fromCharCodes(data).trim();
-          if (message == 'show') {
-            await windowManager.show();
-            await windowManager.focus();
-          }
-          socket.close();
-        });
-      });
-    } catch (e) {
-      print('Could not bind show server: $e');
-    }
+    // Poll every 300ms for show flag
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 300), (_) async {
+      try {
+        final flagFile = File(_flagPath);
+        if (await flagFile.exists()) {
+          await flagFile.delete();
+          await windowManager.show();
+          await windowManager.focus();
+        }
+      } catch (_) {}
+    });
 
     final exeDir = File(Platform.resolvedExecutable).parent.path;
     final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.ico';
@@ -44,7 +41,7 @@ class TrayWindowService with TrayListener, WindowListener {
 
   void dispose() {
     if (!Platform.isWindows) return;
-    _server?.close();
+    _pollTimer?.cancel();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
   }

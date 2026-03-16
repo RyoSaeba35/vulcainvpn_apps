@@ -1,11 +1,9 @@
 #define WIN32_LEAN_AND_MEAN
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 #include <shellapi.h>
-#pragma comment(lib, "ws2_32.lib")
+#include <shlobj.h>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -33,24 +31,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return 0;
   }
 
-  // Try to connect to existing instance on port 45678
-  WSADATA wsaData;
-  WSAStartup(MAKEWORD(2, 2), &wsaData);
+  // Single instance check via mutex
+  HANDLE mutex = CreateMutex(NULL, TRUE, L"Global\\VulcainVPNMutex");
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    // Write flag to C:\ProgramData\VulcainVPN\show.flag
+    WCHAR flagPath[MAX_PATH];
+    swprintf_s(flagPath, MAX_PATH, L"C:\\ProgramData\\VulcainVPN\\show.flag");
 
-  SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  sockaddr_in addr = {};
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(45678);
-  InetPtonW(AF_INET, L"127.0.0.1", &addr.sin_addr);
+    // Ensure directory exists
+    CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
 
-  if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == 0) {
-    send(sock, "show", 4, 0);
-    closesocket(sock);
-    WSACleanup();
+    HANDLE hFile = CreateFileW(flagPath, GENERIC_WRITE, 0, NULL,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
     return 0;
   }
-  closesocket(sock);
-  WSACleanup();
+
+  // Ensure flag directory exists for the running instance too
+  CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
 
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
@@ -79,6 +77,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  ReleaseMutex(mutex);
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }
