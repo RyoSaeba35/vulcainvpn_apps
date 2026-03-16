@@ -16,7 +16,12 @@ class TrayWindowService with TrayListener, WindowListener {
     if (!Platform.isWindows) return;
     trayManager.addListener(this);
     windowManager.addListener(this);
-    await trayManager.setIcon('assets/icon/icon.png');
+
+    // Resolve icon path relative to the exe
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    await trayManager.setIcon(
+      '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.png'
+    );
     await updateState(false);
   }
 
