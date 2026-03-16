@@ -15,10 +15,11 @@ class TrayWindowService with TrayListener, WindowListener {
     if (!Platform.isWindows) return;
     trayManager.addListener(this);
     windowManager.addListener(this);
+    await windowManager.setPreventClose(true);
 
     // Absolute path — works both in dev and installed
     final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.png';
+    final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.ico';
     await trayManager.setIcon(iconPath);
     await updateState(false);
   }

@@ -34,8 +34,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND hwnd = FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Vulcain VPN");
     if (hwnd) {
-      ShowWindow(hwnd, SW_RESTORE);
-      SetForegroundWindow(hwnd);
+      // ShowWindow(hwnd, SW_RESTORE);
+      // SetForegroundWindow(hwnd);
+      PostMessage(hwnd, WM_APP + 1, 0, 0);
     }
     return 0;
   }
