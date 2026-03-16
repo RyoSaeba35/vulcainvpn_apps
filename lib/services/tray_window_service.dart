@@ -5,7 +5,6 @@ import 'package:window_manager/window_manager.dart';
 class TrayWindowService with TrayListener, WindowListener {
   final Function() onToggleConnection;
   final Function() onQuit;
-  bool _isConnected = false;
 
   TrayWindowService({
     required this.onToggleConnection,
@@ -17,11 +16,10 @@ class TrayWindowService with TrayListener, WindowListener {
     trayManager.addListener(this);
     windowManager.addListener(this);
 
-    // Resolve icon path relative to the exe
+    // Absolute path — works both in dev and installed
     final exeDir = File(Platform.resolvedExecutable).parent.path;
-    await trayManager.setIcon(
-      '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.png'
-    );
+    final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.png';
+    await trayManager.setIcon(iconPath);
     await updateState(false);
   }
 
@@ -33,7 +31,6 @@ class TrayWindowService with TrayListener, WindowListener {
 
   Future<void> updateState(bool connected) async {
     if (!Platform.isWindows) return;
-    _isConnected = connected;
     final menu = Menu(items: [
       MenuItem(key: 'show', label: 'Open Vulcain VPN'),
       MenuItem.separator(),

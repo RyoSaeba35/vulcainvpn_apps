@@ -80,8 +80,19 @@ class WindowsVpnService extends VpnService {
   @override
   Future<void> stopVpn() async {
     await _log('stopVpn called');
+
+    // Kill by reference if we have it
     _singBoxProcess?.kill();
     _singBoxProcess = null;
+
+    // Also kill by name in case process was started in a previous session
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+    } catch (e) {
+      await _log('taskkill error: $e');
+    }
+
     _isConnected = false;
     _statusController.add(false);
   }
