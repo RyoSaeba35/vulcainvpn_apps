@@ -1,8 +1,10 @@
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 #include <shellapi.h>
-#include <winsock2.h>
 #pragma comment(lib, "ws2_32.lib")
 
 #include "flutter_window.h"
@@ -35,14 +37,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   WSADATA wsaData;
   WSAStartup(MAKEWORD(2, 2), &wsaData);
 
-  SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-  sockaddr_in addr;
+  SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  sockaddr_in addr = {};
   addr.sin_family = AF_INET;
   addr.sin_port = htons(45678);
-  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  InetPtonW(AF_INET, L"127.0.0.1", &addr.sin_addr);
 
   if (connect(sock, (sockaddr*)&addr, sizeof(addr)) == 0) {
-    // Existing instance running — send show command
     send(sock, "show", 4, 0);
     closesocket(sock);
     WSACleanup();
@@ -51,7 +52,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   closesocket(sock);
   WSACleanup();
 
-  // No existing instance — start normally
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
   }
