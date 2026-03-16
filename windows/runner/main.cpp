@@ -9,7 +9,7 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
-  // Warn if not running as admin (user launched exe directly instead of shortcut)
+  // Warn if not running as admin
   BOOL isAdmin = FALSE;
   HANDLE token = NULL;
   if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
@@ -32,10 +32,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // Single instance check
   HANDLE mutex = CreateMutex(NULL, TRUE, L"VulcainVPNMutex");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    HWND hwnd = FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Vulcain VPN");
-    if (hwnd) {
-      PostMessage(hwnd, WM_APP + 1, 0, 0);
-    }
+    // Write flag file to signal existing instance to show
+    WCHAR tempPath[MAX_PATH];
+    GetTempPathW(MAX_PATH, tempPath);
+    WCHAR flagFile[MAX_PATH];
+    swprintf_s(flagFile, MAX_PATH, L"%svulcain_show.flag", tempPath);
+    HANDLE hFile = CreateFileW(flagFile, GENERIC_WRITE, 0, NULL,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
     return 0;
   }
 

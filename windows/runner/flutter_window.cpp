@@ -58,20 +58,6 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
-
-    case WM_APP + 1:
-      // Send message to Dart to show window properly via window_manager
-      if (flutter_controller_) {
-        const char* message_str = "show";
-        flutter_controller_->engine()->SendPlatformMessage(
-          "vulcain_vpn/window",
-          reinterpret_cast<const uint8_t*>(message_str),
-          4,
-          nullptr,
-          nullptr
-        );
-      }
-      return 0;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);

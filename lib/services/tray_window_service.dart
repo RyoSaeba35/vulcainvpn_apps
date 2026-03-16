@@ -1,16 +1,12 @@
 import 'dart:io';
-import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 class TrayWindowService with TrayListener, WindowListener {
   final Function() onToggleConnection;
   final Function() onQuit;
-
-  static const _channel = BasicMessageChannel<String>(
-    'vulcain_vpn/window',
-    StringCodec(),
-  );
+  Timer? _pollTimer;
 
   TrayWindowService({
     required this.onToggleConnection,
@@ -23,13 +19,17 @@ class TrayWindowService with TrayListener, WindowListener {
     windowManager.addListener(this);
     await windowManager.setPreventClose(true);
 
-    // Listen for show signal from second instance
-    _channel.setMessageHandler((message) async {
-      if (message == 'show') {
-        await windowManager.show();
-        await windowManager.focus();
-      }
-      return '';
+    // Poll every 500ms for show flag from second instance
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 500), (_) async {
+      try {
+        final temp = Platform.environment['TEMP'] ?? '';
+        final flagFile = File('$temp\\vulcain_show.flag');
+        if (await flagFile.exists()) {
+          await flagFile.delete();
+          await windowManager.show();
+          await windowManager.focus();
+        }
+      } catch (_) {}
     });
 
     final exeDir = File(Platform.resolvedExecutable).parent.path;
@@ -40,6 +40,7 @@ class TrayWindowService with TrayListener, WindowListener {
 
   void dispose() {
     if (!Platform.isWindows) return;
+    _pollTimer?.cancel();
     trayManager.removeListener(this);
     windowManager.removeListener(this);
   }
