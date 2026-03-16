@@ -1,7 +1,7 @@
 #define MyAppName "Vulcain VPN"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "RyoSaeba35"
-#define MyAppExeName "cross_platform_vpn.exe"
+#define MyAppExeName "vulcain_vpn.exe"
 
 [Setup]
 AppId={{B7F3A1C9-D24E-4B8F-9E6D-3C5A2F1E0D7B}}
@@ -16,17 +16,21 @@ Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
+SetupIconFile=windows\runner\resources\app_icon.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:";
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-Source: "build\windows\x64\runner\Release\cross_platform_vpn.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build\windows\x64\runner\Release\vulcain_vpn.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\windows\x64\runner\Release\flutter_windows.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\windows\x64\runner\Release\url_launcher_windows_plugin.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build\windows\x64\runner\Release\tray_manager_plugin.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "build\windows\x64\runner\Release\window_manager_plugin.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\windows\x64\runner\Release\sing-box-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\windows\x64\runner\Release\sing-box-arm64.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
