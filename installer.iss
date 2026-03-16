@@ -31,9 +31,14 @@ Source: "build\windows\x64\runner\Release\*.dll"; DestDir: "{app}"; Flags: ignor
 Source: "build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{#MyAppName}"; Filename: "schtasks.exe"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "schtasks.exe"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; Register the scheduled task (runs once during install, requires admin — which installer already has)
+Filename: "schtasks"; Parameters: "/Create /TN ""VulcainVPN\Launch"" /TR ""{app}\vulcain_vpn.exe"" /SC ONDEMAND /RL HIGHEST /RU INTERACTIVE /F"; Flags: runhidden waituntilterminated; Description: "Registering elevated task..."
+
+[UninstallRun]
+; Remove the scheduled task on uninstall
+Filename: "schtasks"; Parameters: "/Delete /TN ""VulcainVPN\Launch"" /F"; Flags: runhidden

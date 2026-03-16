@@ -15,11 +15,11 @@ class WindowsVpnService extends VpnService {
 
   static Future<void> _log(String message) async {
     final logFile = File(_logPath);
-    // Keep log under 1MB — delete if too large
     if (await logFile.exists()) {
       final size = await logFile.length();
       if (size > 1024 * 1024) {
-        await logFile.delete();
+        // Rename old log to vpn_log_old.txt, start fresh
+        await logFile.rename('$_exeDir\\vpn_log_old.txt');
       }
     }
     final timestamp = DateTime.now().toIso8601String();

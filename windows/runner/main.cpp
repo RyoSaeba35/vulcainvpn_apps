@@ -9,33 +9,11 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
-  // Auto-elevate FIRST, before mutex
-  BOOL isAdmin = FALSE;
-  HANDLE token = NULL;
-  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-    TOKEN_ELEVATION elevation;
-    DWORD size;
-    if (GetTokenInformation(token, TokenElevation, &elevation,
-                            sizeof(elevation), &size)) {
-      isAdmin = elevation.TokenIsElevated;
-    }
-    CloseHandle(token);
-  }
-
-  if (!isAdmin) {
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(NULL, path, MAX_PATH);
-    ShellExecuteW(NULL, L"runas", path, command_line, NULL, show_command);
-    return 0;
-  }
-
-  // Single instance check AFTER elevation
+  // Single instance check
   HANDLE mutex = CreateMutex(NULL, TRUE, L"VulcainVPNMutex");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND hwnd = FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Vulcain VPN");
     if (hwnd) {
-      // ShowWindow(hwnd, SW_RESTORE);
-      // SetForegroundWindow(hwnd);
       PostMessage(hwnd, WM_APP + 1, 0, 0);
     }
     return 0;
