@@ -9,6 +9,26 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
+  // Warn if not running as admin (user launched exe directly instead of shortcut)
+  BOOL isAdmin = FALSE;
+  HANDLE token = NULL;
+  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    TOKEN_ELEVATION elevation;
+    DWORD size;
+    if (GetTokenInformation(token, TokenElevation, &elevation,
+                            sizeof(elevation), &size)) {
+      isAdmin = elevation.TokenIsElevated;
+    }
+    CloseHandle(token);
+  }
+
+  if (!isAdmin) {
+    MessageBoxW(NULL,
+      L"Please launch Vulcain VPN from the desktop shortcut.",
+      L"Vulcain VPN", MB_OK | MB_ICONINFORMATION);
+    return 0;
+  }
+
   // Single instance check
   HANDLE mutex = CreateMutex(NULL, TRUE, L"VulcainVPNMutex");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {

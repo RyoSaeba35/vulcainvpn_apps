@@ -36,8 +36,11 @@ Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "schtasks.exe"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"; Tasks: desktopicon
 
 [Run]
-; Register the scheduled task (runs once during install, requires admin — which installer already has)
-Filename: "schtasks"; Parameters: "/Create /TN ""VulcainVPN\Launch"" /TR ""{app}\vulcain_vpn.exe"" /SC ONDEMAND /RL HIGHEST /RU INTERACTIVE /F"; Flags: runhidden waituntilterminated; Description: "Registering elevated task..."
+; Register the scheduled task
+Filename: "schtasks"; Parameters: "/Create /TN ""VulcainVPN\Launch"" /TR ""{app}\vulcain_vpn.exe"" /SC ONDEMAND /RL HIGHEST /F"; Flags: runhidden waituntilterminated
+
+; Launch app after install via the task
+Filename: "schtasks"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; Flags: runhidden; Description: "Launching {#MyAppName}..."; StatusMsg: "Starting Vulcain VPN..."
 
 [UninstallRun]
 ; Remove the scheduled task on uninstall
