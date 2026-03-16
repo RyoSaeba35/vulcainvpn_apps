@@ -3,7 +3,6 @@
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
 #include <shellapi.h>
-#include <shlobj.h>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -11,43 +10,21 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
-  // Warn if not running as admin
-  BOOL isAdmin = FALSE;
-  HANDLE token = NULL;
-  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-    TOKEN_ELEVATION elevation;
-    DWORD size;
-    if (GetTokenInformation(token, TokenElevation, &elevation,
-                            sizeof(elevation), &size)) {
-      isAdmin = elevation.TokenIsElevated;
-    }
-    CloseHandle(token);
-  }
-
-  if (!isAdmin) {
-    MessageBoxW(NULL,
-      L"Please launch Vulcain VPN from the desktop shortcut.",
-      L"Vulcain VPN", MB_OK | MB_ICONINFORMATION);
-    return 0;
-  }
-
-  // Single instance check via mutex
-  HANDLE mutex = CreateMutex(NULL, TRUE, L"Global\\VulcainVPNMutex");
+  // Single instance check
+  HANDLE mutex = CreateMutex(NULL, TRUE, L"VulcainVPNMutex");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    // Write flag to C:\ProgramData\VulcainVPN\show.flag
-    WCHAR flagPath[MAX_PATH];
-    swprintf_s(flagPath, MAX_PATH, L"C:\\ProgramData\\VulcainVPN\\show.flag");
-
-    // Ensure directory exists
+    // App already running — write flag to signal it to show
     CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
-
-    HANDLE hFile = CreateFileW(flagPath, GENERIC_WRITE, 0, NULL,
-                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    HANDLE hFile = CreateFileW(
+      L"C:\\ProgramData\\VulcainVPN\\show.flag",
+      GENERIC_WRITE, 0, NULL,
+      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL
+    );
     if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
     return 0;
   }
 
-  // Ensure flag directory exists for the running instance too
+  // Create the ProgramData directory for flag files
   CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
 
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
