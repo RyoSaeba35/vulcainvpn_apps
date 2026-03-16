@@ -16,7 +16,7 @@ class TrayWindowService with TrayListener, WindowListener {
     if (!Platform.isWindows) return;
     trayManager.addListener(this);
     windowManager.addListener(this);
-    await trayManager.setIcon('assets/icon/icon.ico');
+    await trayManager.setIcon('assets/icon/icon.png');
     await updateState(false);
   }
 
