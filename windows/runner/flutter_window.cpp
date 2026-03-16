@@ -60,9 +60,17 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       break;
 
     case WM_APP + 1:
-      // Show window when triggered by a second instance (desktop shortcut click)
-      ShowWindow(hwnd, SW_RESTORE);
-      SetForegroundWindow(hwnd);
+      // Send message to Dart to show window properly via window_manager
+      if (flutter_controller_) {
+        const char* message_str = "show";
+        flutter_controller_->engine()->SendPlatformMessage(
+          "vulcain_vpn/window",
+          reinterpret_cast<const uint8_t*>(message_str),
+          4,
+          nullptr,
+          nullptr
+        );
+      }
       return 0;
   }
 

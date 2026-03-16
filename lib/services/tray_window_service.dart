@@ -1,10 +1,16 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 class TrayWindowService with TrayListener, WindowListener {
   final Function() onToggleConnection;
   final Function() onQuit;
+
+  static const _channel = BasicMessageChannel<String>(
+    'vulcain_vpn/window',
+    StringCodec(),
+  );
 
   TrayWindowService({
     required this.onToggleConnection,
@@ -17,7 +23,15 @@ class TrayWindowService with TrayListener, WindowListener {
     windowManager.addListener(this);
     await windowManager.setPreventClose(true);
 
-    // Absolute path — works both in dev and installed
+    // Listen for show signal from second instance
+    _channel.setMessageHandler((message) async {
+      if (message == 'show') {
+        await windowManager.show();
+        await windowManager.focus();
+      }
+      return null;
+    });
+
     final exeDir = File(Platform.resolvedExecutable).parent.path;
     final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.ico';
     await trayManager.setIcon(iconPath);
