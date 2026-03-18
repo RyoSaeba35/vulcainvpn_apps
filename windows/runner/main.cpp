@@ -10,6 +10,26 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
+  // Check if running as admin — if not, relaunch via scheduled task
+  BOOL isAdmin = FALSE;
+  HANDLE token = NULL;
+  if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+    TOKEN_ELEVATION elevation;
+    DWORD size;
+    if (GetTokenInformation(token, TokenElevation, &elevation,
+                            sizeof(elevation), &size)) {
+      isAdmin = elevation.TokenIsElevated;
+    }
+    CloseHandle(token);
+  }
+
+  if (!isAdmin) {
+    // Relaunch via scheduled task which has elevation — no UAC prompt
+    ShellExecuteW(NULL, NULL, L"schtasks",
+      L"/Run /TN \"VulcainVPN\\Launch\"", NULL, SW_HIDE);
+    return 0;
+  }
+
   // Always write the show flag on startup
   CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
   HANDLE hFile = CreateFileW(
