@@ -31,9 +31,6 @@ bool IsAppAlreadyRunning() {
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
-  // Hide immediately to prevent flash when relaunching elevated
-  ShowWindow(GetConsoleWindow(), SW_HIDE);
-
   // Check if running as admin
   BOOL isAdmin = FALSE;
   HANDLE token = NULL;
