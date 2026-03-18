@@ -51,16 +51,17 @@ function InitializeUninstall(): Boolean;
 var
   ResultCode: Integer;
   TempFile: String;
-  Lines: TArrayOfString;
+  FileContent: AnsiString;
 begin
   TempFile := ExpandConstant('{tmp}\proccheck.txt');
+
   Exec(ExpandConstant('{sys}\cmd.exe'),
-    '/c tasklist /FI "IMAGENAME eq vulcain_vpn.exe" /NH > "' + TempFile + '"',
+    '/c tasklist /FI "IMAGENAME eq vulcain_vpn.exe" /NH > "' + TempFile + '" 2>&1',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  if LoadStringsFromFile(TempFile, Lines) then
+  if LoadStringFromFile(TempFile, FileContent) then
   begin
-    if (GetArrayLength(Lines) > 0) and (Pos('vulcain_vpn.exe', Lines[0]) > 0) then
+    if Pos('vulcain_vpn.exe', FileContent) > 0 then
     begin
       MsgBox(
         'Vulcain VPN is currently running.' + #13#10 + #13#10 +
