@@ -73,3 +73,10 @@ begin
   end;
   Result := True;
 end;
+
+[UninstallDelete]
+Type: files; Name: "{app}\vpn_log.txt"
+Type: files; Name: "{app}\vpn_log_old.txt"
+Type: files; Name: "{app}\cache.db"
+Type: filesandordirs; Name: "{app}\data\cache.db"
+Type: filesandordirs; Name: "C:\ProgramData\VulcainVPN"
