@@ -45,29 +45,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   if (!isAdmin) {
-      if (IsAppAlreadyRunning()) {
-        CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
-        HANDLE hFile = CreateFileW(
-          L"C:\\ProgramData\\VulcainVPN\\show.flag",
-          GENERIC_WRITE, 0, NULL,
-          CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL
-        );
-        if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
-      } else {
-        // Launch via task with no window flash
-        STARTUPINFOW si = {};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        PROCESS_INFORMATION pi = {};
-        WCHAR cmd[] = L"C:\\Windows\\System32\\schtasks.exe /Run /TN \"VulcainVPN\\Launch\"";
-        CreateProcessW(NULL, cmd,
-          NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-        if (pi.hProcess) CloseHandle(pi.hProcess);
-        if (pi.hThread) CloseHandle(pi.hThread);
-      }
-      return 0;
-    }
+    // Delegate to show_app.vbs which handles everything silently
+    ShellExecuteW(NULL, L"open",
+      L"C:\\Program Files\\Vulcain VPN\\show_app.vbs",
+      NULL, NULL, SW_HIDE);
+    return 0;
+  }
 
   // Running as admin — check if another elevated instance exists
   if (IsAppAlreadyRunning()) {
