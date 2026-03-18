@@ -10,22 +10,25 @@
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
-  // Single instance check
+  // Always write the show flag on startup
+  CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
+  HANDLE hFile = CreateFileW(
+    L"C:\\ProgramData\\VulcainVPN\\show.flag",
+    GENERIC_WRITE, 0, NULL,
+    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL
+  );
+  if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
+
+  // Check if another instance is already running
   HANDLE mutex = CreateMutex(NULL, TRUE, L"VulcainVPNMutex");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
-    // App already running — write flag to signal it to show
-    CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
-    HANDLE hFile = CreateFileW(
-      L"C:\\ProgramData\\VulcainVPN\\show.flag",
-      GENERIC_WRITE, 0, NULL,
-      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL
-    );
-    if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
+    // Another instance is running — flag already written, just exit
     return 0;
   }
 
-  // Create the ProgramData directory for flag files
-  CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
+  // First instance — delete the flag we just wrote (it was for us)
+  // and start the app normally
+  DeleteFileW(L"C:\\ProgramData\\VulcainVPN\\show.flag");
 
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
