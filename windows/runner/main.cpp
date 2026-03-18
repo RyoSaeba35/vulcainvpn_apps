@@ -31,6 +31,9 @@ bool IsAppAlreadyRunning() {
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
 
+  // Hide immediately to prevent flash when relaunching elevated
+  ShowWindow(GetConsoleWindow(), SW_HIDE);
+
   // Check if running as admin
   BOOL isAdmin = FALSE;
   HANDLE token = NULL;
@@ -45,23 +48,29 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   if (!isAdmin) {
-    // Not admin — check if app is already running
-    if (IsAppAlreadyRunning()) {
-      // App running — write flag to show it
-      CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
-      HANDLE hFile = CreateFileW(
-        L"C:\\ProgramData\\VulcainVPN\\show.flag",
-        GENERIC_WRITE, 0, NULL,
-        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL
-      );
-      if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
-    } else {
-      // App not running — relaunch elevated via task
-      ShellExecuteW(NULL, NULL, L"schtasks",
-        L"/Run /TN \"VulcainVPN\\Launch\"", NULL, SW_HIDE);
+      if (IsAppAlreadyRunning()) {
+        CreateDirectoryW(L"C:\\ProgramData\\VulcainVPN", NULL);
+        HANDLE hFile = CreateFileW(
+          L"C:\\ProgramData\\VulcainVPN\\show.flag",
+          GENERIC_WRITE, 0, NULL,
+          CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL
+        );
+        if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
+      } else {
+        // Launch via task with no window flash
+        STARTUPINFOW si = {};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = {};
+        CreateProcessW(NULL,
+          (LPWSTR)L"schtasks /Run /TN \"VulcainVPN\\Launch\"",
+          NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        if (pi.hProcess) CloseHandle(pi.hProcess);
+        if (pi.hThread) CloseHandle(pi.hThread);
+      }
+      return 0;
     }
-    return 0;
-  }
 
   // Running as admin — check if another elevated instance exists
   if (IsAppAlreadyRunning()) {
