@@ -31,11 +31,12 @@ Source: "build\windows\x64\runner\Release\*.exe"; DestDir: "{app}"; Flags: ignor
 Source: "build\windows\x64\runner\Release\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "setup_task.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "show_app.bat"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "schtasks.exe"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\show_app.bat"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"
 Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "schtasks.exe"; Parameters: "/Run /TN ""VulcainVPN\Launch"""; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"; Tasks: desktopicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\show_app.bat"; IconFilename: "{app}\{#MyAppExeName}"; AppUserModelID: "VulcainVPN"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\setup_task.bat"; Flags: runhidden waituntilterminated
