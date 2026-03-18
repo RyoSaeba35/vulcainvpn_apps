@@ -45,3 +45,31 @@ Filename: "{cmd}"; Parameters: "/c schtasks /Run /TN ""VulcainVPN\Launch"""; Fla
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/c schtasks /Delete /TN ""VulcainVPN\Launch"" /F"; Flags: runhidden
+
+[Code]
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+  TempFile: String;
+  Lines: TArrayOfString;
+begin
+  TempFile := ExpandConstant('{tmp}\proccheck.txt');
+  Exec(ExpandConstant('{sys}\cmd.exe'),
+    '/c tasklist /FI "IMAGENAME eq vulcain_vpn.exe" /NH > "' + TempFile + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  if LoadStringsFromFile(TempFile, Lines) then
+  begin
+    if (GetArrayLength(Lines) > 0) and (Pos('vulcain_vpn.exe', Lines[0]) > 0) then
+    begin
+      MsgBox(
+        'Vulcain VPN is currently running.' + #13#10 + #13#10 +
+        'Please quit the app completely before uninstalling.' + #13#10 +
+        'Right-click the tray icon and select "Quit", then try again.',
+        mbError, MB_OK);
+      Result := False;
+      Exit;
+    end;
+  end;
+  Result := True;
+end;
