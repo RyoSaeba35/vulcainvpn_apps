@@ -40,7 +40,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (hFile != INVALID_HANDLE_VALUE) CloseHandle(hFile);
 
   // Check if another instance is already running
-  HANDLE mutex = CreateMutex(NULL, TRUE, L"VulcainVPNMutex");
+  HANDLE mutex = CreateMutex(NULL, TRUE, L"Global\\VulcainVPNMutex");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
     // Another instance is running — flag already written, just exit
     return 0;
