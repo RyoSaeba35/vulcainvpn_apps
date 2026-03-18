@@ -60,8 +60,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
         si.dwFlags = STARTF_USESHOWWINDOW;
         si.wShowWindow = SW_HIDE;
         PROCESS_INFORMATION pi = {};
-        CreateProcessW(NULL,
-          (LPWSTR)L"schtasks /Run /TN \"VulcainVPN\\Launch\"",
+        WCHAR cmd[] = L"C:\\Windows\\System32\\schtasks.exe /Run /TN \"VulcainVPN\\Launch\"";
+        CreateProcessW(NULL, cmd,
           NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
         if (pi.hProcess) CloseHandle(pi.hProcess);
         if (pi.hThread) CloseHandle(pi.hThread);
