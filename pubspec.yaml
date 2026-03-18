@@ -54,6 +54,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.0
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -83,7 +84,7 @@ flutter:
   #   - images/a_dot_ham.jpeg
 
 flutter_native_splash:
-  color: "#000000"  # Black background
+  color: "#432923"  # Brown background
   image: assets/icon/icon_foreground.png  # Your logo with transparent background
   android: true
   ios: true

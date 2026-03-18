@@ -89,7 +89,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   String _currentCountryCode = '';
   bool _isLoadingIp = true;
   StreamSubscription<bool>? _vpnSubscription;
-  TrayWindowService? _trayService; // null on Android/iOS
+  TrayWindowService? _trayService;
 
   late final VpnService _vpnService = VpnService.instance;
 
@@ -177,10 +177,12 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
       await _trayService?.updateState(isConnected);
 
+      // Use the smarter polling method when connecting via stream event too
       if (isConnected) {
-        await Future.delayed(const Duration(seconds: 5));
+        _fetchUntilIpChanges(_currentIp);
+      } else {
+        _fetchCurrentIpAndLocationWithRetry();
       }
-      _fetchCurrentIpAndLocationWithRetry();
     });
   }
 
@@ -210,6 +212,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
     }
   }
 
+  /// Fetches IP on startup or after disconnect — retries up to 5 times with
+  /// no requirement for the IP to change.
   Future<void> _fetchCurrentIpAndLocation() async {
     setState(() => _isLoadingIp = true);
     for (int i = 0; i < 5; i++) {
@@ -237,6 +241,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
     });
   }
 
+  /// Retries IP fetch a few times — used as a fallback when polling gives up.
   Future<void> _fetchCurrentIpAndLocationWithRetry() async {
     setState(() => _isLoadingIp = true);
     await Future.delayed(const Duration(seconds: 2));
@@ -265,6 +270,51 @@ class _VpnHomePageState extends State<VpnHomePage> {
     });
   }
 
+  /// Polls until the IP actually changes from [previousIp], meaning the VPN
+  /// tunnel is routing traffic. Gives up after 20 seconds and shows whatever
+  /// it last got (or 'Unknown').
+  Future<void> _fetchUntilIpChanges(String previousIp) async {
+    setState(() => _isLoadingIp = true);
+
+    const maxWait = Duration(seconds: 20);
+    final deadline = DateTime.now().add(maxWait);
+
+    for (int i = 0; i < 10; i++) {
+      if (!mounted) return;
+      if (DateTime.now().isAfter(deadline)) break;
+
+      await Future.delayed(const Duration(seconds: 3));
+
+      try {
+        final result = await IpService.getPublicIpAndLocation();
+        final ip = result['ip'];
+
+        if (ip != null && ip != 'Unknown' && ip != previousIp) {
+          // IP changed — tunnel is active
+          if (!mounted) return;
+          setState(() {
+            _currentIp = ip;
+            _currentCountry = result['country'] ?? '';
+            _currentCountryCode = result['countryCode'] ?? '';
+            _isLoadingIp = false;
+          });
+          return;
+        }
+      } catch (e) {
+        print('_fetchUntilIpChanges attempt $i failed: $e');
+      }
+    }
+
+    // Timed out — show whatever we can get or Unknown
+    if (!mounted) return;
+    setState(() {
+      _currentIp = 'Unknown';
+      _currentCountry = '';
+      _currentCountryCode = '';
+      _isLoadingIp = false;
+    });
+  }
+
   String _getFlag(String countryCode) {
     if (countryCode.isEmpty) return '';
     return String.fromCharCodes(
@@ -279,15 +329,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   void _toggleConnection() async {
     if (_connectionState == 'disconnected') {
-      if (Platform.isAndroid) {
-        final hasPermission = await _vpnService.checkNotificationPermission();
-        if (!hasPermission) {
-          await _showEnableNotificationsDialog();
-          return;
-        }
-      }
-
       setState(() => _connectionState = 'connecting');
+
+      // Capture the current IP before connecting so we can detect when it changes
+      final ipBeforeConnect = _currentIp;
 
       try {
         final success = await _vpnService.startVpn();
@@ -299,6 +344,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
           _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
             setState(() => _connectionSeconds++);
           });
+          // Poll until IP changes to the VPN IP, rather than waiting a fixed delay
+          _fetchUntilIpChanges(ipBeforeConnect);
         } else {
           setState(() => _connectionState = 'disconnected');
           if (mounted) {
@@ -321,11 +368,28 @@ class _VpnHomePageState extends State<VpnHomePage> {
       } catch (e) {
         setState(() => _connectionState = 'disconnected');
         if (mounted) {
+          String message;
+
+          if (Platform.isAndroid &&
+              e is PlatformException &&
+              (e.code == 'NOTIFICATION_PERMISSION_DENIED' ||
+                  e.message?.contains('null') == true)) {
+            message =
+                'Notification permission is required for the VPN to stay active. Please allow it and try again.';
+          } else if (Platform.isAndroid &&
+              e is PlatformException &&
+              (e.code == 'VPN_PERMISSION_DENIED' || e.details == null)) {
+            message =
+                'VPN permission is required to protect your connection. Please allow it and try again.';
+          } else {
+            message = 'Failed to start VPN: $e';
+          }
+
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
               title: const Text('Connection Error'),
-              content: Text('Failed to start VPN: $e'),
+              content: Text(message),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
@@ -348,11 +412,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
     }
   }
 
-  Future<String> _getPackageName() async {
-    return await MethodChannel('com.vulcain.vpn/package')
-        .invokeMethod('getPackageName');
-  }
-
   Future<void> _showEnableNotificationsDialog() async {
     return showDialog(
       context: context,
@@ -371,15 +430,17 @@ class _VpnHomePageState extends State<VpnHomePage> {
             onPressed: () async {
               Navigator.pop(context);
               try {
-                final packageName = await _getPackageName();
-                final url =
-                    Uri.parse('android.settings.APP_NOTIFICATION_SETTINGS')
-                        .replace(queryParameters: {'package': packageName});
+                const packageName = 'com.vulcain.vpn';
+                final url = Uri.parse(
+                  'android.settings.APP_NOTIFICATION_SETTINGS',
+                ).replace(queryParameters: {'app_package': packageName});
                 if (await canLaunchUrl(url)) await launchUrl(url);
               } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not open settings: $e')),
-                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Could not open settings: $e')),
+                  );
+                }
               }
             },
             child: const Text("Open Settings"),
@@ -478,7 +539,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  '${loc.location}: $_currentCountry ${_getFlag(_currentCountryCode)} ',
+                  '${loc.location}: $_currentCountry ${Platform.isWindows ? '' : _getFlag(_currentCountryCode)} ',
                   style: TextStyle(fontSize: 18, color: Colors.grey[700]),
                 ),
                 if (_isLoadingIp)

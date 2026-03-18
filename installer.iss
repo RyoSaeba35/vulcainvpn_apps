@@ -65,8 +65,12 @@ begin
     begin
       MsgBox(
         'Vulcain VPN is currently running.' + #13#10 + #13#10 +
-        'Please quit the app completely before uninstalling.' + #13#10 +
-        'Right-click the tray icon and select "Quit", then try again.',
+        'Please close it before uninstalling:' + #13#10 + #13#10 +
+        '  1. Click the ^ arrow in the bottom-right corner of your taskbar' + #13#10 +
+        '     to show hidden icons (near the clock, wifi...).' + #13#10 +
+        '  2. Right-click the Vulcain icon.' + #13#10 +
+        '  3. Select "Quit".' + #13#10 + #13#10 +
+        'Then run the uninstaller again.',
         mbError, MB_OK);
       Result := False;
       Exit;
