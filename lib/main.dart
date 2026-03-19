@@ -539,7 +539,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
-                  '${loc.location}: $_currentCountry ${Platform.isWindows ? '' : _getFlag(_currentCountryCode)} ',
+                  '${loc.location}: $_currentCountry${Platform.isWindows ? '' : ' ${_getFlag(_currentCountryCode)}'} ',
                   style: TextStyle(fontSize: 18, color: Colors.grey[700]),
                 ),
                 if (_isLoadingIp)
