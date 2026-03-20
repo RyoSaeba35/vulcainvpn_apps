@@ -1,7 +1,7 @@
 const String vpnConfig = '''
 {
   "log": {
-    "level": "info",
+    "level": "debug",
     "timestamp": true
   },
   "dns": {
@@ -76,7 +76,7 @@ const String vpnConfig = '''
           "address": "51.75.126.238",
           "port": 53050,
           "public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-          "allowed_ips": ["0.0.0.0/0", "::/0"],
+          "allowed_ips": ["0.0.0.0/0", "::/0"]
         }
       ]
     },
@@ -91,7 +91,7 @@ const String vpnConfig = '''
           "address": "51.75.126.238",
           "port": 53050,
           "public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-          "allowed_ips": ["0.0.0.0/0", "::/0"],
+          "allowed_ips": ["0.0.0.0/0", "::/0"]
         }
       ]
     }

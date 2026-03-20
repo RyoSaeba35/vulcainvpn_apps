@@ -64,7 +64,7 @@
     {
       "type": "urltest",
       "tag": "auto",
-      "outbounds": ["hysteria2", "wireguard-device1", "wireguard-device2", "wireguard-device3"],
+      "outbounds": [ "wireguard-device1", "wireguard-device2", "wireguard-device3","hysteria2"],
       "url": "https://www.gstatic.com/generate_204",
       "interval": "10m",
       "tolerance": 50
@@ -110,7 +110,7 @@
       "server": "51.75.126.238",
       "server_port": 443,
       "method": "2022-blake3-aes-256-gcm",
-      "password": "yK8mN3pQ7vR2xT9wU5hJ6kL1mN4oP8qS3tV7wX0yZ2a=",
+      "password": "yK8mN3pQ7vR2xT9wU5hJ6kL1mN4oP8qS3tV7wX0yZ2a=:xK9mN3pQ7vR2xT9wU5hJ6kL1mN4oP8qS3tV7wX0yZ2b=",
       "multiplex": {
         "enabled": true,
         "protocol": "h2mux",
