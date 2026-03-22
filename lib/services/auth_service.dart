@@ -1,13 +1,15 @@
-// lib/services/auth_service.dart
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class AuthService {
   static const String _baseUrl = 'https://api.vulcainvpn.com/api';
   static const String _tokenKey = 'jwt_token';
   static const String _apiKeyKey = 'api_key';
   static const String _deviceIdKey = 'device_id';
+  static const String _emailKey = 'user_email';
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
@@ -16,21 +18,53 @@ class AuthService {
     wOptions: WindowsOptions(),
   );
 
-  // Login — fetches and stores JWT token
+  // Login — fetches token then registers device automatically
   static Future<bool> login(String email, String password) async {
     try {
+      // Step 1 — Login
       final response = await http.post(
         Uri.parse('$_baseUrl/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'email': email, 'password': password}),
       );
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        await _storage.write(key: _tokenKey, value: data['token']);
-        return true;
+      if (response.statusCode != 200) return false;
+
+      final data = json.decode(response.body);
+      final token = data['token'];
+      await _storage.write(key: _tokenKey, value: token);
+      await saveEmail(data['user']['email']);
+
+      // Step 2 — Generate unique device ID
+      final deviceId = await _getDeviceId();
+      final platform = Platform.isAndroid ? 'android' :
+                       Platform.isIOS ? 'ios' :
+                       Platform.isWindows ? 'windows' :
+                       Platform.isMacOS ? 'macos' : 'linux';
+      final deviceName = await _getDeviceName();
+
+      // Step 3 — Register device and store api_key
+      final registerResponse = await http.post(
+        Uri.parse('$_baseUrl/devices/register'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: json.encode({
+          'device_id': deviceId,
+          'platform': platform,
+          'name': deviceName,
+        }),
+      );
+
+      if (registerResponse.statusCode == 200 ||
+          registerResponse.statusCode == 201) {
+        final registerData = json.decode(registerResponse.body);
+        await saveApiKey(registerData['api_key']);
+        await saveDeviceId(deviceId);
       }
-      return false;
+
+      return true;
     } catch (e) {
       return false;
     }
@@ -51,7 +85,6 @@ class AuthService {
     final token = await _storage.read(key: _tokenKey);
     if (token == null) return false;
 
-    // Check if token is expired by decoding the payload
     try {
       final parts = token.split('.');
       if (parts.length != 3) return false;
@@ -64,7 +97,6 @@ class AuthService {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
       if (exp < now) {
-        // Token expired — clear storage
         await _storage.deleteAll();
         return false;
       }
@@ -92,5 +124,75 @@ class AuthService {
   // Get stored device_id
   static Future<String?> getDeviceId() async {
     return await _storage.read(key: _deviceIdKey);
+  }
+
+  // Save email on login
+  static Future<void> saveEmail(String email) async {
+    await _storage.write(key: _emailKey, value: email);
+  }
+
+  // Get stored email
+  static Future<String?> getStoredEmail() async {
+    return await _storage.read(key: _emailKey);
+  }
+
+  // ─── Private helpers ───────────────────────────────────────────────────────
+
+  static Future<String> _getDeviceId() async {
+    // Reuse stored device ID if available
+    final stored = await _storage.read(key: _deviceIdKey);
+    if (stored != null) return stored;
+
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      String id;
+
+      if (Platform.isAndroid) {
+        final info = await deviceInfo.androidInfo;
+        id = info.id;
+      } else if (Platform.isIOS) {
+        final info = await deviceInfo.iosInfo;
+        id = info.identifierForVendor ?? _generateFallbackId();
+      } else if (Platform.isWindows) {
+        final info = await deviceInfo.windowsInfo;
+        id = info.deviceId;
+      } else if (Platform.isMacOS) {
+        final info = await deviceInfo.macOsInfo;
+        id = info.systemGUID ?? _generateFallbackId();
+      } else {
+        id = _generateFallbackId();
+      }
+
+      return id;
+    } catch (e) {
+      return _generateFallbackId();
+    }
+  }
+
+  static String _generateFallbackId() {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return 'device_$timestamp';
+  }
+
+  static Future<String> _getDeviceName() async {
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      if (Platform.isAndroid) {
+        final info = await deviceInfo.androidInfo;
+        return '${info.brand} ${info.model}';
+      } else if (Platform.isIOS) {
+        final info = await deviceInfo.iosInfo;
+        return info.name;
+      } else if (Platform.isWindows) {
+        final info = await deviceInfo.windowsInfo;
+        return info.computerName;
+      } else if (Platform.isMacOS) {
+        final info = await deviceInfo.macOsInfo;
+        return info.computerName;
+      }
+    } catch (e) {
+      return 'Unknown Device';
+    }
+    return 'Unknown Device';
   }
 }

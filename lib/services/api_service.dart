@@ -1,5 +1,4 @@
 // lib/services/api_service.dart
-// lib/services/api_service.dart
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'auth_service.dart';
@@ -69,6 +68,26 @@ class ApiService {
       return json.decode(response.body);
     } else {
       throw Exception('Failed to load status');
+    }
+  }
+
+  // Add this method to your existing ApiService class
+  static Future<Map<String, dynamic>> fetchSubscription() async {
+    final apiKey = await AuthService.getApiKey();
+    if (apiKey == null) throw Exception('No API key found');
+
+    final response = await http.get(
+      Uri.parse('$baseUrl/subscription'),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': apiKey,
+      },
+    );
+
+    if (response.statusCode == 200) {
+      return json.decode(response.body);
+    } else {
+      throw Exception('Failed to load subscription');
     }
   }
 }
