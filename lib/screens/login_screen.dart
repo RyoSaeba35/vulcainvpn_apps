@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../colors.dart';
 
@@ -184,9 +185,22 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Don\'t have an account? Visit vulcainvpn.com',
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                GestureDetector(
+                  onTap: () async {
+                    final url = Uri.parse('https://vulcainvpn.com');
+                    if (await canLaunchUrl(url)) {
+                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  child: const Text(
+                    'Don\'t have an account? Visit vulcainvpn.com',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 12,
+                      decoration: TextDecoration.underline,
+                      decorationColor: Colors.white38,
+                    ),
+                  ),
                 ),
               ],
             ),
