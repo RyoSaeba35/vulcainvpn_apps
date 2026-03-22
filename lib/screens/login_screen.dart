@@ -244,17 +244,26 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                   const SizedBox(height: 24),
 
                   // Clickable website link
-                  GestureDetector(
-                    onTap: _launchWebsite,
-                    child: const Text(
-                      'Don\'t have an account? Visit www.vulcainvpn.com',
-                      style: TextStyle(
-                        color: Colors.white38,
-                        fontSize: 12,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.white38,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'Don\'t have an account? Visit ',
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
                       ),
-                    ),
+                      GestureDetector(
+                        onTap: _launchWebsite,
+                        child: const Text(
+                          'www.vulcainvpn.com',
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 12,
+                            decoration: TextDecoration.underline,
+                            decorationColor: Colors.white60,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
