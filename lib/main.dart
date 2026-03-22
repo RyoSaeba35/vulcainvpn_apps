@@ -221,7 +221,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
       await _checkAdminRights();
     }
 
-    // await Future.delayed(const Duration(seconds: 5));
+    await Future.delayed(const Duration(seconds: 3));
     _fetchCurrentIpAndLocation();
 
     _vpnSubscription = _vpnService.statusStream.listen((isConnected) async {
@@ -464,8 +464,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
         _connectionState = 'disconnected';
         _connectionSeconds = 0;
       });
-      await Future.delayed(const Duration(seconds: 2));
-      _fetchCurrentIpAndLocation();
+      _fetchCurrentIpAndLocationWithRetry();
     }
   }
 
