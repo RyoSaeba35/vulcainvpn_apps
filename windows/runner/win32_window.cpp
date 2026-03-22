@@ -111,7 +111,7 @@ void WindowClassRegistrar::UnregisterWindowClass() {
   class_registered_ = false;
 }
 
-Win32Window::Win32Window() : scale_factor_(1.0) {
+Win32Window::Win32Window() {
   ++g_active_window_count;
 }
 
@@ -134,7 +134,7 @@ bool Win32Window::Create(const std::wstring& title,
   UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
   scale_factor_ = dpi / 96.0;
 
-  HWND window = CreateWindow(
+  HWND window = CreateWindowW(
       window_class, title.c_str(),
       WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
       Scale(origin.x, scale_factor_), Scale(origin.y, scale_factor_),
@@ -145,6 +145,7 @@ bool Win32Window::Create(const std::wstring& title,
     return false;
   }
 
+  window_handle_ = window;
   UpdateTheme(window);
 
   return OnCreate();
