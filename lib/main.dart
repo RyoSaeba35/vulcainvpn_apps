@@ -729,6 +729,10 @@ class _SubscriptionTabState extends State<_SubscriptionTab> {
                 value: '${plan['name'] ?? '-'} — ${plan['interval'] ?? '-'}',
               ),
               _InfoRow(
+                label: 'Reference',
+                value: sub['name'] ?? '-',
+              ),
+              _InfoRow(
                 label: 'Status',
                 value: sub['status'] ?? '-',
                 valueColor:
