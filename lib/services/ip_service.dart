@@ -5,13 +5,13 @@ class IpService {
   static Future<Map<String, dynamic>> getPublicIpAndLocation() async {
     try {
       // Fetch public IP
-      final ipResponse = await http.get(Uri.parse('https://api.ipify.org?format=json')).timeout(const Duration(seconds: 5));
+      final ipResponse = await http.get(Uri.parse('https://api.ipify.org?format=json'));
       if (ipResponse.statusCode == 200) {
         final ipData = json.decode(ipResponse.body);
         final ip = ipData['ip'] ?? 'Unknown';
 
         // Fetch geolocation for the IP
-        final locationResponse = await http.get(Uri.parse('https://ip-api.com/json/$ip')).timeout(const Duration(seconds: 5));
+        final locationResponse = await http.get(Uri.parse('https://ip-api.com/json/$ip'));
         if (locationResponse.statusCode == 200) {
           final locationData = json.decode(locationResponse.body);
           return {
