@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'services/auth_service.dart';
+import 'screens/login_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -67,13 +69,77 @@ class _MyAppState extends State<MyApp> {
         colorScheme: ColorScheme.fromSeed(seedColor: MyColors.myOrange),
         useMaterial3: false,
       ),
-      home: const VpnHomePage(),
+      home: const AuthGate(),
     );
   }
 }
 
+// ─── Auth Gate ───────────────────────────────────────────────────────────────
+
+class AuthGate extends StatefulWidget {
+  const AuthGate({super.key});
+
+  @override
+  State<AuthGate> createState() => _AuthGateState();
+}
+
+class _AuthGateState extends State<AuthGate> {
+  bool _isLoading = true;
+  bool _isLoggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final loggedIn = await AuthService.isLoggedIn();
+    if (mounted) {
+      setState(() {
+        _isLoggedIn = loggedIn;
+        _isLoading = false;
+      });
+    }
+  }
+
+  void _onLoginSuccess() {
+    setState(() => _isLoggedIn = true);
+  }
+
+  void _onLogout() async {
+    await AuthService.logout();
+    if (mounted) {
+      setState(() => _isLoggedIn = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Show splash while checking stored token
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: MyColors.myBrown,
+        body: Center(
+          child: CircularProgressIndicator(color: MyColors.myOrange),
+        ),
+      );
+    }
+
+    if (!_isLoggedIn) {
+      return LoginScreen(onLoginSuccess: _onLoginSuccess);
+    }
+
+    return VpnHomePage(onLogout: _onLogout);
+  }
+}
+
+// ─── Home Page ───────────────────────────────────────────────────────────────
+
 class VpnHomePage extends StatefulWidget {
-  const VpnHomePage({super.key});
+  final VoidCallback onLogout;
+
+  const VpnHomePage({super.key, required this.onLogout});
 
   @override
   State<VpnHomePage> createState() => _VpnHomePageState();
@@ -177,7 +243,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
       await _trayService?.updateState(isConnected);
 
-      // Use the smarter polling method when connecting via stream event too
       if (isConnected) {
         _fetchUntilIpChanges(_currentIp);
       } else {
@@ -212,8 +277,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
     }
   }
 
-  /// Fetches IP on startup or after disconnect — retries up to 5 times with
-  /// no requirement for the IP to change.
   Future<void> _fetchCurrentIpAndLocation() async {
     setState(() => _isLoadingIp = true);
     for (int i = 0; i < 5; i++) {
@@ -241,7 +304,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
     });
   }
 
-  /// Retries IP fetch a few times — used as a fallback when polling gives up.
   Future<void> _fetchCurrentIpAndLocationWithRetry() async {
     setState(() => _isLoadingIp = true);
     await Future.delayed(const Duration(seconds: 2));
@@ -270,9 +332,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
     });
   }
 
-  /// Polls until the IP actually changes from [previousIp], meaning the VPN
-  /// tunnel is routing traffic. Gives up after 20 seconds and shows whatever
-  /// it last got (or 'Unknown').
   Future<void> _fetchUntilIpChanges(String previousIp) async {
     setState(() => _isLoadingIp = true);
 
@@ -290,7 +349,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
         final ip = result['ip'];
 
         if (ip != null && ip != 'Unknown' && ip != previousIp) {
-          // IP changed — tunnel is active
           if (!mounted) return;
           setState(() {
             _currentIp = ip;
@@ -305,7 +363,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
       }
     }
 
-    // Timed out — show whatever we can get or Unknown
     if (!mounted) return;
     setState(() {
       _currentIp = 'Unknown';
@@ -331,7 +388,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
     if (_connectionState == 'disconnected') {
       setState(() => _connectionState = 'connecting');
 
-      // Capture the current IP before connecting so we can detect when it changes
       final ipBeforeConnect = _currentIp;
 
       try {
@@ -344,7 +400,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
           _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
             setState(() => _connectionSeconds++);
           });
-          // Poll until IP changes to the VPN IP, rather than waiting a fixed delay
           _fetchUntilIpChanges(ipBeforeConnect);
         } else {
           setState(() => _connectionState = 'disconnected');
@@ -412,38 +467,30 @@ class _VpnHomePageState extends State<VpnHomePage> {
     }
   }
 
-  Future<void> _showEnableNotificationsDialog() async {
-    return showDialog(
+  void _showLogoutDialog() {
+    showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Notifications Required"),
-        content: const Text(
-          "Android requires notifications for VPN services. "
-          "Please enable notifications in settings.",
-        ),
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+            child: const Text('Cancel'),
           ),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              try {
-                const packageName = 'com.vulcain.vpn';
-                final url = Uri.parse(
-                  'android.settings.APP_NOTIFICATION_SETTINGS',
-                ).replace(queryParameters: {'app_package': packageName});
-                if (await canLaunchUrl(url)) await launchUrl(url);
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Could not open settings: $e')),
-                  );
-                }
+              // Disconnect VPN before logging out
+              if (_connectionState == 'connected') {
+                await _vpnService.stopVpn();
               }
+              widget.onLogout();
             },
-            child: const Text("Open Settings"),
+            child: const Text(
+              'Logout',
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
@@ -504,6 +551,11 @@ class _VpnHomePageState extends State<VpnHomePage> {
             icon: const Icon(Icons.settings),
             onPressed: _showLanguageDialog,
             tooltip: loc.settings,
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: _showLogoutDialog,
+            tooltip: 'Logout',
           ),
         ],
       ),
