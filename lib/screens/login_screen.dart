@@ -79,7 +79,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
   }
 
   Future<void> _launchWebsite() async {
-    final url = Uri.parse('https://vulcainvpn.com');
+    final url = Uri.parse('https://www.vulcainvpn.com');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }
@@ -247,7 +247,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                   GestureDetector(
                     onTap: _launchWebsite,
                     child: const Text(
-                      'Don\'t have an account? Visit vulcainvpn.com',
+                      'Don\'t have an account? Visit www.vulcainvpn.com',
                       style: TextStyle(
                         color: Colors.white38,
                         fontSize: 12,

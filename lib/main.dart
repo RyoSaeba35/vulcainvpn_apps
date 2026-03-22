@@ -221,7 +221,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
       await _checkAdminRights();
     }
 
-    await Future.delayed(const Duration(seconds: 5));
+    // await Future.delayed(const Duration(seconds: 5));
     _fetchCurrentIpAndLocation();
 
     _vpnSubscription = _vpnService.statusStream.listen((isConnected) async {
@@ -279,7 +279,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   Future<void> _fetchCurrentIpAndLocation() async {
     setState(() => _isLoadingIp = true);
-    for (int i = 0; i < 5; i++) {
+    // Remove the 5 second delay — start immediately
+    for (int i = 0; i < 8; i++) {
       try {
         final result = await IpService.getPublicIpAndLocation();
         if (result['ip'] != 'Unknown') {
@@ -294,7 +295,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
       } catch (e) {
         print('Attempt $i failed: $e');
       }
-      await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 3));
     }
     setState(() {
       _currentIp = 'Unknown';
@@ -306,8 +307,9 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   Future<void> _fetchCurrentIpAndLocationWithRetry() async {
     setState(() => _isLoadingIp = true);
-    await Future.delayed(const Duration(seconds: 2));
-    for (int attempt = 0; attempt < 3; attempt++) {
+    // Wait longer after disconnect for network to restore
+    await Future.delayed(const Duration(seconds: 4));
+    for (int attempt = 0; attempt < 8; attempt++) {
       try {
         final result = await IpService.getPublicIpAndLocation();
         if (result['ip'] != 'Unknown') {
