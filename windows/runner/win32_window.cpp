@@ -135,7 +135,8 @@ bool Win32Window::Create(const std::wstring& title,
   double scale_factor = dpi / 96.0;
 
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      window_class, title.c_str(),
+      WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, // Non-resizable style
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
@@ -216,6 +217,17 @@ Win32Window::MessageHandler(HWND hwnd,
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);
       return 0;
+
+    case WM_GETMINMAXINFO: {
+      MINMAXINFO* pInfo = (MINMAXINFO*)lparam;
+      // Set the minimum and maximum tracking sizes to the same value
+      // This enforces a fixed window size
+      pInfo->ptMinTrackSize.x = Scale(400, scale_factor); // Minimum width
+      pInfo->ptMinTrackSize.y = Scale(700, scale_factor); // Minimum height
+      pInfo->ptMaxTrackSize.x = Scale(400, scale_factor); // Maximum width
+      pInfo->ptMaxTrackSize.y = Scale(700, scale_factor); // Maximum height
+      return 0;
+    }
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);
