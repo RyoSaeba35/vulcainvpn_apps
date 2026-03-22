@@ -11,7 +11,7 @@ class IpService {
         final ip = ipData['ip'] ?? 'Unknown';
 
         // Fetch geolocation for the IP
-        final locationResponse = await http.get(Uri.parse('https://ip-api.com/json/$ip'));
+        final locationResponse = await http.get(Uri.parse('http://ip-api.com/json/$ip'));
         if (locationResponse.statusCode == 200) {
           final locationData = json.decode(locationResponse.body);
           return {
