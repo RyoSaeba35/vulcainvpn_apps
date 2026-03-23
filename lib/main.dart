@@ -13,6 +13,7 @@ import 'l10n/app_localizations.dart';
 import 'services/ip_service.dart';
 import 'services/vpn_service.dart';
 import 'services/tray_window_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -480,7 +481,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
     final loc = AppLocalizations.of(context)!;
 
     final List<Widget> pages = [
-      _buildVpnTab(loc),
+      _buildHomeTab(loc),
       const _SubscriptionTab(),
       _SettingsTab(
         onLogout: widget.onLogout,
@@ -504,9 +505,9 @@ class _VpnHomePageState extends State<VpnHomePage> {
         unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.shield_outlined),
-            activeIcon: Icon(Icons.shield),
-            label: 'VPN',
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: 'Home',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.card_membership_outlined),
@@ -525,21 +526,25 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   // ─── VPN Tab (your existing working UI) ─────────────────────────────────────
 
-  Widget _buildVpnTab(AppLocalizations loc) {
+  Widget _buildHomeTab(AppLocalizations loc) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
+          SvgPicture.asset(
             _connectionState == 'connected'
-                ? Icons.shield
-                : Icons.shield_outlined,
-            size: 140,
-            color: _connectionState == 'connected'
-                ? Colors.green
-                : _connectionState == 'connecting'
-                    ? MyColors.myOrange
-                    : Colors.grey,
+              ? 'assets/icons/france_filled.svg'
+              : 'assets/icons/france_outline.svg',
+            width: 140,
+            height: 140,
+            colorFilter: ColorFilter.mode(
+              _connectionState == 'connected'
+                  ? Colors.green
+                  : _connectionState == 'connecting'
+                      ? MyColors.myOrange
+                      : Colors.grey,
+              BlendMode.srcIn,
+            ),
           ),
           const SizedBox(height: 40),
           Text(

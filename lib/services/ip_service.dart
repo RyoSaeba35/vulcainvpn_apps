@@ -3,30 +3,80 @@ import 'dart:convert';
 
 class IpService {
   static Future<Map<String, dynamic>> getPublicIpAndLocation() async {
-    try {
-      final response = await http
-          .get(Uri.parse('https://ipinfo.io/json'))
-          .timeout(const Duration(seconds: 5));
+    // Try multiple services in order
+    final services = [
+      _tryIpApi,
+      _tryIpInfo,
+      _tryIpify,
+    ];
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final ip = data['ip'] ?? 'Unknown';
-        final country = data['country'] ?? 'Unknown';
+    for (var service in services) {
+      try {
+        final result = await service();
+        if (result['ip'] != 'Unknown') {
+          return result;
+        }
+      } catch (e) {
+        print('Service failed: $e');
+        continue;
+      }
+    }
 
-        // ipinfo returns country code only, convert to full name
-        final countryName = _countryCodeToName(country);
+    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
+  }
 
+  // Primary: ip-api.com (free, no rate limit for reasonable use)
+  static Future<Map<String, dynamic>> _tryIpApi() async {
+    final response = await http
+        .get(Uri.parse('http://ip-api.com/json/'))
+        .timeout(const Duration(seconds: 5));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      if (data['status'] == 'success') {
         return {
-          'ip': ip,
-          'country': countryName,
-          'countryCode': country,
+          'ip': data['query'] ?? 'Unknown',
+          'country': data['country'] ?? 'Unknown',
+          'countryCode': data['countryCode'] ?? 'Unknown',
         };
       }
-      return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
-    } catch (e) {
-      print('Error fetching IP/location: $e');
-      return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
     }
+    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
+  }
+
+  // Backup 1: ipinfo.io
+  static Future<Map<String, dynamic>> _tryIpInfo() async {
+    final response = await http
+        .get(Uri.parse('https://ipinfo.io/json'))
+        .timeout(const Duration(seconds: 5));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      final countryCode = data['country'] ?? 'Unknown';
+      return {
+        'ip': data['ip'] ?? 'Unknown',
+        'country': _countryCodeToName(countryCode),
+        'countryCode': countryCode,
+      };
+    }
+    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
+  }
+
+  // Backup 2: ipify (IP only, no location)
+  static Future<Map<String, dynamic>> _tryIpify() async {
+    final response = await http
+        .get(Uri.parse('https://api.ipify.org?format=json'))
+        .timeout(const Duration(seconds: 5));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return {
+        'ip': data['ip'] ?? 'Unknown',
+        'country': 'Unknown',
+        'countryCode': 'Unknown',
+      };
+    }
+    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
   }
 
   static String _countryCodeToName(String code) {

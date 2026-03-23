@@ -106,7 +106,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                 children: [
                   // Logo
                   Image.asset(
-                    'assets/icon/icon.png',
+                    'assets/icons/icon.png',
                     width: 80,
                     height: 80,
                     errorBuilder: (_, __, ___) => const Icon(
