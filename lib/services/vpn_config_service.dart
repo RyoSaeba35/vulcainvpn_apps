@@ -73,13 +73,13 @@ class VpnConfigService {
           "tag": "wireguard",
           "address": ["${wg['client_ip']}/32"],
           "private_key": wg['client_private_key'],
-          "preshared_key": wg['client_preshared_key'],
           "mtu": 1420,
           "peers": [
             {
               "address": wg['server_ip'],
               "port": int.parse(wg['server_port'].toString()),
               "public_key": wg['server_public_key'],
+              "preshared_key": wg['client_preshared_key'],
               "allowed_ips": ["0.0.0.0/0", "::/0"]
             }
           ]
@@ -237,6 +237,7 @@ class VpnConfigService {
           "pre_shared_key": wg['client_preshared_key'].toString(), // ⭐ Force string
           "peer_public_key": wg['server_public_key'].toString(),
           "mtu": 1420,
+          "allowed_ips": ["0.0.0.0/0", "::/0"],
           if (ss != null) "detour": "ss-out"
         },
         if (ss != null) {
