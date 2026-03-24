@@ -6,8 +6,8 @@ import 'package:device_info_plus/device_info_plus.dart';
 
 class AuthService {
   static const String _baseUrl = 'https://api.vulcainvpn.com/api';
-  static const String _tokenKey = 'jwt_token';
-  static const String _apiKeyKey = 'api_key';
+  static const String _accessTokenKey = 'access_token';
+  static const String _refreshTokenKey = 'refresh_token';
   static const String _deviceIdKey = 'device_id';
   static const String _emailKey = 'user_email';
 
@@ -18,10 +18,10 @@ class AuthService {
     wOptions: WindowsOptions(),
   );
 
-  // Login — fetches token then registers device automatically
+  // Login — stores both access and refresh tokens
   static Future<bool> login(String email, String password) async {
     try {
-      // Step 1 — Login
+      // Step 1 — Login and get tokens
       final response = await http.post(
         Uri.parse('$_baseUrl/login'),
         headers: {'Content-Type': 'application/json'},
@@ -31,8 +31,10 @@ class AuthService {
       if (response.statusCode != 200) return false;
 
       final data = json.decode(response.body);
-      final token = data['token'];
-      await _storage.write(key: _tokenKey, value: token);
+
+      // Store both tokens
+      await _storage.write(key: _accessTokenKey, value: data['access_token']);
+      await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
       await saveEmail(data['user']['email']);
 
       // Step 2 — Generate unique device ID
@@ -48,7 +50,7 @@ class AuthService {
         Uri.parse('$_baseUrl/devices/register'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
+          'Authorization': 'Bearer ${data['access_token']}',
         },
         body: json.encode({
           'device_id': deviceId,
@@ -66,44 +68,105 @@ class AuthService {
 
       return true;
     } catch (e) {
+      print('Login error: $e');
       return false;
     }
   }
 
-  // Logout — clears all stored credentials
+  // Refresh the access token
+  static Future<bool> refreshAccessToken() async {
+    try {
+      final refreshToken = await _storage.read(key: _refreshTokenKey);
+      if (refreshToken == null) return false;
+
+      final response = await http.post(
+        Uri.parse('$_baseUrl/refresh'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'refresh_token': refreshToken}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+
+        // Store new tokens (both are rotated)
+        await _storage.write(key: _accessTokenKey, value: data['access_token']);
+        await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
+
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print('Token refresh error: $e');
+      return false;
+    }
+  }
+
+  // Get valid access token (auto-refresh if needed)
+  static Future<String?> getValidAccessToken() async {
+    String? accessToken = await _storage.read(key: _accessTokenKey);
+
+    if (accessToken == null) return null;
+
+    // Check if token is expiring in next 5 minutes
+    if (_isTokenExpiringSoon(accessToken)) {
+      print('Token expiring soon, refreshing...');
+      final refreshed = await refreshAccessToken();
+      if (!refreshed) return null;
+      accessToken = await _storage.read(key: _accessTokenKey);
+    }
+
+    return accessToken;
+  }
+
+  // Check if JWT is expiring in next 5 minutes
+  static bool _isTokenExpiringSoon(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+
+      final payload = json.decode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+
+      final exp = payload['exp'];
+      if (exp == null) return false;
+
+      final expiryDate = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+
+      // Refresh if less than 5 minutes remaining
+      return DateTime.now().isAfter(expiryDate.subtract(const Duration(minutes: 5)));
+    } catch (e) {
+      print('Token decode error: $e');
+      return true;
+    }
+  }
+
+  // Logout — calls backend and clears all stored credentials
   static Future<void> logout() async {
+    try {
+      final token = await _storage.read(key: _accessTokenKey);
+      if (token != null) {
+        await http.delete(
+          Uri.parse('$_baseUrl/logout'),
+          headers: {'Authorization': 'Bearer $token'},
+        );
+      }
+    } catch (e) {
+      print('Logout API call failed: $e');
+    }
+
     await _storage.deleteAll();
   }
 
-  // Get stored JWT token
+  // DEPRECATED: Use getValidAccessToken() instead
   static Future<String?> getToken() async {
-    return await _storage.read(key: _tokenKey);
+    return await getValidAccessToken();
   }
 
-  // Check if user is logged in
+  // Check if user is logged in (checks refresh token existence)
   static Future<bool> isLoggedIn() async {
-    final token = await _storage.read(key: _tokenKey);
-    if (token == null) return false;
-
-    try {
-      final parts = token.split('.');
-      if (parts.length != 3) return false;
-
-      final payload = json.decode(
-        utf8.decode(base64Url.decode(base64Url.normalize(parts[1])))
-      );
-
-      final exp = payload['exp'] as int;
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-
-      if (exp < now) {
-        await _storage.deleteAll();
-        return false;
-      }
-      return true;
-    } catch (e) {
-      return false;
-    }
+    final refreshToken = await _storage.read(key: _refreshTokenKey);
+    return refreshToken != null;
   }
 
   // Store api_key after device registration
