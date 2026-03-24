@@ -89,13 +89,13 @@ class VpnConfigService {
         {
           "type": "selector",
           "tag": "proxy",
-          "outbounds": _buildSelectorOutbounds(hy2),
+          "outbounds": ["auto", "hysteria2", "direct"],
           "default": "auto"
         },
         {
           "type": "urltest",
           "tag": "auto",
-          "outbounds": _buildAutoOutbounds(hy2),
+          "outbounds": ["wireguard", "hysteria2"],
           "url": "https://www.gstatic.com/generate_204",
           "interval": "10m",
           "tolerance": 50

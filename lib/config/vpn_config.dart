@@ -1,5 +1,3 @@
-# lib/config/vpn_config.dart
-# VPN configuration template for WireGuard and Hysteria2
 const String vpnConfig = '''
 {
   "log": {
