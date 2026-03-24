@@ -13,5 +13,5 @@ abstract class VpnService {
   Stream<bool> get statusStream;
   Future<bool> startVpn();
   Future<void> stopVpn();
-  Future<bool> checkNotificationPermission(); // ← was missing
+  Future<bool> checkNotificationPermission();
 }
