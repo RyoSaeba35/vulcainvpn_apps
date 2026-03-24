@@ -8,6 +8,7 @@ class AuthService {
   static const String _baseUrl = 'https://api.vulcainvpn.com/api';
   static const String _accessTokenKey = 'access_token';
   static const String _refreshTokenKey = 'refresh_token';
+  static const String _apiKeyKey = 'api_key';
   static const String _deviceIdKey = 'device_id';
   static const String _emailKey = 'user_email';
 
