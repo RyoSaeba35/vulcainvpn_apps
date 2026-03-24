@@ -1,5 +1,3 @@
-# android/app/src/main/assets/config.json
-# VPN configuration template for WireGuard and Hysteria2
 {
   "log": {
     "level": "info",

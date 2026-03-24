@@ -50,6 +50,10 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
                 }
+                "checkVpnPermission" -> {
+                    val intent = VpnService.prepare(this)
+                    result.success(intent == null)
+                }
                 "getPackageName" -> getPackageName(result)
                 "startVpn" -> {
                     // Get config from Flutter

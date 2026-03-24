@@ -45,6 +45,7 @@ dependencies:
   window_manager: ^0.3.9
   flutter_secure_storage: ^9.0.0
   device_info_plus: ^9.0.0
+  fluttertoast: ^9.0.0
 
 dev_dependencies:
   flutter_test:
