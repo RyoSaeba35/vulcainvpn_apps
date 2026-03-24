@@ -1,3 +1,5 @@
+# lib/config/vpn_config.dart
+# VPN configuration template for WireGuard and Hysteria2
 const String vpnConfig = '''
 {
   "log": {
@@ -52,7 +54,7 @@ const String vpnConfig = '''
   "endpoints": [
     {
       "type": "wireguard",
-      "tag": "wireguard-device1",
+      "tag": "wireguard",
       "address": ["10.155.0.2/32"],
       "private_key": "QNfDN54TBS7znkepTc5DTyKJZbOb/Wo3j8gExmfTTGc=",
       "mtu": 1420,
@@ -65,37 +67,6 @@ const String vpnConfig = '''
         }
       ]
     },
-    {
-      "type": "wireguard",
-      "tag": "wireguard-device2",
-      "address": ["10.155.0.3/32"],
-      "private_key": "SDQWsGLhy744maFA/WpgkPWAw7UKfc+UCCwXBalEm1s=",
-      "mtu": 1420,
-      "peers": [
-        {
-          "address": "51.75.126.238",
-          "port": 53050,
-          "public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-          "allowed_ips": ["0.0.0.0/0", "::/0"]
-        }
-      ]
-    },
-    {
-      "type": "wireguard",
-      "tag": "wireguard-device3",
-      "address": ["10.155.0.4/32"],
-      "private_key": "mMYiyJnyb317OsVZkf2PG9MTOWqLwC749mFHmaf1o30=",
-      "mtu": 1420,
-      "peers": [
-        {
-          "address": "51.75.126.238",
-          "port": 53050,
-          "public_key": "ldvntMa1jvroOvcHXeg73/PTKvp/SJs3i4EuiG1Mq0o=",
-          "allowed_ips": ["0.0.0.0/0", "::/0"]
-        }
-      ]
-    }
-  ],
   "outbounds": [
     {
       "type": "selector",
@@ -106,7 +77,7 @@ const String vpnConfig = '''
     {
       "type": "urltest",
       "tag": "auto",
-      "outbounds": ["wireguard-device1", "wireguard-device2", "wireguard-device3", "hysteria2"],
+      "outbounds": ["wireguard", "hysteria2"],
       "url": "https://www.gstatic.com/generate_204",
       "interval": "10m",
       "tolerance": 50

@@ -62,6 +62,12 @@ class MyVpnService : VpnService(), PlatformInterface {
                 return START_NOT_STICKY
             }
             else -> {
+                // ⭐ Get config from intent
+                intent?.getStringExtra("VPN_CONFIG")?.let { config ->
+                    Log.d(TAG, "Received config from Flutter (${config.length} chars)")
+                    cachedConfig = config
+                }
+
                 if (!isRunning) startVpnService()
                 return START_STICKY
             }
@@ -81,13 +87,12 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         Thread {
             try {
-                val config = loadConfigFromAssets()
+                val config = getConfig()  // ⭐ Changed from loadConfigFromAssets()
 
                 Log.d(TAG, "Starting sing-box service")
 
                 val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
 
-                // Use runBlocking to call suspend function
                 runBlocking {
                     DefaultNetworkMonitor.start(connectivityManager)
                 }
@@ -108,12 +113,23 @@ class MyVpnService : VpnService(), PlatformInterface {
         }.start()
     }
 
-    private fun loadConfigFromAssets(): String {
+    private var cachedConfig: String? = null
+
+    private fun getConfig(): String {
+        // Return cached config if available
+        cachedConfig?.let {
+            Log.d(TAG, "Using cached config")
+            return it
+        }
+
+        // Fallback: try to load from assets (for backward compatibility)
         return try {
-            assets.open("config.json").bufferedReader().use { it.readText() }
+            val config = assets.open("config.json").bufferedReader().use { it.readText() }
+            Log.d(TAG, "Loaded config from assets (fallback)")
+            config
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load config from assets", e)
-            throw e
+            Log.e(TAG, "Failed to load config", e)
+            throw IllegalStateException("No config available")
         }
     }
 
@@ -123,7 +139,8 @@ class MyVpnService : VpnService(), PlatformInterface {
             runBlocking {
                 DefaultNetworkMonitor.stop()
             }
-            cachedInterfaces = null  // Clear cache
+            cachedConfig = null  // ⭐ Clear cached config
+            cachedInterfaces = null
             fileDescriptor?.close()
             fileDescriptor = null
             boxService?.close()

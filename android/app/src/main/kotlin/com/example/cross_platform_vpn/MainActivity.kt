@@ -27,6 +27,7 @@ class MainActivity : FlutterActivity() {
     private val TAG = "MainActivity"
 
     private var pendingResult: MethodChannel.Result? = null
+    private var pendingConfig: String? = null  // Store config temporarily
 
     companion object {
         var statusSink: EventChannel.EventSink? = null
@@ -46,12 +47,21 @@ class MainActivity : FlutterActivity() {
                         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                         result.success(notificationManager.areNotificationsEnabled())
                     } else {
-                        result.success(true) // No permission needed for older Android versions
+                        result.success(true)
                     }
                 }
                 "getPackageName" -> getPackageName(result)
                 "startVpn" -> {
+                    // Get config from Flutter
+                    val configJson = call.argument<String>("config")
+                    if (configJson == null) {
+                        result.error("NO_CONFIG", "Config not provided", null)
+                        return@setMethodCallHandler
+                    }
+
                     pendingResult = result
+                    pendingConfig = configJson  // Store config
+
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                             requestPermissions(
@@ -83,7 +93,7 @@ class MainActivity : FlutterActivity() {
         })
     }
 
-    private fun getPackageName(result: MethodChannel.Result) { // <-- Add this method
+    private fun getPackageName(result: MethodChannel.Result) {
         result.success(packageName)
     }
 
@@ -97,7 +107,6 @@ class MainActivity : FlutterActivity() {
                 return
             }
         }
-        // If permission is already granted or not needed, proceed to VPN permission
         val intent = VpnService.prepare(this)
         if (intent != null) {
             startActivityForResult(intent, VPN_REQUEST_CODE)
@@ -105,13 +114,17 @@ class MainActivity : FlutterActivity() {
             pendingResult?.let {
                 startVpnInternal(it)
                 pendingResult = null
+                pendingConfig = null  // Clear config
             }
         }
     }
 
     private fun startVpnInternal(result: MethodChannel.Result) {
         try {
-            val intent = Intent(this, MyVpnService::class.java)
+            val intent = Intent(this, MyVpnService::class.java).apply {
+                // Pass config to service
+                putExtra("VPN_CONFIG", pendingConfig)
+            }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
@@ -143,15 +156,12 @@ class MainActivity : FlutterActivity() {
 
         if (requestCode == VPN_REQUEST_CODE) {
             pendingResult?.let { result ->
-
                 if (resultCode == Activity.RESULT_OK) {
-
-                    // Small UI-cycle delay (prevents first-run freeze)
                     Handler(mainLooper).post {
                         startVpnInternal(result)
                         pendingResult = null
+                        pendingConfig = null  // Clear config
                     }
-
                 } else {
                     result.error(
                         "VPN_PERMISSION_DENIED",
@@ -159,6 +169,7 @@ class MainActivity : FlutterActivity() {
                         null
                     )
                     pendingResult = null
+                    pendingConfig = null  // Clear config
                 }
             }
         }
@@ -172,13 +183,9 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
 
         if (requestCode == NOTIFICATION_REQUEST_CODE) {
-
             if (grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-
-                // Continue with VPN permission
                 requestVpnPermission()
-
             } else {
                 pendingResult?.error(
                     "NOTIFICATION_PERMISSION_DENIED",
@@ -186,6 +193,7 @@ class MainActivity : FlutterActivity() {
                     null
                 )
                 pendingResult = null
+                pendingConfig = null  // Clear config
             }
         }
     }
