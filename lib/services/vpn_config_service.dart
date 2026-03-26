@@ -87,13 +87,13 @@ class VpnConfigService {
           "tag": "wireguard_1",
           "address": ["${wg['client_ip']}/32"],
           "private_key": wg['client_private_key'],
-          "preshared_key": wg['client_preshared_key'],
           "mtu": 1420,
           "peers": [
             {
               "address": wg['server_ip'],
               "port": int.parse(wg['server_port'].toString()),
               "public_key": wg['client_public_key'],
+              "preshared_key": wg['client_preshared_key'],
               "allowed_ips": ["0.0.0.0/0", "::/0"]
             }
           ]
