@@ -55,10 +55,9 @@ class HomeTab extends StatelessWidget {
           child: Center(
             child: SvgPicture.asset(
               connectionState == 'connected'
-                  ? 'assets/icons/france_filled.svg'
-                  : 'assets/icons/france_outline.svg',
-              width: 180,
-              height: 180,
+                  ? 'assets/icons/connected.svg'
+                  : 'assets/icons/disconnected.svg',
+              height: MediaQuery.of(context).size.width * 0.3,
               colorFilter: connectionState == 'connecting'
                   ? const ColorFilter.mode(
                       MyColors.myOrange,
@@ -137,11 +136,13 @@ class HomeTab extends StatelessWidget {
 
         // ─── BOTTOM SECTION: Button (Fixed Height) ─────────────────────
         Container(
-          height: 200, // Fixed bottom section height
+          height: 200,
           alignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: ElevatedButton(
-            onPressed: connectionState == 'connecting' ? null : onToggleConnection,
+            onPressed: (connectionState == 'connecting' || connectionState == 'disconnecting')
+                ? null
+                : onToggleConnection,
             style: ElevatedButton.styleFrom(
               backgroundColor: connectionState == 'connected'
                   ? Colors.red
@@ -161,7 +162,9 @@ class HomeTab extends StatelessWidget {
                   ? loc.disconnect
                   : connectionState == 'connecting'
                       ? loc.connectingBtn
-                      : loc.connect,
+                      : connectionState == 'disconnecting'
+                          ? loc.disconnectingBtn  // Add this to your localizations
+                          : loc.connect,
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,

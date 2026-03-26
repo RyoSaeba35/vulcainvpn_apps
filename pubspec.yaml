@@ -75,6 +75,8 @@ flutter:
   - assets/icons/icon.ico
   - assets/icons/france_outline.svg
   - assets/icons/france_filled.svg
+  - assets/icons/connected.svg
+  - assets/icons/disconnected.svg
 
 # flutter_icons:
 #   android: true

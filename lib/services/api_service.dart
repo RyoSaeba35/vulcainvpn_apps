@@ -6,16 +6,28 @@ import 'auth_service.dart';
 class ApiService {
   static const String baseUrl = 'https://api.vulcainvpn.com/api';
 
-  // ⭐ Log to file instead of console
+  // ⭐ Get exe directory (same as vpn_service_windows.dart)
+  static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
+
+  // ⭐ Log to file in exe directory
   static Future<void> _log(String message) async {
     try {
       final timestamp = DateTime.now().toIso8601String();
       final logMessage = '$timestamp: $message\n';
 
-      // Write to Documents folder on Windows
+      // Write to exe directory on Windows (same location as VPN log)
       if (Platform.isWindows) {
-        final logPath = '${Platform.environment['USERPROFILE']}\\Documents\\VulcainVPN_API.log';
+        final logPath = '$_exeDir\\api_log.txt';
         final logFile = File(logPath);
+
+        // Rotate log if it gets too big
+        if (await logFile.exists()) {
+          final size = await logFile.length();
+          if (size > 1024 * 1024) {
+            await logFile.rename('$_exeDir\\api_log_old.txt');
+          }
+        }
+
         await logFile.writeAsString(logMessage, mode: FileMode.append);
       }
 
