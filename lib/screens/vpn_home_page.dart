@@ -339,13 +339,18 @@ class _VpnHomePageState extends State<VpnHomePage> {
           );
         }
       }
-    } else {
+    } else if (_connectionState == 'connected') {  // ← CHANGED: Added explicit check
+      // ← ADD: Set to disconnecting first
+      setState(() => _connectionState = 'disconnecting');
+
       await _vpnService.stopVpn();
       _timer?.cancel();
+
       setState(() {
         _connectionState = 'disconnected';
         _connectionSeconds = 0;
       });
+
       _fetchCurrentIpAndLocationWithRetry();
     }
   }
