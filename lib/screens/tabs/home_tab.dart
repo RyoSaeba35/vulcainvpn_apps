@@ -57,7 +57,7 @@ class HomeTab extends StatelessWidget {
               connectionState == 'connected'
                   ? 'assets/icons/connected.svg'
                   : 'assets/icons/disconnected.svg',
-              height: MediaQuery.of(context).size.width * 0.3,
+              height: MediaQuery.of(context).size.width * 1,
               colorFilter: connectionState == 'connecting'
                   ? const ColorFilter.mode(
                       MyColors.myOrange,
