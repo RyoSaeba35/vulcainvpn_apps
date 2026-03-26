@@ -34,7 +34,7 @@ class TrayWindowService with TrayListener, WindowListener {
     });
 
     final exeDir = File(Platform.resolvedExecutable).parent.path;
-    final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icon\\icon.ico';
+    final iconPath = '$exeDir\\data\\flutter_assets\\assets\\icons\\icon.ico';
     await trayManager.setIcon(iconPath);
     await updateState(false);
   }
