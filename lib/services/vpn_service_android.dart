@@ -88,6 +88,12 @@ class AndroidVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       print('✅ Config built (${configJson.length} chars)');
 
+      // ⭐ ADD THIS: Save first 500 chars to debug string
+      VpnConfigService.lastDebugInfo += '\n\n📄 Config Preview:\n' +
+          configJson.substring(0, configJson.length > 500 ? 500 : configJson.length);
+
+      print('🔧 Full config:\n$configJson');  // ⭐ Print full config to logs
+
       // Validate config size
       if (configJson.length > 100000) {
         print('⚠️  WARNING: Config is very large: ${configJson.length} chars');

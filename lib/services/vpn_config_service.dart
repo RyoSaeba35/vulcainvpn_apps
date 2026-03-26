@@ -2,26 +2,40 @@ import 'dart:convert';
 import 'dart:io';
 
 class VpnConfigService {
+  static String lastDebugInfo = '';
+  static String lastFullConfig = '';
+
   // Build sing-box config dynamically from credentials
   static Map<String, dynamic> buildConfig({
     required Map<String, dynamic> wireguard,
     required Map<String, dynamic>? hysteria2,
     required Map<String, dynamic>? shadowsocks,
   }) {
-    // ⭐ Validate and log WireGuard fields
-    print('🔧 Building config...');
-    print('  WireGuard fields: ${wireguard.keys.toList()}');
-    print('  server_ip: ${wireguard['server_ip']}');
-    print('  server_port: ${wireguard['server_port']} (${wireguard['server_port'].runtimeType})');
-    print('  client_ip: ${wireguard['client_ip']}');
-    print('  PSK present: ${wireguard['client_preshared_key'] != null}');
+    // ⭐ Build debug string
+    StringBuffer debug = StringBuffer();
+    debug.writeln('📦 WireGuard:');
+    wireguard.forEach((key, value) {
+      String valStr = value.toString();
+      int len = valStr.length > 30 ? 30 : valStr.length;
+      debug.writeln('  $key: ${valStr.substring(0, len)}...');
+    });
+    debug.writeln('\n📦 Shadowsocks: ${shadowsocks != null ? "YES" : "NO"}');
+    debug.writeln('📦 Hysteria2: ${hysteria2 != null ? "YES" : "NO"}');
 
-    // Platform-specific config structure
-    if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-      return _buildDesktopConfig(wireguard, hysteria2, shadowsocks);
-    } else {
-      return _buildMobileConfig(wireguard, hysteria2, shadowsocks);
-    }
+    lastDebugInfo = debug.toString();
+
+    print('🔧 Building config...');
+    print(lastDebugInfo);
+
+    // ⭐ Build the config
+    final config = Platform.isWindows || Platform.isMacOS || Platform.isLinux
+        ? _buildDesktopConfig(wireguard, hysteria2, shadowsocks)
+        : _buildMobileConfig(wireguard, hysteria2, shadowsocks);
+
+    // ⭐ Store full config for debugging
+    lastFullConfig = toJsonString(config);
+
+    return config;
   }
 
   // DESKTOP (Windows/macOS/Linux) - Uses "endpoints" array
@@ -70,16 +84,16 @@ class VpnConfigService {
       "endpoints": [
         {
           "type": "wireguard",
-          "tag": "wireguard",
+          "tag": "wireguard_1",
           "address": ["${wg['client_ip']}/32"],
           "private_key": wg['client_private_key'],
+          "preshared_key": wg['client_preshared_key'],
           "mtu": 1420,
           "peers": [
             {
               "address": wg['server_ip'],
               "port": int.parse(wg['server_port'].toString()),
-              "public_key": wg['server_public_key'],
-              "preshared_key": wg['client_preshared_key'],
+              "public_key": wg['client_public_key'],
               "allowed_ips": ["0.0.0.0/0", "::/0"]
             }
           ]
@@ -89,13 +103,13 @@ class VpnConfigService {
         {
           "type": "selector",
           "tag": "proxy",
-          "outbounds": ["auto", "hysteria2", "direct"],
+          "outbounds": _buildSelectorOutbounds(hy2),
           "default": "auto"
         },
         {
           "type": "urltest",
           "tag": "auto",
-          "outbounds": ["wireguard", "hysteria2"],
+          "outbounds": _buildAutoOutbounds(hy2),
           "url": "https://www.gstatic.com/generate_204",
           "interval": "10m",
           "tolerance": 50
@@ -116,7 +130,7 @@ class VpnConfigService {
           },
           "tcp_fast_open": true
         },
-        if (hy2 != null) {
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
           "type": "hysteria2",
           "tag": "hysteria2",
           "server": hy2['server'],
@@ -124,7 +138,7 @@ class VpnConfigService {
           "password": hy2['password'],
           "tls": {
             "enabled": true,
-            "server_name": hy2['tls_server_name']?.isNotEmpty == true
+            "server_name": hy2['tls_server_name']?.toString().isNotEmpty == true
                 ? hy2['tls_server_name']
                 : "www.cloudflare.com",
             "alpn": ["h3"],
@@ -173,16 +187,8 @@ class VpnConfigService {
       "log": {"level": "info", "timestamp": true},
       "dns": {
         "servers": [
-          {
-            "tag": "dns-direct",
-            "address": "223.5.5.5",
-            "detour": "direct"
-          },
-          {
-            "tag": "dns-proxy",
-            "address": "https://1.1.1.1/dns-query",
-            "detour": "proxy"
-          },
+          {"tag": "dns-direct", "address": "223.5.5.5", "detour": "direct"},
+          {"tag": "dns-proxy", "address": "https://1.1.1.1/dns-query", "detour": "proxy"},
           {"tag": "dns-block", "address": "rcode://success"}
         ],
         "rules": [
@@ -227,24 +233,23 @@ class VpnConfigService {
         },
         {
           "type": "wireguard",
-          "tag": "wireguard",
+          "tag": "wireguard_1",
           "server": wg['server_ip'].toString(),
-          "server_port": int.parse(wg['server_port'].toString()), // ⭐ Force int
+          "server_port": int.parse(wg['server_port'].toString()),
           "system_interface": false,
           "interface_name": "wg0",
           "local_address": ["${wg['client_ip']}/32"],
           "private_key": wg['client_private_key'].toString(),
-          "pre_shared_key": wg['client_preshared_key'].toString(), // ⭐ Force string
-          "peer_public_key": wg['server_public_key'].toString(),
+          "peer_public_key": wg['client_public_key'].toString(),
+          "pre_shared_key": wg['client_preshared_key'].toString(),
           "mtu": 1420,
-          "allowed_ips": ["0.0.0.0/0", "::/0"],
           if (ss != null) "detour": "ss-out"
         },
         if (ss != null) {
           "type": "shadowsocks",
           "tag": "ss-out",
           "server": ss['server'].toString(),
-          "server_port": int.parse(ss['port'].toString()), // ⭐ Force int
+          "server_port": int.parse(ss['port'].toString()),
           "method": ss['method'].toString(),
           "password": ss['password'].toString(),
           "multiplex": {
@@ -256,7 +261,7 @@ class VpnConfigService {
           },
           "tcp_fast_open": true
         },
-        if (hy2 != null) {
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
           "type": "hysteria2",
           "tag": "hysteria2",
           "server": hy2['server'].toString(),
@@ -264,9 +269,7 @@ class VpnConfigService {
           "password": hy2['password'].toString(),
           "tls": {
             "enabled": true,
-            "server_name": hy2['tls_server_name']?.isNotEmpty == true
-                ? hy2['tls_server_name']
-                : "www.cloudflare.com",
+            "server_name": "www.cloudflare.com",
             "alpn": ["h3"],
             "insecure": true
           },
@@ -304,16 +307,22 @@ class VpnConfigService {
     };
   }
 
+  // ⭐ FIXED: Only add hysteria2 if server exists and is not empty
   static List<String> _buildSelectorOutbounds(Map<String, dynamic>? hy2) {
     final outbounds = ["auto"];
-    if (hy2 != null) outbounds.add("hysteria2");
+    if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+      outbounds.add("hysteria2");
+    }
     outbounds.add("direct");
     return outbounds;
   }
 
+  // ⭐ FIXED: Only add hysteria2 if server exists and is not empty
   static List<String> _buildAutoOutbounds(Map<String, dynamic>? hy2) {
-    final outbounds = ["wireguard"];
-    if (hy2 != null) outbounds.add("hysteria2");
+    final outbounds = ["wireguard_1"];
+    if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+      outbounds.add("hysteria2");
+    }
     return outbounds;
   }
 

@@ -6,6 +6,7 @@ import '../../services/auth_service.dart';
 import '../../services/vpn_service.dart';
 import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
+import '../../services/vpn_config_service.dart';
 
 class SettingsTab extends StatelessWidget {
   final VoidCallback onLogout;
@@ -51,6 +52,122 @@ class SettingsTab extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _showDebugInfo(BuildContext context) async {
+    // Show loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      final email = await AuthService.getStoredEmail();
+      final deviceId = await AuthService.getDeviceId();
+      final apiKey = await AuthService.getApiKey();
+
+      // Close loading
+      if (context.mounted) Navigator.pop(context);
+
+      // Show debug info
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.bug_report, color: Colors.blue),
+                SizedBox(width: 8),
+                Text('Debug Info'),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Email: ${email ?? "Not logged in"}'),
+                  const SizedBox(height: 8),
+                  Text('Device ID: ${deviceId ?? "Not registered"}'),
+                  const SizedBox(height: 8),
+                  Text('API Key: ${apiKey != null ? apiKey.substring(0, 16) : "Missing"}...'),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Last VPN Config:',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  // ⭐ Show last config data
+                  Text(
+                    VpnConfigService.lastDebugInfo.isEmpty
+                      ? 'No config built yet. Try connecting first.'
+                      : VpnConfigService.lastDebugInfo,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              if (VpnConfigService.lastFullConfig.isNotEmpty)
+                TextButton(
+                  onPressed: () {
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: const Text('Full Config'),
+                        content: SingleChildScrollView(
+                          child: SelectableText(
+                            VpnConfigService.lastFullConfig,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                  child: const Text('View Full Config'),
+                ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) Navigator.pop(context);
+      if (context.mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Error'),
+            content: Text('Failed to load debug info:\n$e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    }
   }
 
   void _showLogoutDialog(BuildContext context) {
@@ -127,6 +244,43 @@ class SettingsTab extends StatelessWidget {
                               ? '🇫🇷 Français'
                               : '🇬🇧 English',
                           style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.chevron_right, color: Colors.grey[400]),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        // ⭐ Ajout de la section Debug
+        InfoCard(
+          title: 'Debug',
+          icon: Icons.bug_report,
+          children: [
+            InkWell(
+              onTap: () => _showDebugInfo(context),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Debug Info',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    ),
+                    Row(
+                      children: [
+                        const Text(
+                          'Show',
+                          style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
                           ),
