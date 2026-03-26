@@ -93,7 +93,7 @@ class VpnConfigService {
               "address": wg['server_ip'],
               "port": int.parse(wg['server_port'].toString()),
               "public_key": wg['client_public_key'],
-              "preshared_key": wg['client_preshared_key'],
+              "pre_shared_key": wg['client_preshared_key'],
               "allowed_ips": ["0.0.0.0/0", "::/0"]
             }
           ]
