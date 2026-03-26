@@ -16,7 +16,9 @@ class AuthService {
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
     ),
-    wOptions: WindowsOptions(),
+    wOptions: WindowsOptions(
+      useBackwardCompatibility: true,
+    ),
   );
 
   // Login — stores both access and refresh tokens
