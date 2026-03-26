@@ -289,27 +289,45 @@ class _VpnHomePageState extends State<VpnHomePage> {
       } catch (e) {
         setState(() => _connectionState = 'disconnected');
         if (mounted) {
+          String title = 'Connection Error';
           String message;
 
-          if (Platform.isAndroid &&
+          // ⭐ Check for specific error messages
+          final errorString = e.toString();
+
+          if (errorString.contains('Maximum active devices reached')) {
+            title = 'Device Limit Reached';
+            message = 'You can only connect 3 devices at the same time.\n\n'
+                    'Please disconnect another device and try again.';
+          } else if (errorString.contains('Device not registered')) {
+            title = 'Not Registered';
+            message = 'Your device is not registered. Please logout and login again.';
+          } else if (Platform.isAndroid &&
               e is PlatformException &&
               (e.code == 'NOTIFICATION_PERMISSION_DENIED' ||
                   e.message?.contains('null') == true)) {
-            message =
-                'Notification permission is required for the VPN to stay active. Please allow it and try again.';
+            title = 'Permission Required';
+            message = 'Notification permission is required for the VPN to stay active.\n\n'
+                    'Please allow it and try again.';
           } else if (Platform.isAndroid &&
               e is PlatformException &&
               (e.code == 'VPN_PERMISSION_DENIED' || e.details == null)) {
-            message =
-                'VPN permission is required to protect your connection. Please allow it and try again.';
+            title = 'Permission Required';
+            message = 'VPN permission is required to protect your connection.\n\n'
+                    'Please allow it and try again.';
+          } else if (errorString.contains('Failed to connect: 429')) {
+            title = 'Device Limit Reached';
+            message = 'Maximum number of active connections reached.\n\n'
+                    'Please disconnect another device first.';
           } else {
-            message = 'Failed to start VPN: $e';
+            message = 'Failed to start VPN.\n\n'
+                    'Error: ${errorString.replaceAll('Exception: ', '')}';
           }
 
           showDialog(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('Connection Error'),
+              title: Text(title),
               content: Text(message),
               actions: [
                 TextButton(

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import '../../colors.dart';
 import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
 import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
 
@@ -22,18 +24,57 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
     _loadSubscription();
   }
 
+  // ⭐ Log to file
+  Future<void> _log(String message) async {
+    try {
+      final timestamp = DateTime.now().toIso8601String();
+      final logMessage = '$timestamp: $message\n';
+
+      if (Platform.isWindows) {
+        final logPath = '${Platform.environment['USERPROFILE']}\\Documents\\VulcainVPN_Subscription.log';
+        final logFile = File(logPath);
+        await logFile.writeAsString(logMessage, mode: FileMode.append);
+      }
+
+      print(message); // Still print for development/Android
+    } catch (e) {
+      print('Failed to write log: $e');
+    }
+  }
+
   Future<void> _loadSubscription() async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
+
     try {
+      await _log('📊 Loading subscription...');
+
+      // Check if we have tokens
+      final token = await AuthService.getValidAccessToken();
+      await _log('   Token available: ${token != null}');
+      if (token != null) {
+        await _log('   Token length: ${token.length}');
+        await _log('   Token preview: ${token.substring(0, token.length > 20 ? 20 : token.length)}...');
+      } else {
+        await _log('   ❌ No token found!');
+      }
+
+      // Try to fetch subscription
+      await _log('   Calling API...');
       final data = await ApiService.fetchSubscription();
+      await _log('   ✅ Subscription data received');
+      await _log('   Data keys: ${data.keys.toList()}');
+
       setState(() {
         _subscriptionData = data;
         _isLoading = false;
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
+      await _log('❌ Subscription load error: $e');
+      await _log('   Stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
+
       setState(() {
         _error = 'Failed to load subscription info.';
         _isLoading = false;
@@ -82,7 +123,6 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
     final daysRemaining =
         expiresAt != null ? expiresAt.difference(DateTime.now()).inDays : 0;
     final activeDevices = devices['active'] ?? 0;
-    final totalDevices = devices['total'] ?? 0;
     final maxDevices = devices['max'] ?? 3;
 
     return RefreshIndicator(
@@ -140,10 +180,6 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
                 value: '$activeDevices / $maxDevices',
                 valueColor:
                     activeDevices >= maxDevices ? Colors.red : Colors.green,
-              ),
-              InfoRow(
-                label: 'Registered devices',
-                value: '$totalDevices',
               ),
               const SizedBox(height: 8),
               ClipRRect(
