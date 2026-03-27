@@ -18,14 +18,14 @@ class AppLocalizations {
       'connected': 'Connected',
       'disconnected': 'Disconnected',
       'connecting': 'Connecting...',
-      'disconnecting': 'Disconnecting...',  // ← ADD THIS
+      'disconnecting': 'Disconnecting...',
       'location': 'Location',
       'duration': 'Duration',
       'secure_connection': '🔒 Your connection is secure',
       'disconnect': 'Disconnect',
       'connect': 'Connect',
       'connecting_btn': 'Connecting...',
-      'disconnecting_btn': 'Disconnecting...',  // ← ADD THIS
+      'disconnecting_btn': 'Disconnecting...',
       'france': 'France',
       'settings': 'Settings',
       'language': 'Language',
@@ -38,14 +38,14 @@ class AppLocalizations {
       'connected': 'Connecté',
       'disconnected': 'Déconnecté',
       'connecting': 'Connexion en cours...',
-      'disconnecting': 'Déconnexion en cours...',  // ← ADD THIS
+      'disconnecting': 'Déconnexion en cours...',
       'location': 'Localisation',
       'duration': 'Durée',
       'secure_connection': '🔒 Votre connexion est sécurisée',
       'disconnect': 'Déconnecter',
       'connect': 'Connecter',
       'connecting_btn': 'Connexion...',
-      'disconnecting_btn': 'Déconnexion...',  // ← ADD THIS
+      'disconnecting_btn': 'Déconnexion...',
       'france': 'France',
       'settings': 'Paramètres',
       'language': 'Langue',
@@ -64,14 +64,14 @@ class AppLocalizations {
   String get connected => translate('connected');
   String get disconnected => translate('disconnected');
   String get connecting => translate('connecting');
-  String get disconnecting => translate('disconnecting');  // ← ADD THIS
+  String get disconnecting => translate('disconnecting');
   String get location => translate('location');
   String get duration => translate('duration');
   String get secureConnection => translate('secure_connection');
   String get disconnect => translate('disconnect');
   String get connect => translate('connect');
   String get connectingBtn => translate('connecting_btn');
-  String get disconnectingBtn => translate('disconnecting_btn');  // ← ADD THIS
+  String get disconnectingBtn => translate('disconnecting_btn');
   String get france => translate('france');
   String get settings => translate('settings');
   String get language => translate('language');

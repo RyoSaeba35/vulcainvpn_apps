@@ -12,6 +12,7 @@ class WindowsVpnService extends VpnService {
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
+  // Heartbeat timer - sends ping every 90 seconds
   static Timer? _heartbeatTimer;
   static const Duration _heartbeatInterval = Duration(seconds: 90);
 
@@ -40,46 +41,21 @@ class WindowsVpnService extends VpnService {
     return '$_exeDir\\$binary';
   }
 
-  // ⭐ FIXED: Check both process names separately (wildcards don't work in tasklist filters!)
-  static Future<bool> _isProcessRunning() async {
-    try {
-      // Check for AMD64 version
-      var result = await Process.run('tasklist', ['/FI', 'IMAGENAME eq sing-box-amd64.exe']);
-      var output = result.stdout.toString();
-      if (output.contains('sing-box-amd64.exe')) {
-        return true;
-      }
-
-      // Check for ARM64 version
-      result = await Process.run('tasklist', ['/FI', 'IMAGENAME eq sing-box-arm64.exe']);
-      output = result.stdout.toString();
-      if (output.contains('sing-box-arm64.exe')) {
-        return true;
-      }
-
-      return false;
-    } catch (e) {
-      await _log('Failed to check process: $e');
-      return false;
-    }
-  }
-
-  // ⭐ NEW: Public method for health checks
-  Future<bool> checkVpnState() async {
-    return await _isProcessRunning();
-  }
-
+  // Start heartbeat pings
   static Future<void> _startHeartbeat() async {
-    _stopHeartbeat();
+    _stopHeartbeat(); // Clear any existing timer
+
     await _log('🟢 Starting heartbeat timer (every ${_heartbeatInterval.inSeconds}s)');
 
     _heartbeatTimer = Timer.periodic(_heartbeatInterval, (timer) async {
       await _sendHeartbeat();
     });
 
+    // Send first heartbeat immediately
     await _sendHeartbeat();
   }
 
+  // Stop heartbeat pings
   static void _stopHeartbeat() {
     if (_heartbeatTimer != null) {
       _log('🔴 Stopping heartbeat timer');
@@ -88,6 +64,7 @@ class WindowsVpnService extends VpnService {
     }
   }
 
+  // Send single heartbeat ping
   static Future<void> _sendHeartbeat() async {
     try {
       final deviceId = await AuthService.getDeviceId();
@@ -121,6 +98,7 @@ class WindowsVpnService extends VpnService {
     try {
       await _log('startVpn called');
 
+      // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
 
@@ -131,6 +109,7 @@ class WindowsVpnService extends VpnService {
 
       await _log('Fetching credentials for device: $deviceId');
 
+      // Step 2: Call /api/connect to get credentials
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
         headers: {'X-Api-Key': apiKey},
@@ -145,15 +124,18 @@ class WindowsVpnService extends VpnService {
       final credentials = data['credentials'];
       await _log('Credentials received');
 
+      // Step 3: Build dynamic config
       final config = VpnConfigService.buildConfig(
         wireguard: credentials['wireguard'],
         hysteria2: credentials['hysteria2'],
         shadowsocks: credentials['shadowsocks'],
       );
 
+      // Step 4: Convert to JSON string
       final configJson = VpnConfigService.toJsonString(config);
       await _log('Config built successfully');
 
+      // Step 5: Write config to temp file
       await _log('exe dir: $_exeDir');
       await _log('sing-box path: $_singBoxPath');
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
@@ -163,6 +145,7 @@ class WindowsVpnService extends VpnService {
       await configFile.writeAsString(configJson);
       await _log('config written to: ${configFile.path}');
 
+      // Step 6: Start sing-box process
       _singBoxProcess = await Process.start(
         _singBoxPath,
         ['run', '-c', configFile.path],
@@ -176,12 +159,13 @@ class WindowsVpnService extends VpnService {
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box ERR: $data'));
 
-      _singBoxProcess!.exitCode.then((code) async {
-        await _log('sing-box exited with code: $code');
+      _singBoxProcess!.exitCode.then((code) {
+        _log('sing-box exited with code: $code');
         configFile.delete();
         if (_isConnected) {
           _isConnected = false;
           _statusController.add(false);
+          // Stop heartbeat when process dies
           _stopHeartbeat();
         }
       });
@@ -190,6 +174,7 @@ class WindowsVpnService extends VpnService {
       _isConnected = true;
       _statusController.add(true);
 
+      // START HEARTBEAT TIMER
       await _startHeartbeat();
 
       return true;
@@ -203,8 +188,10 @@ class WindowsVpnService extends VpnService {
   Future<void> stopVpn() async {
     await _log('stopVpn called');
 
+    // STOP HEARTBEAT TIMER FIRST
     _stopHeartbeat();
 
+    // Notify backend of disconnection
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -220,9 +207,11 @@ class WindowsVpnService extends VpnService {
       await _log('Failed to notify backend: $e');
     }
 
+    // Kill by reference if we have it
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
+    // Also kill by name in case process was started in a previous session
     try {
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
