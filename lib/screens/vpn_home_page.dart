@@ -26,8 +26,12 @@ class _VpnHomePageState extends State<VpnHomePage> {
   int _selectedIndex = 0;
 
   String _connectionState = 'disconnected';
-  int _connectionSeconds = 0;
-  Timer? _timer;
+
+  // ⭐ CHANGED: Use timestamp-based duration instead of counter
+  DateTime? _vpnStartTime;
+  Duration _elapsedTime = Duration.zero;
+  Timer? _displayTimer;
+
   Timer? _ipCheckTimer;
   String _currentIp = '';
   String _currentCountry = '';
@@ -38,6 +42,9 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   late final VpnService _vpnService = VpnService.instance;
 
+  // ⭐ CHANGED: Computed property instead of _connectionSeconds
+  int get _connectionSeconds => _elapsedTime.inSeconds;
+
   @override
   void initState() {
     super.initState();
@@ -47,7 +54,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _displayTimer?.cancel();
     _ipCheckTimer?.cancel();
     _vpnSubscription?.cancel();
     _trayService?.dispose();
@@ -82,11 +89,9 @@ class _VpnHomePageState extends State<VpnHomePage> {
       if (result.stdout.toString().contains('sing-box-amd64.exe')) {
         setState(() {
           _connectionState = 'connected';
-          _connectionSeconds = 0;
-          _timer?.cancel();
-          _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-            setState(() => _connectionSeconds++);
-          });
+          // ⭐ CHANGED: Start timestamp-based timer instead
+          _vpnStartTime = DateTime.now();
+          _startDisplayTimer();
         });
         await _trayService?.updateState(true);
       }
@@ -101,7 +106,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
     }
 
     if (Platform.isAndroid) {
-      await _restoreVpnState();  // NEW: Restore state on Android
+      await _restoreVpnState();
     }
 
     await Future.delayed(const Duration(seconds: 3));
@@ -112,15 +117,14 @@ class _VpnHomePageState extends State<VpnHomePage> {
       setState(() {
         if (isConnected) {
           _connectionState = 'connected';
-          _connectionSeconds = 0;
-          _timer?.cancel();
-          _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-            setState(() => _connectionSeconds++);
-          });
+          // ⭐ CHANGED: Set start time instead of counter
+          if (_vpnStartTime == null) {
+            _vpnStartTime = DateTime.now();
+          }
+          _startDisplayTimer();
         } else {
           _connectionState = 'disconnected';
-          _connectionSeconds = 0;
-          _timer?.cancel();
+          _stopDisplayTimer();
         }
       });
 
@@ -132,6 +136,42 @@ class _VpnHomePageState extends State<VpnHomePage> {
         _fetchCurrentIpAndLocationWithRetry();
       }
     });
+  }
+
+  // ⭐ NEW: Start display timer (updates UI every second)
+  void _startDisplayTimer() {
+    _displayTimer?.cancel();
+    _displayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (_vpnStartTime != null && mounted) {
+        setState(() {
+          _elapsedTime = DateTime.now().difference(_vpnStartTime!);
+        });
+      }
+    });
+  }
+
+  // ⭐ NEW: Stop display timer and reset
+  void _stopDisplayTimer() {
+    _displayTimer?.cancel();
+    _vpnStartTime = null;
+    _elapsedTime = Duration.zero;
+  }
+
+  // ⭐ NEW: Load VPN start time from native
+  Future<void> _loadVpnStartTime() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      final startTimeMs = await (VpnService.instance as AndroidVpnService).getConnectionStartTimeMs();
+      if (startTimeMs != null && startTimeMs > 0) {
+        setState(() {
+          _vpnStartTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
+        });
+        _startDisplayTimer();
+      }
+    } catch (e) {
+      print('Failed to load VPN start time: $e');
+    }
   }
 
   Future<void> _checkAdminRights() async {
@@ -266,11 +306,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
         if (success) {
           setState(() {
             _connectionState = 'connected';
-            _connectionSeconds = 0;
+            // ⭐ CHANGED: Set start time
+            _vpnStartTime = DateTime.now();
           });
-          _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-            setState(() => _connectionSeconds++);
-          });
+          _startDisplayTimer();
           _fetchUntilIpChanges(ipBeforeConnect);
         } else {
           setState(() => _connectionState = 'disconnected');
@@ -297,7 +336,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
           String title = 'Connection Error';
           String message;
 
-          // Check for specific error messages
           final errorString = e.toString();
 
           if (errorString.contains('Maximum active devices reached')) {
@@ -344,16 +382,16 @@ class _VpnHomePageState extends State<VpnHomePage> {
           );
         }
       }
-    } else if (_connectionState == 'connected') {  // ← CHANGED: Added explicit check
-      // ← ADD: Set to disconnecting first
+    } else if (_connectionState == 'connected') {
       setState(() => _connectionState = 'disconnecting');
 
       await _vpnService.stopVpn();
-      _timer?.cancel();
+
+      // ⭐ CHANGED: Stop timer and reset
+      _stopDisplayTimer();
 
       setState(() {
         _connectionState = 'disconnected';
-        _connectionSeconds = 0;
       });
 
       _fetchCurrentIpAndLocationWithRetry();
@@ -417,23 +455,23 @@ class _VpnHomePageState extends State<VpnHomePage> {
     );
   }
 
+  // ⭐ UPDATED: Restore VPN state and load start time
   Future<void> _restoreVpnState() async {
     if (!Platform.isAndroid) return;
 
     try {
-      // Check actual VPN state from native side
       final isRunning = await (VpnService.instance as AndroidVpnService).checkVpnState();
 
       if (isRunning) {
         print('🔄 Restoring VPN state: connected');
+
+        // ⭐ Load the actual start time from native
+        await _loadVpnStartTime();
+
         setState(() {
           _connectionState = 'connected';
-          _connectionSeconds = 0; // Could calculate from connected_at if stored
-          _timer?.cancel();
-          _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-            setState(() => _connectionSeconds++);
-          });
         });
+
         await _trayService?.updateState(true);
         _fetchUntilIpChanges(_currentIp);
       } else {

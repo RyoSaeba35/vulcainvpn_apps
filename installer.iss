@@ -83,5 +83,6 @@ end;
 Type: files; Name: "{app}\vpn_log.txt"
 Type: files; Name: "{app}\vpn_log_old.txt"
 Type: files; Name: "{app}\cache.db"
+Type: files; Name: "{app}\api_log.txt"
 Type: filesandordirs; Name: "{app}\data\cache.db"
 Type: filesandordirs; Name: "C:\ProgramData\VulcainVPN"

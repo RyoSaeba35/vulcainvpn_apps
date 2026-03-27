@@ -139,7 +139,10 @@ class MyVpnService : VpnService(), PlatformInterface {
                 // ⭐ Save state to SharedPreferences
                 setVpnState(true)
 
-                MainActivity.statusSink?.success(true)
+                // ⭐ CRITICAL: Post to main thread to avoid crash
+                mainHandler.post {
+                    MainActivity.statusSink?.success(true)
+                }
                 Log.d(TAG, "✅ VPN started successfully")
 
                 // ⭐ START HEARTBEAT
@@ -192,7 +195,10 @@ class MyVpnService : VpnService(), PlatformInterface {
             // ⭐ Save state to SharedPreferences
             setVpnState(false)
 
-            MainActivity.statusSink?.success(false)
+            // ⭐ CRITICAL: Post to main thread to avoid crash
+            mainHandler.post {
+                MainActivity.statusSink?.success(false)
+            }
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         } catch (e: Exception) {
@@ -212,7 +218,10 @@ class MyVpnService : VpnService(), PlatformInterface {
             setVpnState(false)
         }
 
-        MainActivity.statusSink?.success(false)
+        // ⭐ CRITICAL: Post to main thread to avoid crash
+        mainHandler.post {
+            MainActivity.statusSink?.success(false)
+        }
     }
 
     override fun onRevoke() {

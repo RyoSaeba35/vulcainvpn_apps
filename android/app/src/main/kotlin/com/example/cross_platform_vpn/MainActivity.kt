@@ -97,6 +97,12 @@ class MainActivity : FlutterActivity() {
                     val isRunning = prefs.getBoolean("is_running", false)
                     result.success(isRunning)
                 }
+                "getStartTime" -> {
+                    // ⭐ NEW: Get VPN start timestamp
+                    val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                    val startTime = prefs.getLong("start_time", 0)
+                    result.success(if (startTime > 0) startTime else null)
+                }
                 else -> result.notImplemented()
             }
         }

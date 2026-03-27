@@ -120,4 +120,12 @@ class AndroidVpnService extends VpnService {
       return false;
     }
   }
+
+  Future<int?> getConnectionStartTimeMs() async {
+    try {
+      return await _platform.invokeMethod('getStartTime');
+    } catch (e) {
+      return null;
+    }
+  }
 }
