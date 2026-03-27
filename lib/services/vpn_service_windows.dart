@@ -12,6 +12,10 @@ class WindowsVpnService extends VpnService {
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
+  // Heartbeat timer - sends ping every 90 seconds
+  static Timer? _heartbeatTimer;
+  static const Duration _heartbeatInterval = Duration(seconds: 90);
+
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
 
@@ -37,6 +41,55 @@ class WindowsVpnService extends VpnService {
     return '$_exeDir\\$binary';
   }
 
+  // Start heartbeat pings
+  static Future<void> _startHeartbeat() async {
+    _stopHeartbeat(); // Clear any existing timer
+
+    await _log('🟢 Starting heartbeat timer (every ${_heartbeatInterval.inSeconds}s)');
+
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (timer) async {
+      await _sendHeartbeat();
+    });
+
+    // Send first heartbeat immediately
+    await _sendHeartbeat();
+  }
+
+  // Stop heartbeat pings
+  static void _stopHeartbeat() {
+    if (_heartbeatTimer != null) {
+      _log('🔴 Stopping heartbeat timer');
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = null;
+    }
+  }
+
+  // Send single heartbeat ping
+  static Future<void> _sendHeartbeat() async {
+    try {
+      final deviceId = await AuthService.getDeviceId();
+      final apiKey = await AuthService.getApiKey();
+
+      if (deviceId == null || apiKey == null) {
+        await _log('⚠️  Cannot send heartbeat: no credentials');
+        return;
+      }
+
+      final response = await http.post(
+        Uri.parse('https://api.vulcainvpn.com/api/heartbeat/$deviceId'),
+        headers: {'X-Api-Key': apiKey},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        await _log('💓 Heartbeat sent successfully');
+      } else {
+        await _log('⚠️  Heartbeat failed: ${response.statusCode}');
+      }
+    } catch (e) {
+      await _log('⚠️  Heartbeat error: $e');
+    }
+  }
+
   @override
   Stream<bool> get statusStream => _statusController.stream;
 
@@ -45,7 +98,7 @@ class WindowsVpnService extends VpnService {
     try {
       await _log('startVpn called');
 
-      // ⭐ Step 1: Get device credentials
+      // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
 
@@ -56,7 +109,7 @@ class WindowsVpnService extends VpnService {
 
       await _log('Fetching credentials for device: $deviceId');
 
-      // ⭐ Step 2: Call /api/connect to get credentials
+      // Step 2: Call /api/connect to get credentials
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
         headers: {'X-Api-Key': apiKey},
@@ -71,18 +124,18 @@ class WindowsVpnService extends VpnService {
       final credentials = data['credentials'];
       await _log('Credentials received');
 
-      // ⭐ Step 3: Build dynamic config
+      // Step 3: Build dynamic config
       final config = VpnConfigService.buildConfig(
         wireguard: credentials['wireguard'],
         hysteria2: credentials['hysteria2'],
         shadowsocks: credentials['shadowsocks'],
       );
 
-      // ⭐ Step 4: Convert to JSON string
+      // Step 4: Convert to JSON string
       final configJson = VpnConfigService.toJsonString(config);
       await _log('Config built successfully');
 
-      // ⭐ Step 5: Write config to temp file
+      // Step 5: Write config to temp file
       await _log('exe dir: $_exeDir');
       await _log('sing-box path: $_singBoxPath');
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
@@ -92,7 +145,7 @@ class WindowsVpnService extends VpnService {
       await configFile.writeAsString(configJson);
       await _log('config written to: ${configFile.path}');
 
-      // ⭐ Step 6: Start sing-box process
+      // Step 6: Start sing-box process
       _singBoxProcess = await Process.start(
         _singBoxPath,
         ['run', '-c', configFile.path],
@@ -112,12 +165,18 @@ class WindowsVpnService extends VpnService {
         if (_isConnected) {
           _isConnected = false;
           _statusController.add(false);
+          // Stop heartbeat when process dies
+          _stopHeartbeat();
         }
       });
 
       await Future.delayed(const Duration(seconds: 2));
       _isConnected = true;
       _statusController.add(true);
+
+      // START HEARTBEAT TIMER
+      await _startHeartbeat();
+
       return true;
     } catch (e) {
       await _log('Windows VPN error: $e');
@@ -129,7 +188,10 @@ class WindowsVpnService extends VpnService {
   Future<void> stopVpn() async {
     await _log('stopVpn called');
 
-    // ⭐ Notify backend of disconnection
+    // STOP HEARTBEAT TIMER FIRST
+    _stopHeartbeat();
+
+    // Notify backend of disconnection
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
