@@ -48,7 +48,6 @@ class MyVpnService : VpnService(), PlatformInterface {
         private const val KEY_IS_RUNNING = "is_running"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_API_KEY = "api_key"
-        private const val KEY_START_TIME = "start_time"
 
         var isRunning: Boolean
             get() = false // Deprecated - use SharedPreferences instead
@@ -139,8 +138,6 @@ class MyVpnService : VpnService(), PlatformInterface {
 
                 // ⭐ Save state to SharedPreferences
                 setVpnState(true)
-                prefs.edit().putLong(KEY_START_TIME, System.currentTimeMillis()).apply()
-                Log.d(TAG, "✅ Stored start_time: ${System.currentTimeMillis()}")
 
                 // ⭐ CRITICAL: Post to main thread to avoid crash
                 mainHandler.post {
@@ -197,7 +194,6 @@ class MyVpnService : VpnService(), PlatformInterface {
 
             // ⭐ Save state to SharedPreferences
             setVpnState(false)
-            prefs.edit().remove(KEY_START_TIME).apply()
 
             // ⭐ CRITICAL: Post to main thread to avoid crash
             mainHandler.post {
@@ -216,10 +212,11 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         // ⭐ Stop heartbeat
         stopHeartbeat()
-        
-        setVpnState(false)
-        prefs.edit().remove(KEY_START_TIME).apply()
-        Log.d(TAG, "✅ VPN state cleared in onDestroy()")
+
+        // ⭐ Only clear state if we explicitly stopped
+        if (boxService == null) {
+            setVpnState(false)
+        }
 
         // ⭐ CRITICAL: Post to main thread to avoid crash
         mainHandler.post {

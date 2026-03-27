@@ -10,27 +10,9 @@ class AndroidVpnService extends VpnService {
   static const MethodChannel _platform = MethodChannel('com.vulcain.vpn/control');
   static const EventChannel _statusChannel = EventChannel('com.vulcain.vpn/status');
 
-  // ⭐ NEW: Health check timer
-  Timer? _healthCheckTimer;
-  final _statusController = StreamController<bool>.broadcast();
-
   @override
-  Stream<bool> get statusStream => _statusController.stream;
-
-  // ⭐ NEW: Start periodic health checks
-  void startHealthCheck() {
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      final actualState = await checkVpnState();
-      _statusController.add(actualState);
-    });
-  }
-
-  // ⭐ NEW: Stop health checks
-  void stopHealthCheck() {
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = null;
-  }
+  Stream<bool> get statusStream =>
+      _statusChannel.receiveBroadcastStream().map((e) => e as bool);
 
   @override
   Future<bool> startVpn() async {
@@ -67,6 +49,7 @@ class AndroidVpnService extends VpnService {
       final data = json.decode(response.body);
       final credentials = data['credentials'];
 
+      // ⭐ CRITICAL: Check if wireguard is null (all clients assigned)
       if (credentials['wireguard'] == null) {
         print('❌ No WireGuard credentials available (all slots in use)');
         throw Exception('Maximum active devices reached. Please disconnect another device first.');
@@ -84,17 +67,14 @@ class AndroidVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       print('✅ Config built (${configJson.length} chars)');
 
+      // ⭐ Call native Android with config AND credentials
       final result = await _platform.invokeMethod('startVpn', {
         'config': configJson,
-        'device_id': deviceId,
-        'api_key': apiKey,
+        'device_id': deviceId,  // ⭐ NEW: Pass device_id
+        'api_key': apiKey,      // ⭐ NEW: Pass api_key
       });
 
       print('✅ VPN started successfully');
-
-      // ⭐ Start health monitoring
-      startHealthCheck();
-
       return result;
 
     } on PlatformException catch (e) {
@@ -108,9 +88,6 @@ class AndroidVpnService extends VpnService {
 
   @override
   Future<void> stopVpn() async {
-    // ⭐ Stop health checks first
-    stopHealthCheck();
-
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -127,14 +104,13 @@ class AndroidVpnService extends VpnService {
     }
 
     await _platform.invokeMethod('stopVpn');
-    _statusController.add(false);
   }
 
   @override
   Future<bool> checkNotificationPermission() async =>
       await _platform.invokeMethod('checkNotificationPermission');
 
-  // ⭐ Check actual VPN state from native side
+  // ⭐ NEW: Check actual VPN state from native side
   Future<bool> checkVpnState() async {
     try {
       final result = await _platform.invokeMethod('getStatus');
@@ -151,11 +127,5 @@ class AndroidVpnService extends VpnService {
     } catch (e) {
       return null;
     }
-  }
-
-  // ⭐ NEW: Clean up on dispose
-  void dispose() {
-    stopHealthCheck();
-    _statusController.close();
   }
 }

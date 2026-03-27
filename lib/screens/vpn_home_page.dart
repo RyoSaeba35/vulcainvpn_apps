@@ -9,7 +9,6 @@ import '../services/ip_service.dart';
 import '../services/vpn_service.dart';
 import '../services/tray_window_service.dart';
 import '../services/vpn_service_android.dart';
-import '../services/vpn_service_windows.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
@@ -23,17 +22,15 @@ class VpnHomePage extends StatefulWidget {
   State<VpnHomePage> createState() => _VpnHomePageState();
 }
 
-class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
+class _VpnHomePageState extends State<VpnHomePage> {
   int _selectedIndex = 0;
 
   String _connectionState = 'disconnected';
 
+  // ⭐ CHANGED: Use timestamp-based duration instead of counter
   DateTime? _vpnStartTime;
   Duration _elapsedTime = Duration.zero;
   Timer? _displayTimer;
-
-  // ⭐ NEW: Health check timer
-  Timer? _healthCheckTimer;
 
   Timer? _ipCheckTimer;
   String _currentIp = '';
@@ -45,39 +42,23 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
   late final VpnService _vpnService = VpnService.instance;
 
+  // ⭐ CHANGED: Computed property instead of _connectionSeconds
   int get _connectionSeconds => _elapsedTime.inSeconds;
 
   @override
   void initState() {
     super.initState();
-    // ⭐ NEW: Register lifecycle observer
-    WidgetsBinding.instance.addObserver(this);
-
     _initTrayIfWindows();
     _init();
   }
 
   @override
   void dispose() {
-    // ⭐ NEW: Unregister lifecycle observer
-    WidgetsBinding.instance.removeObserver(this);
-
     _displayTimer?.cancel();
-    _healthCheckTimer?.cancel();
     _ipCheckTimer?.cancel();
     _vpnSubscription?.cancel();
     _trayService?.dispose();
     super.dispose();
-  }
-
-  // ⭐ NEW: App lifecycle handler
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      print('📱 App resumed, verifying VPN state...');
-      _verifyVpnState();
-      _fetchCurrentIpAndLocation();
-    }
   }
 
   Future<void> _initTrayIfWindows() async {
@@ -87,6 +68,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       onQuit: _quitApp,
     );
     await _trayService!.init();
+    await _checkExistingVpn();
   }
 
   Future<void> _quitApp() async {
@@ -98,13 +80,34 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _checkExistingVpn() async {
+    try {
+      final result = await Process.run(
+        'tasklist',
+        ['/FI', 'IMAGENAME eq sing-box-amd64.exe', '/NH'],
+      );
+      if (result.stdout.toString().contains('sing-box-amd64.exe')) {
+        setState(() {
+          _connectionState = 'connected';
+          // ⭐ CHANGED: Start timestamp-based timer instead
+          _vpnStartTime = DateTime.now();
+          _startDisplayTimer();
+        });
+        await _trayService?.updateState(true);
+      }
+    } catch (e) {
+      print('Could not check existing VPN: $e');
+    }
+  }
+
   Future<void> _init() async {
     if (Platform.isWindows) {
       await _checkAdminRights();
     }
 
-    // ⭐ NEW: Universal state verification on startup
-    await _verifyVpnState();
+    if (Platform.isAndroid) {
+      await _restoreVpnState();
+    }
 
     await Future.delayed(const Duration(seconds: 3));
     _fetchCurrentIpAndLocation();
@@ -114,17 +117,14 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       setState(() {
         if (isConnected) {
           _connectionState = 'connected';
+          // ⭐ CHANGED: Set start time instead of counter
           if (_vpnStartTime == null) {
             _vpnStartTime = DateTime.now();
           }
           _startDisplayTimer();
-          // ⭐ NEW: Start health monitoring when connected
-          _startHealthCheck();
         } else {
           _connectionState = 'disconnected';
           _stopDisplayTimer();
-          // ⭐ NEW: Stop health monitoring when disconnected
-          _stopHealthCheck();
         }
       });
 
@@ -138,139 +138,18 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     });
   }
 
-  // ⭐ NEW: Periodic health check (runs every 3 seconds when connected)
-  void _startHealthCheck() {
-    _healthCheckTimer?.cancel();
-
-    print('🏥 Starting VPN health check...');
-
-    _healthCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      await _checkVpnHealth();
-    });
-  }
-
-  // ⭐ NEW: Stop health check
-  void _stopHealthCheck() {
-    print('🏥 Stopping VPN health check');
-    _healthCheckTimer?.cancel();
-    _healthCheckTimer = null;
-  }
-
-  // ⭐ NEW: Check if VPN is actually running
-  Future<void> _checkVpnHealth() async {
-    if (_connectionState != 'connected') {
-      return; // Only check when we think we're connected
-    }
-
-    try {
-      bool actualState = false;
-
-      if (Platform.isAndroid) {
-        final androidService = _vpnService as AndroidVpnService;
-        actualState = await androidService.checkVpnState();
-      } else if (Platform.isWindows) {
-        final windowsService = _vpnService as WindowsVpnService;
-        actualState = await windowsService.checkVpnState();
-      }
-
-      // ⚠️ State mismatch detected!
-      if (!actualState && _connectionState == 'connected') {
-        print('⚠️ VPN died unexpectedly! Updating UI...');
-
-        if (mounted) {
-          setState(() {
-            _connectionState = 'disconnected';
-          });
-          _stopDisplayTimer();
-          _stopHealthCheck();
-
-          // Show notification to user
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('VPN connection lost'),
-                backgroundColor: Colors.red,
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
-
-          await _trayService?.updateState(false);
-          _fetchCurrentIpAndLocationWithRetry();
-        }
-      }
-    } catch (e) {
-      print('Health check error: $e');
-    }
-  }
-
-  // ⭐ NEW: Universal VPN state verification (works on all platforms)
-  Future<void> _verifyVpnState() async {
-    try {
-      print('🔍 Verifying VPN state...');
-
-      bool actualState = false;
-      DateTime? startTime;
-
-      if (Platform.isAndroid) {
-        final androidService = _vpnService as AndroidVpnService;
-        actualState = await androidService.checkVpnState();
-
-        if (actualState) {
-          final startTimeMs = await androidService.getConnectionStartTimeMs();
-          if (startTimeMs != null && startTimeMs > 0) {
-            startTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
-            print('✅ Loaded Android start time: $startTime');
-          }
-        }
-      } else if (Platform.isWindows) {
-        final windowsService = _vpnService as WindowsVpnService;
-        actualState = await windowsService.checkVpnState();
-
-        // Windows: We can't reliably get the original start time after restart
-        // so we use current time (timer will show from 0)
-        if (actualState) {
-          startTime = DateTime.now();
-          print('⚠️ Windows VPN detected, using current time (timer reset)');
-        }
-      }
-
-      print('🔍 Actual VPN state: $actualState');
-
-      if (mounted) {
-        setState(() {
-          _connectionState = actualState ? 'connected' : 'disconnected';
-
-          if (actualState && startTime != null) {
-            _vpnStartTime = startTime;
-          }
-        });
-
-        if (actualState) {
-          _startDisplayTimer();
-          _startHealthCheck();
-          await _trayService?.updateState(true);
-          _fetchUntilIpChanges(_currentIp);
-        } else {
-          _stopDisplayTimer();
-          _stopHealthCheck();
-          await _trayService?.updateState(false);
-        }
-      }
-    } catch (e) {
-      print('❌ Failed to verify VPN state: $e');
-    }
-  }
-
+  // ⭐ NEW: Start display timer (updates UI every second)
   void _startDisplayTimer() {
     _displayTimer?.cancel();
 
+    // ⭐ CRITICAL: Calculate elapsed time IMMEDIATELY (don't wait for first tick)
     if (_vpnStartTime != null && mounted) {
       setState(() {
         _elapsedTime = DateTime.now().difference(_vpnStartTime!);
       });
     }
 
+    // Then start periodic updates
     _displayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_vpnStartTime != null && mounted) {
         setState(() {
@@ -280,10 +159,28 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     });
   }
 
+  // ⭐ NEW: Stop display timer and reset
   void _stopDisplayTimer() {
     _displayTimer?.cancel();
     _vpnStartTime = null;
     _elapsedTime = Duration.zero;
+  }
+
+  // ⭐ NEW: Load VPN start time from native
+  Future<void> _loadVpnStartTime() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      final startTimeMs = await (VpnService.instance as AndroidVpnService).getConnectionStartTimeMs();
+      if (startTimeMs != null && startTimeMs > 0) {
+        setState(() {
+          _vpnStartTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
+        });
+        _startDisplayTimer();
+      }
+    } catch (e) {
+      print('Failed to load VPN start time: $e');
+    }
   }
 
   Future<void> _checkAdminRights() async {
@@ -418,10 +315,10 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         if (success) {
           setState(() {
             _connectionState = 'connected';
+            // ⭐ CHANGED: Set start time
             _vpnStartTime = DateTime.now();
           });
           _startDisplayTimer();
-          _startHealthCheck(); // ⭐ Start health monitoring
           _fetchUntilIpChanges(ipBeforeConnect);
         } else {
           setState(() => _connectionState = 'disconnected');
@@ -499,8 +396,8 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
       await _vpnService.stopVpn();
 
+      // ⭐ CHANGED: Stop timer and reset
       _stopDisplayTimer();
-      _stopHealthCheck(); // ⭐ Stop health monitoring
 
       setState(() {
         _connectionState = 'disconnected';
@@ -565,5 +462,58 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         ],
       ),
     );
+  }
+
+  // ⭐ UPDATED: Restore VPN state and load start time with fallback
+  Future<void> _restoreVpnState() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      print('🔄 Checking VPN state...');
+      final isRunning = await (VpnService.instance as AndroidVpnService).checkVpnState();
+      print('🔄 VPN is running: $isRunning');
+
+      if (isRunning) {
+        print('🔄 Restoring VPN state: connected');
+
+        // ⭐ Try to load the actual start time from native
+        print('🔄 Loading start time from native...');
+        final startTimeMs = await (VpnService.instance as AndroidVpnService).getConnectionStartTimeMs();
+        print('🔄 Start time from native: $startTimeMs');
+
+        if (startTimeMs != null && startTimeMs > 0) {
+          // ✅ Use stored start time
+          final startTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
+          final elapsed = DateTime.now().difference(startTime);
+
+          setState(() {
+            _connectionState = 'connected';
+            _vpnStartTime = startTime;
+          });
+
+          print('✅ Loaded start time: $startTime');
+          print('✅ Elapsed time: ${elapsed.inHours}h ${elapsed.inMinutes % 60}m ${elapsed.inSeconds % 60}s');
+
+          // Start the display timer (this will calculate elapsed time immediately)
+          _startDisplayTimer();
+        } else {
+          // ⚠️ Fallback: Use current time if we can't load stored time
+          print('⚠️ No stored start time found, using current time as fallback');
+          setState(() {
+            _connectionState = 'connected';
+            _vpnStartTime = DateTime.now();
+          });
+          _startDisplayTimer();
+        }
+
+        await _trayService?.updateState(true);
+        _fetchUntilIpChanges(_currentIp);
+      } else {
+        print('🔄 Restoring VPN state: disconnected');
+        setState(() => _connectionState = 'disconnected');
+      }
+    } catch (e) {
+      print('❌ Failed to restore VPN state: $e');
+    }
   }
 }
