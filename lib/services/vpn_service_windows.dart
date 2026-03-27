@@ -40,13 +40,24 @@ class WindowsVpnService extends VpnService {
     return '$_exeDir\\$binary';
   }
 
-  // ⭐ NEW: Check if sing-box process is actually running
+  // ⭐ FIXED: Check both process names separately (wildcards don't work in tasklist filters!)
   static Future<bool> _isProcessRunning() async {
     try {
-      final result = await Process.run('tasklist', ['/FI', 'IMAGENAME eq sing-box-*.exe']);
-      final output = result.stdout.toString();
-      final isRunning = output.contains('sing-box-amd64.exe') || output.contains('sing-box-arm64.exe');
-      return isRunning;
+      // Check for AMD64 version
+      var result = await Process.run('tasklist', ['/FI', 'IMAGENAME eq sing-box-amd64.exe']);
+      var output = result.stdout.toString();
+      if (output.contains('sing-box-amd64.exe')) {
+        return true;
+      }
+
+      // Check for ARM64 version
+      result = await Process.run('tasklist', ['/FI', 'IMAGENAME eq sing-box-arm64.exe']);
+      output = result.stdout.toString();
+      if (output.contains('sing-box-arm64.exe')) {
+        return true;
+      }
+
+      return false;
     } catch (e) {
       await _log('Failed to check process: $e');
       return false;

@@ -216,9 +216,10 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         // ⭐ Stop heartbeat
         stopHeartbeat()
-
+        
         setVpnState(false)
         prefs.edit().remove(KEY_START_TIME).apply()
+        Log.d(TAG, "✅ VPN state cleared in onDestroy()")
 
         // ⭐ CRITICAL: Post to main thread to avoid crash
         mainHandler.post {
