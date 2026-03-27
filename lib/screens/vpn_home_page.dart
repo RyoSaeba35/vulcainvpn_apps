@@ -8,6 +8,7 @@ import '../l10n/app_localizations.dart';
 import '../services/ip_service.dart';
 import '../services/vpn_service.dart';
 import '../services/tray_window_service.dart';
+import '../services/vpn_service_android.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
@@ -97,6 +98,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
   Future<void> _init() async {
     if (Platform.isWindows) {
       await _checkAdminRights();
+    }
+
+    if (Platform.isAndroid) {
+      await _restoreVpnState();  // NEW: Restore state on Android
     }
 
     await Future.delayed(const Duration(seconds: 3));
@@ -292,7 +297,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
           String title = 'Connection Error';
           String message;
 
-          // ⭐ Check for specific error messages
+          // Check for specific error messages
           final errorString = e.toString();
 
           if (errorString.contains('Maximum active devices reached')) {
@@ -410,5 +415,33 @@ class _VpnHomePageState extends State<VpnHomePage> {
         ],
       ),
     );
+  }
+
+  Future<void> _restoreVpnState() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      // Check actual VPN state from native side
+      final isRunning = await (VpnService.instance as AndroidVpnService).checkVpnState();
+
+      if (isRunning) {
+        print('🔄 Restoring VPN state: connected');
+        setState(() {
+          _connectionState = 'connected';
+          _connectionSeconds = 0; // Could calculate from connected_at if stored
+          _timer?.cancel();
+          _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+            setState(() => _connectionSeconds++);
+          });
+        });
+        await _trayService?.updateState(true);
+        _fetchUntilIpChanges(_currentIp);
+      } else {
+        print('🔄 Restoring VPN state: disconnected');
+        setState(() => _connectionState = 'disconnected');
+      }
+    } catch (e) {
+      print('Failed to restore VPN state: $e');
+    }
   }
 }

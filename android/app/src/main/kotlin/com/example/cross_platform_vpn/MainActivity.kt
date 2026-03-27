@@ -27,7 +27,10 @@ class MainActivity : FlutterActivity() {
     private val TAG = "MainActivity"
 
     private var pendingResult: MethodChannel.Result? = null
-    private var pendingConfig: String? = null  // Store config temporarily
+    private var pendingConfig: String? = null
+    // ⭐ NEW: Store credentials temporarily
+    private var pendingDeviceId: String? = null
+    private var pendingApiKey: String? = null
 
     companion object {
         var statusSink: EventChannel.EventSink? = null
@@ -56,15 +59,25 @@ class MainActivity : FlutterActivity() {
                 }
                 "getPackageName" -> getPackageName(result)
                 "startVpn" -> {
-                    // Get config from Flutter
+                    // ⭐ Get config AND credentials from Flutter
                     val configJson = call.argument<String>("config")
+                    val deviceId = call.argument<String>("device_id")
+                    val apiKey = call.argument<String>("api_key")
+
                     if (configJson == null) {
                         result.error("NO_CONFIG", "Config not provided", null)
                         return@setMethodCallHandler
                     }
 
+                    if (deviceId == null || apiKey == null) {
+                        result.error("NO_CREDENTIALS", "Device credentials not provided", null)
+                        return@setMethodCallHandler
+                    }
+
                     pendingResult = result
-                    pendingConfig = configJson  // Store config
+                    pendingConfig = configJson
+                    pendingDeviceId = deviceId
+                    pendingApiKey = apiKey
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -78,7 +91,12 @@ class MainActivity : FlutterActivity() {
                     requestVpnPermission()
                 }
                 "stopVpn" -> stopVpnInternal(result)
-                "getStatus" -> result.success(MyVpnService.isRunning)
+                "getStatus" -> {
+                    // ⭐ NEW: Check actual VPN state from SharedPreferences
+                    val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                    val isRunning = prefs.getBoolean("is_running", false)
+                    result.success(isRunning)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -118,7 +136,9 @@ class MainActivity : FlutterActivity() {
             pendingResult?.let {
                 startVpnInternal(it)
                 pendingResult = null
-                pendingConfig = null  // Clear config
+                pendingConfig = null
+                pendingDeviceId = null
+                pendingApiKey = null
             }
         }
     }
@@ -126,8 +146,10 @@ class MainActivity : FlutterActivity() {
     private fun startVpnInternal(result: MethodChannel.Result) {
         try {
             val intent = Intent(this, MyVpnService::class.java).apply {
-                // Pass config to service
+                // ⭐ Pass config AND credentials to service
                 putExtra("VPN_CONFIG", pendingConfig)
+                putExtra("DEVICE_ID", pendingDeviceId)
+                putExtra("API_KEY", pendingApiKey)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -164,7 +186,9 @@ class MainActivity : FlutterActivity() {
                     Handler(mainLooper).post {
                         startVpnInternal(result)
                         pendingResult = null
-                        pendingConfig = null  // Clear config
+                        pendingConfig = null
+                        pendingDeviceId = null
+                        pendingApiKey = null
                     }
                 } else {
                     result.error(
@@ -173,7 +197,9 @@ class MainActivity : FlutterActivity() {
                         null
                     )
                     pendingResult = null
-                    pendingConfig = null  // Clear config
+                    pendingConfig = null
+                    pendingDeviceId = null
+                    pendingApiKey = null
                 }
             }
         }
@@ -197,7 +223,9 @@ class MainActivity : FlutterActivity() {
                     null
                 )
                 pendingResult = null
-                pendingConfig = null  // Clear config
+                pendingConfig = null
+                pendingDeviceId = null
+                pendingApiKey = null
             }
         }
     }

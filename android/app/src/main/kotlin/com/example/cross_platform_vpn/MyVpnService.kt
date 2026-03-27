@@ -30,6 +30,11 @@ import io.nekohasekai.libbox.StringIterator
 import io.nekohasekai.libbox.InterfaceUpdateListener
 import io.nekohasekai.libbox.PlatformInterface
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
+import java.net.HttpURLConnection
+import java.net.URL
+import android.content.Context
+import android.content.SharedPreferences
 
 class MyVpnService : VpnService(), PlatformInterface {
 
@@ -37,7 +42,16 @@ class MyVpnService : VpnService(), PlatformInterface {
         private const val TAG = "MyVpnService"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "vpn_channel"
-        var isRunning = false
+
+        // ⭐ CHANGED: Use SharedPreferences instead of static variable
+        private const val PREFS_NAME = "vpn_state"
+        private const val KEY_IS_RUNNING = "is_running"
+        private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_API_KEY = "api_key"
+
+        var isRunning: Boolean
+            get() = false // Deprecated - use SharedPreferences instead
+            set(_) {} // Deprecated
     }
 
     private var boxService: LibboxService? = null
@@ -46,6 +60,15 @@ class MyVpnService : VpnService(), PlatformInterface {
 
     // Cache for interface list to prevent recursive calls
     private var cachedInterfaces: List<LibboxNetworkInterface>? = null
+
+    // ⭐ NEW: Heartbeat coroutine job
+    private var heartbeatJob: Job? = null
+    private val heartbeatScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // ⭐ NEW: SharedPreferences
+    private val prefs: SharedPreferences by lazy {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -68,7 +91,17 @@ class MyVpnService : VpnService(), PlatformInterface {
                     cachedConfig = config
                 }
 
-                if (!isRunning) startVpnService()
+                // ⭐ Store device credentials for heartbeat
+                intent?.getStringExtra("DEVICE_ID")?.let { deviceId ->
+                    prefs.edit().putString(KEY_DEVICE_ID, deviceId).apply()
+                    Log.d(TAG, "Stored device_id: $deviceId")
+                }
+                intent?.getStringExtra("API_KEY")?.let { apiKey ->
+                    prefs.edit().putString(KEY_API_KEY, apiKey).apply()
+                    Log.d(TAG, "Stored api_key: ${apiKey.take(20)}...")
+                }
+
+                if (!getVpnState()) startVpnService()  // ⭐ CHANGED: use getVpnState() instead of isRunning
                 return START_STICKY
             }
         }
@@ -102,9 +135,15 @@ class MyVpnService : VpnService(), PlatformInterface {
                 service.start()
 
                 boxService = service
-                isRunning = true
+
+                // ⭐ Save state to SharedPreferences
+                setVpnState(true)
+
                 MainActivity.statusSink?.success(true)
                 Log.d(TAG, "✅ VPN started successfully")
+
+                // ⭐ START HEARTBEAT
+                startHeartbeat()
 
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Failed to start VPN", e)
@@ -135,6 +174,10 @@ class MyVpnService : VpnService(), PlatformInterface {
 
     private fun stopVpnService() {
         Log.d(TAG, "Stopping VPN service")
+
+        // ⭐ STOP HEARTBEAT FIRST
+        stopHeartbeat()
+
         try {
             runBlocking {
                 DefaultNetworkMonitor.stop()
@@ -145,7 +188,10 @@ class MyVpnService : VpnService(), PlatformInterface {
             fileDescriptor = null
             boxService?.close()
             boxService = null
-            isRunning = false
+
+            // ⭐ Save state to SharedPreferences
+            setVpnState(false)
+
             MainActivity.statusSink?.success(false)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
@@ -157,7 +203,15 @@ class MyVpnService : VpnService(), PlatformInterface {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service destroyed")
-        isRunning = false
+
+        // ⭐ Stop heartbeat
+        stopHeartbeat()
+
+        // ⭐ Only clear state if we explicitly stopped
+        if (boxService == null) {
+            setVpnState(false)
+        }
+
         MainActivity.statusSink?.success(false)
     }
 
@@ -504,6 +558,98 @@ class MyVpnService : VpnService(), PlatformInterface {
             override fun next(): String? = null
         }
     override fun sendNotification(notification: io.nekohasekai.libbox.Notification) {}
+
+    // =============================
+    // ⭐ HEARTBEAT IMPLEMENTATION
+    // =============================
+
+    private fun startHeartbeat() {
+        stopHeartbeat() // Clear any existing job
+
+        val deviceId = prefs.getString(KEY_DEVICE_ID, null)
+        val apiKey = prefs.getString(KEY_API_KEY, null)
+
+        if (deviceId == null || apiKey == null) {
+            Log.w(TAG, "⚠️  Cannot start heartbeat: missing credentials")
+            return
+        }
+
+        Log.d(TAG, "🟢 Starting heartbeat timer (every 90s)")
+
+        heartbeatJob = heartbeatScope.launch {
+            while (isActive) {
+                try {
+                    sendHeartbeat(deviceId, apiKey)
+                    delay(90_000) // 90 seconds
+                } catch (e: CancellationException) {
+                    Log.d(TAG, "Heartbeat job cancelled")
+                    break
+                } catch (e: Exception) {
+                    Log.e(TAG, "⚠️  Heartbeat error: ${e.message}")
+                    delay(90_000) // Continue trying even if one fails
+                }
+            }
+        }
+
+        // Send first heartbeat immediately
+        heartbeatScope.launch {
+            try {
+                sendHeartbeat(deviceId, apiKey)
+            } catch (e: Exception) {
+                Log.e(TAG, "⚠️  Initial heartbeat failed: ${e.message}")
+            }
+        }
+    }
+
+    private fun stopHeartbeat() {
+        if (heartbeatJob != null) {
+            Log.d(TAG, "🔴 Stopping heartbeat timer")
+            heartbeatJob?.cancel()
+            heartbeatJob = null
+        }
+    }
+
+    private suspend fun sendHeartbeat(deviceId: String, apiKey: String) = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("https://api.vulcainvpn.com/api/heartbeat/$deviceId")
+            val connection = url.openConnection() as HttpURLConnection
+
+            connection.apply {
+                requestMethod = "POST"
+                setRequestProperty("X-Api-Key", apiKey)
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                doOutput = false
+            }
+
+            val responseCode = connection.responseCode
+
+            if (responseCode == 200) {
+                Log.d(TAG, "💓 Heartbeat sent successfully")
+            } else {
+                Log.w(TAG, "⚠️  Heartbeat failed: HTTP $responseCode")
+            }
+
+            connection.disconnect()
+
+        } catch (e: Exception) {
+            Log.e(TAG, "⚠️  Heartbeat error: ${e.message}")
+            throw e
+        }
+    }
+
+    // =============================
+    // ⭐ STATE PERSISTENCE
+    // =============================
+
+    private fun setVpnState(running: Boolean) {
+        prefs.edit().putBoolean(KEY_IS_RUNNING, running).apply()
+        Log.d(TAG, "VPN state saved: $running")
+    }
+
+    fun getVpnState(): Boolean {
+        return prefs.getBoolean(KEY_IS_RUNNING, false)
+    }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

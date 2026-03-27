@@ -10,62 +10,9 @@ class AndroidVpnService extends VpnService {
   static const MethodChannel _platform = MethodChannel('com.vulcain.vpn/control');
   static const EventChannel _statusChannel = EventChannel('com.vulcain.vpn/status');
 
-  // Heartbeat timer - sends ping every 90 seconds
-  static Timer? _heartbeatTimer;
-  static const Duration _heartbeatInterval = Duration(seconds: 90);
-
   @override
   Stream<bool> get statusStream =>
       _statusChannel.receiveBroadcastStream().map((e) => e as bool);
-
-  // Start heartbeat pings
-  static Future<void> _startHeartbeat() async {
-    _stopHeartbeat(); // Clear any existing timer
-
-    print('🟢 Starting heartbeat timer (every ${_heartbeatInterval.inSeconds}s)');
-
-    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (timer) async {
-      await _sendHeartbeat();
-    });
-
-    // Send first heartbeat immediately
-    await _sendHeartbeat();
-  }
-
-  // Stop heartbeat pings
-  static void _stopHeartbeat() {
-    if (_heartbeatTimer != null) {
-      print('🔴 Stopping heartbeat timer');
-      _heartbeatTimer?.cancel();
-      _heartbeatTimer = null;
-    }
-  }
-
-  // Send single heartbeat ping
-  static Future<void> _sendHeartbeat() async {
-    try {
-      final deviceId = await AuthService.getDeviceId();
-      final apiKey = await AuthService.getApiKey();
-
-      if (deviceId == null || apiKey == null) {
-        print('⚠️  Cannot send heartbeat: no credentials');
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse('https://api.vulcainvpn.com/api/heartbeat/$deviceId'),
-        headers: {'X-Api-Key': apiKey},
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        print('💓 Heartbeat sent successfully');
-      } else {
-        print('⚠️  Heartbeat failed: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('⚠️  Heartbeat error: $e');
-    }
-  }
 
   @override
   Future<bool> startVpn() async {
@@ -102,7 +49,7 @@ class AndroidVpnService extends VpnService {
       final data = json.decode(response.body);
       final credentials = data['credentials'];
 
-      // CRITICAL: Check if wireguard is null (all clients assigned)
+      // ⭐ CRITICAL: Check if wireguard is null (all clients assigned)
       if (credentials['wireguard'] == null) {
         print('❌ No WireGuard credentials available (all slots in use)');
         throw Exception('Maximum active devices reached. Please disconnect another device first.');
@@ -120,16 +67,14 @@ class AndroidVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       print('✅ Config built (${configJson.length} chars)');
 
-      // Call native Android
+      // ⭐ Call native Android with config AND credentials
       final result = await _platform.invokeMethod('startVpn', {
         'config': configJson,
+        'device_id': deviceId,  // ⭐ NEW: Pass device_id
+        'api_key': apiKey,      // ⭐ NEW: Pass api_key
       });
 
       print('✅ VPN started successfully');
-
-      // START HEARTBEAT TIMER
-      await _startHeartbeat();
-
       return result;
 
     } on PlatformException catch (e) {
@@ -143,9 +88,6 @@ class AndroidVpnService extends VpnService {
 
   @override
   Future<void> stopVpn() async {
-    // STOP HEARTBEAT TIMER FIRST
-    _stopHeartbeat();
-
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -167,4 +109,15 @@ class AndroidVpnService extends VpnService {
   @override
   Future<bool> checkNotificationPermission() async =>
       await _platform.invokeMethod('checkNotificationPermission');
+
+  // ⭐ NEW: Check actual VPN state from native side
+  Future<bool> checkVpnState() async {
+    try {
+      final result = await _platform.invokeMethod('getStatus');
+      return result as bool;
+    } catch (e) {
+      print('Failed to check VPN state: $e');
+      return false;
+    }
+  }
 }
