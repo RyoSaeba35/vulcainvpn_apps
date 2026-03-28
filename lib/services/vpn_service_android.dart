@@ -17,7 +17,7 @@ class AndroidVpnService extends VpnService {
   @override
   Future<bool> startVpn() async {
     try {
-      // Get credentials
+      // Get credentials for API call
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
 
@@ -28,7 +28,7 @@ class AndroidVpnService extends VpnService {
 
       print('🔵 Calling API for device: $deviceId');
 
-      // Call API
+      // Call /connect API
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
         headers: {'X-Api-Key': apiKey},
@@ -49,7 +49,6 @@ class AndroidVpnService extends VpnService {
       final data = json.decode(response.body);
       final credentials = data['credentials'];
 
-      // ⭐ CRITICAL: Check if wireguard is null (all clients assigned)
       if (credentials['wireguard'] == null) {
         print('❌ No WireGuard credentials available (all slots in use)');
         throw Exception('Maximum active devices reached. Please disconnect another device first.');
@@ -67,11 +66,9 @@ class AndroidVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       print('✅ Config built (${configJson.length} chars)');
 
-      // ⭐ Call native Android with config AND credentials
+      // Start VPN with only config (no credentials needed)
       final result = await _platform.invokeMethod('startVpn', {
         'config': configJson,
-        'device_id': deviceId,  // ⭐ NEW: Pass device_id
-        'api_key': apiKey,      // ⭐ NEW: Pass api_key
       });
 
       print('✅ VPN started successfully');
@@ -110,7 +107,6 @@ class AndroidVpnService extends VpnService {
   Future<bool> checkNotificationPermission() async =>
       await _platform.invokeMethod('checkNotificationPermission');
 
-  // ⭐ NEW: Check actual VPN state from native side
   Future<bool> checkVpnState() async {
     try {
       final result = await _platform.invokeMethod('getStatus');

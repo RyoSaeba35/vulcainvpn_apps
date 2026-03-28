@@ -12,10 +12,6 @@ class WindowsVpnService extends VpnService {
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
-  // Heartbeat timer - sends ping every 90 seconds
-  static Timer? _heartbeatTimer;
-  static const Duration _heartbeatInterval = Duration(seconds: 90);
-
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
 
@@ -39,55 +35,6 @@ class WindowsVpnService extends VpnService {
 
     final binary = isArm ? 'sing-box-arm64.exe' : 'sing-box-amd64.exe';
     return '$_exeDir\\$binary';
-  }
-
-  // Start heartbeat pings
-  static Future<void> _startHeartbeat() async {
-    _stopHeartbeat(); // Clear any existing timer
-
-    await _log('🟢 Starting heartbeat timer (every ${_heartbeatInterval.inSeconds}s)');
-
-    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (timer) async {
-      await _sendHeartbeat();
-    });
-
-    // Send first heartbeat immediately
-    await _sendHeartbeat();
-  }
-
-  // Stop heartbeat pings
-  static void _stopHeartbeat() {
-    if (_heartbeatTimer != null) {
-      _log('🔴 Stopping heartbeat timer');
-      _heartbeatTimer?.cancel();
-      _heartbeatTimer = null;
-    }
-  }
-
-  // Send single heartbeat ping
-  static Future<void> _sendHeartbeat() async {
-    try {
-      final deviceId = await AuthService.getDeviceId();
-      final apiKey = await AuthService.getApiKey();
-
-      if (deviceId == null || apiKey == null) {
-        await _log('⚠️  Cannot send heartbeat: no credentials');
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse('https://api.vulcainvpn.com/api/heartbeat/$deviceId'),
-        headers: {'X-Api-Key': apiKey},
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        await _log('💓 Heartbeat sent successfully');
-      } else {
-        await _log('⚠️  Heartbeat failed: ${response.statusCode}');
-      }
-    } catch (e) {
-      await _log('⚠️  Heartbeat error: $e');
-    }
   }
 
   @override
@@ -165,17 +112,12 @@ class WindowsVpnService extends VpnService {
         if (_isConnected) {
           _isConnected = false;
           _statusController.add(false);
-          // Stop heartbeat when process dies
-          _stopHeartbeat();
         }
       });
 
       await Future.delayed(const Duration(seconds: 2));
       _isConnected = true;
       _statusController.add(true);
-
-      // START HEARTBEAT TIMER
-      await _startHeartbeat();
 
       return true;
     } catch (e) {
@@ -187,9 +129,6 @@ class WindowsVpnService extends VpnService {
   @override
   Future<void> stopVpn() async {
     await _log('stopVpn called');
-
-    // STOP HEARTBEAT TIMER FIRST
-    _stopHeartbeat();
 
     // Notify backend of disconnection
     try {
