@@ -25,8 +25,11 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
     _loadSubscription();
   }
 
-  // ⭐ Log to file
+  // ✅ FIX: Console logging only (no Windows file writing to prevent hangs)
   Future<void> _log(String message) async {
+    print(message);
+
+    /* ORIGINAL FILE LOGGING (disabled to prevent Windows issues):
     try {
       final timestamp = DateTime.now().toIso8601String();
       final logMessage = '$timestamp: $message\n';
@@ -37,10 +40,11 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
         await logFile.writeAsString(logMessage, mode: FileMode.append);
       }
 
-      print(message); // Still print for development/Android
+      print(message);
     } catch (e) {
       print('Failed to write log: $e');
     }
+    */
   }
 
   Future<void> _loadSubscription() async {
@@ -68,6 +72,9 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
       await _log('   ✅ Subscription data received');
       await _log('   Data keys: ${data.keys.toList()}');
 
+      // ✅ FIX: Check if widget is still mounted before calling setState
+      if (!mounted) return;
+
       setState(() {
         _subscriptionData = data;
         _isLoading = false;
@@ -76,7 +83,9 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
       await _log('❌ Subscription load error: $e');
       await _log('   Stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
 
+      // ✅ Check mounted before accessing context or calling setState
       if (!mounted) return;
+
       final loc = AppLocalizations.of(context)!;
       setState(() {
         _error = loc.failedLoadSubscription;
