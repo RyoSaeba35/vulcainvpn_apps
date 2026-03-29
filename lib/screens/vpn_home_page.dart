@@ -12,6 +12,7 @@ import '../services/vpn_service_android.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class VpnHomePage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -315,7 +316,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
         if (success) {
           setState(() {
             _connectionState = 'connected';
-            // ⭐ CHANGED: Set start time
             _vpnStartTime = DateTime.now();
           });
           _startDisplayTimer();
@@ -347,7 +347,55 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
           final errorString = e.toString();
 
-          if (errorString.contains('Maximum active devices reached')) {
+          // NEW: Check for expired/no subscription FIRST
+          if (errorString.contains('No active subscription') ||
+              errorString.contains('Subscription is not active') ||
+              errorString.contains('Subscription expired')) {
+            title = 'Subscription Required';
+            message = 'Your VPN subscription has expired or is not active.\n\n'
+                    'Please renew your subscription to continue using the VPN.';
+
+            // Show dialog with action button to open website
+            showDialog(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: Text(title),
+                content: Text(message),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      // Open website purchase page
+                      final url = Uri.parse('https://vulcainvpn.com/'); // Change to your actual URL
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      } else {
+                        // Fallback if can't open browser
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Please visit vulcainvpn.com to renew'),
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: MyColors.myOrange,
+                    ),
+                    child: const Text('Renew Now'),
+                  ),
+                ],
+              ),
+            );
+            return; // Exit early
+          }
+          // Rest of existing error handling...
+          else if (errorString.contains('Maximum active devices reached')) {
             title = 'Device Limit Reached';
             message = 'You can only connect 3 devices at the same time.\n\n'
                     'Please disconnect another device and try again.';
@@ -396,7 +444,6 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
       await _vpnService.stopVpn();
 
-      // ⭐ CHANGED: Stop timer and reset
       _stopDisplayTimer();
 
       setState(() {
