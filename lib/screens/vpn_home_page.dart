@@ -347,14 +347,21 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
           final errorString = e.toString();
 
-          // NEW: Check for expired/no subscription FIRST
+          // 🐛 DEBUG: Print the actual error to console
+          print('❌ VPN Connection Error: $errorString');
+          if (e is PlatformException) {
+            print('   Code: ${e.code}');
+            print('   Message: ${e.message}');
+            print('   Details: ${e.details}');
+          }
+
+          // Check for expired/no subscription FIRST
           if (errorString.contains('No active subscription') ||
               errorString.contains('Subscription is not active') ||
               errorString.contains('Subscription expired')) {
             title = loc.subscriptionRequiredTitle;
             message = loc.subscriptionExpiredMessage;
 
-            // Show dialog with action button to open website
             showDialog(
               context: context,
               builder: (context) => AlertDialog(
@@ -368,12 +375,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
                   ElevatedButton(
                     onPressed: () async {
                       Navigator.pop(context);
-                      // Open website purchase page
-                      final url = Uri.parse('https://vulcainvpn.com/'); // Change to your actual URL
+                      final url = Uri.parse('https://vulcainvpn.com/');
                       if (await canLaunchUrl(url)) {
                         await launchUrl(url, mode: LaunchMode.externalApplication);
                       } else {
-                        // Fallback if can't open browser
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
@@ -391,30 +396,41 @@ class _VpnHomePageState extends State<VpnHomePage> {
                 ],
               ),
             );
-            return; // Exit early
+            return;
           }
-          // Rest of existing error handling...
+          // Check for device registration issues BEFORE permission errors
+          else if (errorString.contains('Device not registered') ||
+                  errorString.contains('not registered') ||
+                  errorString.contains('401') ||
+                  errorString.contains('403') ||
+                  errorString.contains('Unauthorized')) {
+            title = loc.notRegisteredTitle;
+            message = loc.notRegisteredMessage;
+          }
+          // Device limit errors
           else if (errorString.contains('Maximum active devices reached')) {
             title = loc.deviceLimitTitle;
             message = loc.deviceLimitMessage;
-          } else if (errorString.contains('Device not registered')) {
-            title = loc.notRegisteredTitle;
-            message = loc.notRegisteredMessage;
-          } else if (Platform.isAndroid &&
-              e is PlatformException &&
-              (e.code == 'NOTIFICATION_PERMISSION_DENIED' ||
-                  e.message?.contains('null') == true)) {
-            title = loc.permissionRequiredTitle;
-            message = loc.notificationPermissionMessage;
-          } else if (Platform.isAndroid &&
-              e is PlatformException &&
-              (e.code == 'VPN_PERMISSION_DENIED' || e.details == null)) {
-            title = loc.permissionRequiredTitle;
-            message = loc.vpnPermissionMessage;
-          } else if (errorString.contains('Failed to connect: 429')) {
+          }
+          else if (errorString.contains('Failed to connect: 429')) {
             title = loc.deviceLimitTitle;
             message = loc.deviceLimit429Message;
-          } else {
+          }
+          // Android permission errors - ONLY specific codes
+          else if (Platform.isAndroid && e is PlatformException) {
+            if (e.code == 'NOTIFICATION_PERMISSION_DENIED') {
+              title = loc.permissionRequiredTitle;
+              message = loc.notificationPermissionMessage;
+            } else if (e.code == 'VPN_PERMISSION_DENIED') {
+              title = loc.permissionRequiredTitle;
+              message = loc.vpnPermissionMessage;
+            } else {
+              // Unknown Android error - show the actual error
+              message = '${loc.connectionFailedMessage}\n\n'
+                      'Error: ${e.code}\n${e.message ?? errorString}';
+            }
+          }
+          else {
             message = '${loc.connectionFailedMessage}\n\n'
                     'Error: ${errorString.replaceAll('Exception: ', '')}';
           }

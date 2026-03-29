@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
+import 'secure_config_service.dart';  // ✅ FIX #3: Encrypted config files
 
 class WindowsVpnService extends VpnService {
   static Process? _singBoxProcess;
@@ -82,20 +83,28 @@ class WindowsVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       await _log('Config built successfully');
 
-      // Step 5: Write config to temp file
+      // Step 5: Write encrypted config to temp file
       await _log('exe dir: $_exeDir');
       await _log('sing-box path: $_singBoxPath');
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
 
       final tempDir = await getTemporaryDirectory();
-      final configFile = File('${tempDir.path}\\config.json');
-      await configFile.writeAsString(configJson);
-      await _log('config written to: ${configFile.path}');
+      final configPath = '${tempDir.path}\\config.json.enc';  // .enc extension
 
+      // ✅ FIX #3: Encrypt config before writing to disk
+      await SecureConfigService.writeEncryptedConfig(configPath, configJson);
+      await _log('encrypted config written to: $configPath');
+
+      // For sing-box, we need to decrypt it temporarily
+      // Decrypt to memory, write plaintext temporarily, start process, then delete
+      final plaintextPath = '${tempDir.path}\\config.json';
+      await File(plaintextPath).writeAsString(configJson);
+
+      // Step 6: Start sing-box process
       // Step 6: Start sing-box process
       _singBoxProcess = await Process.start(
         _singBoxPath,
-        ['run', '-c', configFile.path],
+        ['run', '-c', plaintextPath],  // Use temporary plaintext file
       );
       await _log('process started with pid: ${_singBoxProcess!.pid}');
 
@@ -106,9 +115,13 @@ class WindowsVpnService extends VpnService {
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box ERR: $data'));
 
-      _singBoxProcess!.exitCode.then((code) {
+      _singBoxProcess!.exitCode.then((code) async {
         _log('sing-box exited with code: $code');
-        configFile.delete();
+
+        // ✅ FIX #3: Securely delete config files on exit
+        await SecureConfigService.secureDelete(plaintextPath);
+        await SecureConfigService.secureDelete(configPath);
+
         if (_isConnected) {
           _isConnected = false;
           _statusController.add(false);

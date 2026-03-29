@@ -5,10 +5,15 @@ import 'package:http/http.dart' as http;
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
+import 'secure_config_service.dart';  // ✅ FIX #3: For future use if needed
 
 class AndroidVpnService extends VpnService {
   static const MethodChannel _platform = MethodChannel('com.vulcain.vpn/control');
   static const EventChannel _statusChannel = EventChannel('com.vulcain.vpn/status');
+
+  // ⭐ NOTE: Android passes config directly to native code via MethodChannel
+  // The native Android code should handle secure storage if needed
+  // For now, config is only in memory, not written to disk on Android
 
   @override
   Stream<bool> get statusStream =>
