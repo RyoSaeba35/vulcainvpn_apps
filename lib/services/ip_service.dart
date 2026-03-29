@@ -3,11 +3,11 @@ import 'dart:convert';
 
 class IpService {
   static Future<Map<String, dynamic>> getPublicIpAndLocation() async {
-    // Try multiple services in order
+    // ✅ SECURITY: Only use HTTPS services to prevent IP leaks
     final services = [
-      _tryIpApi,
-      _tryIpInfo,
-      _tryIpify,
+      _tryIpInfo,      // Primary: ipinfo.io (HTTPS, includes location)
+      _tryIpApiCo,     // Backup 1: ipapi.co (HTTPS, free tier with location)
+      _tryIpify,       // Backup 2: ipify.org (HTTPS, IP only)
     ];
 
     for (var service in services) {
@@ -25,26 +25,7 @@ class IpService {
     return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
   }
 
-  // Primary: ip-api.com (free, no rate limit for reasonable use)
-  static Future<Map<String, dynamic>> _tryIpApi() async {
-    final response = await http
-        .get(Uri.parse('http://ip-api.com/json/'))
-        .timeout(const Duration(seconds: 5));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      if (data['status'] == 'success') {
-        return {
-          'ip': data['query'] ?? 'Unknown',
-          'country': data['country'] ?? 'Unknown',
-          'countryCode': data['countryCode'] ?? 'Unknown',
-        };
-      }
-    }
-    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
-  }
-
-  // Backup 1: ipinfo.io
+  // Primary: ipinfo.io (HTTPS)
   static Future<Map<String, dynamic>> _tryIpInfo() async {
     final response = await http
         .get(Uri.parse('https://ipinfo.io/json'))
@@ -57,6 +38,23 @@ class IpService {
         'ip': data['ip'] ?? 'Unknown',
         'country': _countryCodeToName(countryCode),
         'countryCode': countryCode,
+      };
+    }
+    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
+  }
+
+  // Backup 1: ipapi.co (HTTPS, free tier with location)
+  static Future<Map<String, dynamic>> _tryIpApiCo() async {
+    final response = await http
+        .get(Uri.parse('https://ipapi.co/json/'))
+        .timeout(const Duration(seconds: 5));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return {
+        'ip': data['ip'] ?? 'Unknown',
+        'country': data['country_name'] ?? 'Unknown',
+        'countryCode': data['country_code'] ?? 'Unknown',
       };
     }
     return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
