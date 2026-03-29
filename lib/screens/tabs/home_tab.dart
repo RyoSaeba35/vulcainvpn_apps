@@ -142,7 +142,7 @@ class HomeTab extends StatelessWidget {
 
         // ─── BOTTOM SECTION: Button (Fixed Height) ─────────────────────
         Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(40),
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton(
