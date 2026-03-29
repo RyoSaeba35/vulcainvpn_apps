@@ -9,18 +9,21 @@ class ApiService {
   // ⭐ Get exe directory (same as vpn_service_windows.dart)
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
 
-  // ⭐ Log to file in exe directory
+  // ✅ FIX #4 PREVIEW: Simplified logging (file logging disabled to fix Windows issue)
   static Future<void> _log(String message) async {
+    // Only print to console - no file writing
+    // This prevents Windows file permission issues
+    print(message);
+
+    /* ORIGINAL FILE LOGGING (disabled for now):
     try {
       final timestamp = DateTime.now().toIso8601String();
       final logMessage = '$timestamp: $message\n';
 
-      // Write to exe directory on Windows (same location as VPN log)
       if (Platform.isWindows) {
         final logPath = '$_exeDir\\api_log.txt';
         final logFile = File(logPath);
 
-        // Rotate log if it gets too big
         if (await logFile.exists()) {
           final size = await logFile.length();
           if (size > 1024 * 1024) {
@@ -31,10 +34,11 @@ class ApiService {
         await logFile.writeAsString(logMessage, mode: FileMode.append);
       }
 
-      print(message); // Still print for development/Android
+      print(message);
     } catch (e) {
       print('Failed to write log: $e');
     }
+    */
   }
 
   // Generic authenticated request with auto-refresh
@@ -61,17 +65,22 @@ class ApiService {
 
     http.Response response;
 
-    if (method == 'GET') {
-      response = await http.get(Uri.parse('$baseUrl/$endpoint'), headers: headers);
-    } else {
-      response = await http.post(
-        Uri.parse('$baseUrl/$endpoint'),
-        headers: headers,
-        body: body != null ? json.encode(body) : null,
-      );
-    }
+    try {
+      if (method == 'GET') {
+        response = await http.get(Uri.parse('$baseUrl/$endpoint'), headers: headers);
+      } else {
+        response = await http.post(
+          Uri.parse('$baseUrl/$endpoint'),
+          headers: headers,
+          body: body != null ? json.encode(body) : null,
+        );
+      }
 
-    await _log('📥 Response: ${response.statusCode}');
+      await _log('📥 Response: ${response.statusCode}');
+    } catch (e) {
+      await _log('❌ Network error: $e');
+      throw Exception('Network error: $e');
+    }
 
     // Handle 401 - token might have expired between check and request
     if (response.statusCode == 401) {
@@ -85,15 +94,20 @@ class ApiService {
         await _log('   New token: ${newToken != null ? "EXISTS" : "NULL"}');
         headers['Authorization'] = 'Bearer $newToken';
 
-        response = method == 'GET'
-            ? await http.get(Uri.parse('$baseUrl/$endpoint'), headers: headers)
-            : await http.post(
-                Uri.parse('$baseUrl/$endpoint'),
-                headers: headers,
-                body: body != null ? json.encode(body) : null,
-              );
+        try {
+          response = method == 'GET'
+              ? await http.get(Uri.parse('$baseUrl/$endpoint'), headers: headers)
+              : await http.post(
+                  Uri.parse('$baseUrl/$endpoint'),
+                  headers: headers,
+                  body: body != null ? json.encode(body) : null,
+                );
 
-        await _log('   Retry response: ${response.statusCode}');
+          await _log('   Retry response: ${response.statusCode}');
+        } catch (e) {
+          await _log('   ❌ Retry failed: $e');
+          throw Exception('Retry failed: $e');
+        }
       } else {
         await _log('   ❌ Refresh failed, logging out...');
         await AuthService.logout();
@@ -103,7 +117,13 @@ class ApiService {
 
     if (response.statusCode == 200) {
       await _log('✅ Request successful');
-      return json.decode(response.body);
+      try {
+        return json.decode(response.body);
+      } catch (e) {
+        await _log('❌ JSON decode error: $e');
+        await _log('   Response body: ${response.body}');
+        throw Exception('Failed to parse response: $e');
+      }
     } else {
       await _log('❌ Request failed: ${response.statusCode}');
       await _log('   Body: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}');
