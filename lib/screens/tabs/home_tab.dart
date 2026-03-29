@@ -49,15 +49,15 @@ class HomeTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // ─── TOP SECTION: SVG (Fixed Height) ───────────────────────────
-        SizedBox(
-          height: MediaQuery.of(context).size.height * 0.35, // 35% of screen
+        // ─── TOP SECTION: SVG (Flexible) ───────────────────────────────
+        Expanded(
+          flex: 3, // Takes 3 parts of available space
           child: Center(
             child: SvgPicture.asset(
               connectionState == 'connected'
                   ? 'assets/icons/connected.svg'
                   : 'assets/icons/disconnected.svg',
-              height: MediaQuery.of(context).size.height * 0.35 * 0.9,
+              height: 200, // Fixed reasonable height instead of percentage
               colorFilter: connectionState == 'connecting'
                   ? const ColorFilter.mode(
                       MyColors.myOrange,
@@ -70,6 +70,7 @@ class HomeTab extends StatelessWidget {
 
         // ─── MIDDLE SECTION: Information (Flexible) ────────────────────
         Expanded(
+          flex: 2, // Takes 2 parts of available space
           child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -91,9 +92,12 @@ class HomeTab extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        '${loc.location}: $currentCountry${Platform.isWindows ? '' : ' ${_getFlag(currentCountryCode)}'} ',
-                        style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                      Flexible(
+                        child: Text(
+                          '${loc.location}: $currentCountry${Platform.isWindows ? '' : ' ${_getFlag(currentCountryCode)}'} ',
+                          style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                       if (isLoadingIp)
                         const SizedBox(
@@ -102,12 +106,14 @@ class HomeTab extends StatelessWidget {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       else
-                        Text(
-                          '($currentIp)',
-                          style: TextStyle(
-                            fontSize: 18,
-                            color: Colors.grey[700],
-                            fontWeight: FontWeight.bold,
+                        Flexible(
+                          child: Text(
+                            '($currentIp)',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.grey[700],
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                     ],
@@ -135,40 +141,41 @@ class HomeTab extends StatelessWidget {
         ),
 
         // ─── BOTTOM SECTION: Button (Fixed Height) ─────────────────────
-        Container(
-          height: 200,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: ElevatedButton(
-            onPressed: (connectionState == 'connecting' || connectionState == 'disconnecting')
-                ? null
-                : onToggleConnection,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: connectionState == 'connected'
-                  ? Colors.red
-                  : MyColors.myOrange,
-              disabledBackgroundColor: Colors.grey,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 60,
-                vertical: 22,
+        Padding(
+          padding: const EdgeInsets.all(20),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: (connectionState == 'connecting' || connectionState == 'disconnecting')
+                  ? null
+                  : onToggleConnection,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: connectionState == 'connected'
+                    ? Colors.red
+                    : MyColors.myOrange,
+                disabledBackgroundColor: Colors.grey,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 60,
+                  vertical: 22,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                elevation: 5,
               ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
-              elevation: 5,
-            ),
-            child: Text(
-              connectionState == 'connected'
-                  ? loc.disconnect
-                  : connectionState == 'connecting'
-                      ? loc.connectingBtn
-                      : connectionState == 'disconnecting'
-                          ? loc.disconnectingBtn  // Add this to your localizations
-                          : loc.connect,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+              child: Text(
+                connectionState == 'connected'
+                    ? loc.disconnect
+                    : connectionState == 'connecting'
+                        ? loc.connectingBtn
+                        : connectionState == 'disconnecting'
+                            ? loc.disconnectingBtn
+                            : loc.connect,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),

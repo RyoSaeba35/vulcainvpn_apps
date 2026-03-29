@@ -121,8 +121,10 @@ class MainActivity : FlutterActivity() {
         }
         val intent = VpnService.prepare(this)
         if (intent != null) {
+            Log.d(TAG, "🔐 Requesting VPN permission from user...")
             startActivityForResult(intent, VPN_REQUEST_CODE)
         } else {
+            Log.d(TAG, "✅ VPN permission already granted")
             pendingResult?.let {
                 startVpnInternal(it)
                 pendingResult = null
@@ -133,6 +135,8 @@ class MainActivity : FlutterActivity() {
 
     private fun startVpnInternal(result: MethodChannel.Result) {
         try {
+            Log.d(TAG, "🚀 Starting VPN service...")
+
             val intent = Intent(this, MyVpnService::class.java).apply {
                 putExtra("VPN_CONFIG", pendingConfig)
             }
@@ -143,21 +147,69 @@ class MainActivity : FlutterActivity() {
                 startService(intent)
             }
 
-            result.success(true)
+            // ✅ FIX: Add verification after starting
+            Handler(mainLooper).postDelayed({
+                verifyVpnStarted(result)
+            }, 800) // Wait 800ms for VPN to initialize
 
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Error starting VPN: ${e.message}", e)
             result.error("VPN_START_ERROR", e.message, null)
+        }
+    }
+
+    private fun verifyVpnStarted(result: MethodChannel.Result) {
+        val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+        val isRunning = prefs.getBoolean("is_running", false)
+
+        if (isRunning) {
+            Log.d(TAG, "✅ VPN verified as running")
+            result.success(true)
+        } else {
+            Log.w(TAG, "⚠️ VPN may not have started properly, retrying...")
+
+            // Retry once (for first-time permission scenario)
+            Handler(mainLooper).postDelayed({
+                val isRunningAfterRetry = prefs.getBoolean("is_running", false)
+
+                if (isRunningAfterRetry) {
+                    Log.d(TAG, "✅ VPN verified as running after retry check")
+                    result.success(true)
+                } else {
+                    Log.e(TAG, "❌ VPN failed to start even after retry")
+                    result.error(
+                        "VPN_START_FAILED",
+                        "VPN service did not start properly. Please try again.",
+                        null
+                    )
+                }
+            }, 1000) // Wait another second before giving up
         }
     }
 
     private fun stopVpnInternal(result: MethodChannel.Result) {
         try {
+            Log.d(TAG, "🛑 Stopping VPN service...")
             val intent = Intent(this, MyVpnService::class.java).apply {
                 action = "STOP_VPN"
             }
             startService(intent)
-            result.success(true)
+
+            // Verify stopped
+            Handler(mainLooper).postDelayed({
+                val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                val isRunning = prefs.getBoolean("is_running", false)
+
+                if (!isRunning) {
+                    Log.d(TAG, "✅ VPN verified as stopped")
+                } else {
+                    Log.w(TAG, "⚠️ VPN may still be running")
+                }
+                result.success(true)
+            }, 500)
+
         } catch (e: Exception) {
+            Log.e(TAG, "❌ Error stopping VPN: ${e.message}", e)
             result.error("VPN_STOP_ERROR", e.message, null)
         }
     }
@@ -168,12 +220,18 @@ class MainActivity : FlutterActivity() {
         if (requestCode == VPN_REQUEST_CODE) {
             pendingResult?.let { result ->
                 if (resultCode == Activity.RESULT_OK) {
-                    Handler(mainLooper).post {
+                    Log.d(TAG, "✅ VPN permission granted by user")
+
+                    // ✅ FIX: Add delay after permission grant
+                    // This ensures Android fully processes the permission
+                    Handler(mainLooper).postDelayed({
                         startVpnInternal(result)
                         pendingResult = null
                         pendingConfig = null
-                    }
+                    }, 400) // 400ms delay instead of immediate Handler.post
+
                 } else {
+                    Log.w(TAG, "❌ User denied VPN permission")
                     result.error(
                         "VPN_PERMISSION_DENIED",
                         "User denied VPN permission",
@@ -196,8 +254,10 @@ class MainActivity : FlutterActivity() {
         if (requestCode == NOTIFICATION_REQUEST_CODE) {
             if (grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "✅ Notification permission granted")
                 requestVpnPermission()
             } else {
+                Log.w(TAG, "❌ Notification permission denied")
                 pendingResult?.error(
                     "NOTIFICATION_PERMISSION_DENIED",
                     "Notification permission is required",
