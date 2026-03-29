@@ -24,7 +24,8 @@ class AppLocalizations {
       'disconnecting': 'Disconnecting...',
 
       // Home tab
-      'location': 'IP',
+      'location': 'location',
+      'ip': 'IP',
       'duration': 'Duration',
       'secure_connection': '🔒 Your connection is secure',
       'disconnect': 'Disconnect',
@@ -125,7 +126,8 @@ class AppLocalizations {
       'disconnecting': 'Déconnexion en cours...',
 
       // Home tab
-      'location': 'IP',
+      'location': 'localisation',
+      'ip': 'IP',
       'duration': 'Durée',
       'secure_connection': '🔒 Votre connexion est sécurisée',
       'disconnect': 'Déconnecter',
@@ -232,6 +234,7 @@ class AppLocalizations {
 
   // Home tab
   String get location => translate('location');
+  String get ip => translate('ip');
   String get duration => translate('duration');
   String get secureConnection => translate('secure_connection');
   String get disconnect => translate('disconnect');

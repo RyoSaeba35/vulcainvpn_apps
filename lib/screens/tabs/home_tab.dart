@@ -94,7 +94,7 @@ class HomeTab extends StatelessWidget {
                     children: [
                       Flexible(
                         child: Text(
-                          '${loc.location}: $currentCountry${Platform.isWindows ? '' : ' ${_getFlag(currentCountryCode)}'} ',
+                          '${loc.ip}: $currentCountry${Platform.isWindows ? '' : ' ${_getFlag(currentCountryCode)}'} ',
                           style: TextStyle(fontSize: 18, color: Colors.grey[700]),
                           textAlign: TextAlign.center,
                         ),

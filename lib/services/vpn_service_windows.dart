@@ -13,6 +13,10 @@ class WindowsVpnService extends VpnService {
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
+  // ✅ FIX #3: Track config file paths for cleanup
+  static String? _configPath;
+  static String? _plaintextPath;
+
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
 
@@ -89,22 +93,22 @@ class WindowsVpnService extends VpnService {
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
 
       final tempDir = await getTemporaryDirectory();
-      final configPath = '${tempDir.path}\\config.json.enc';  // .enc extension
+      _configPath = '${tempDir.path}\\config.json.enc';  // .enc extension
+      _plaintextPath = '${tempDir.path}\\config.json';
 
       // ✅ FIX #3: Encrypt config before writing to disk
-      await SecureConfigService.writeEncryptedConfig(configPath, configJson);
-      await _log('encrypted config written to: $configPath');
+      await SecureConfigService.writeEncryptedConfig(_configPath!, configJson);
+      await _log('encrypted config written to: $_configPath');
 
       // For sing-box, we need to decrypt it temporarily
       // Decrypt to memory, write plaintext temporarily, start process, then delete
-      final plaintextPath = '${tempDir.path}\\config.json';
-      await File(plaintextPath).writeAsString(configJson);
+      await File(_plaintextPath!).writeAsString(configJson);
 
       // Step 6: Start sing-box process
       // Step 6: Start sing-box process
       _singBoxProcess = await Process.start(
         _singBoxPath,
-        ['run', '-c', plaintextPath],  // Use temporary plaintext file
+        ['run', '-c', _plaintextPath!],  // Use temporary plaintext file
       );
       await _log('process started with pid: ${_singBoxProcess!.pid}');
 
@@ -119,8 +123,15 @@ class WindowsVpnService extends VpnService {
         _log('sing-box exited with code: $code');
 
         // ✅ FIX #3: Securely delete config files on exit
-        await SecureConfigService.secureDelete(plaintextPath);
-        await SecureConfigService.secureDelete(configPath);
+        if (_plaintextPath != null) {
+          await SecureConfigService.secureDelete(_plaintextPath!);
+        }
+        if (_configPath != null) {
+          await SecureConfigService.secureDelete(_configPath!);
+        }
+
+        _plaintextPath = null;
+        _configPath = null;
 
         if (_isConnected) {
           _isConnected = false;
@@ -162,6 +173,22 @@ class WindowsVpnService extends VpnService {
     // Kill by reference if we have it
     _singBoxProcess?.kill();
     _singBoxProcess = null;
+
+    // ✅ FIX #3: Explicitly clean up config files
+    try {
+      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
+        await SecureConfigService.secureDelete(_plaintextPath!);
+        await _log('Plaintext config deleted');
+      }
+      if (_configPath != null && await File(_configPath!).exists()) {
+        await SecureConfigService.secureDelete(_configPath!);
+        await _log('Encrypted config deleted');
+      }
+      _plaintextPath = null;
+      _configPath = null;
+    } catch (e) {
+      await _log('Config cleanup error: $e');
+    }
 
     // Also kill by name in case process was started in a previous session
     try {
