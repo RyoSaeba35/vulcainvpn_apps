@@ -5,6 +5,7 @@ import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
+import '../../l10n/app_localizations.dart';
 
 class SubscriptionTab extends StatefulWidget {
   const SubscriptionTab({super.key});
@@ -75,8 +76,10 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
       await _log('❌ Subscription load error: $e');
       await _log('   Stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
 
+      if (!mounted) return;
+      final loc = AppLocalizations.of(context)!;
       setState(() {
-        _error = 'Failed to load subscription info.';
+        _error = loc.failedLoadSubscription;
         _isLoading = false;
       });
     }
@@ -84,6 +87,8 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+
     if (_isLoading) {
       return const Center(
         child: CircularProgressIndicator(color: MyColors.myOrange),
@@ -103,8 +108,8 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
               onPressed: _loadSubscription,
               style: ElevatedButton.styleFrom(
                   backgroundColor: MyColors.myOrange),
-              child: const Text('Retry',
-                  style: TextStyle(color: Colors.white)),
+              child: Text(loc.retry,
+                  style: const TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -113,7 +118,7 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
 
     final sub = _subscriptionData?['subscription'];
     if (sub == null) {
-      return const Center(child: Text('No subscription data available.'));
+      return Center(child: Text(loc.noSubscriptionData));
     }
 
     final plan = sub['plan'] ?? {};
@@ -132,51 +137,51 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
         padding: const EdgeInsets.all(20),
         children: [
           InfoCard(
-            title: 'Subscription',
+            title: loc.subscription,
             icon: Icons.card_membership,
             children: [
               InfoRow(
-                label: 'Plan',
+                label: loc.plan,
                 value: '${plan['name'] ?? '-'} — ${plan['interval'] ?? '-'}',
               ),
               InfoRow(
-                label: 'Reference',
+                label: loc.reference,
                 value: sub['name'] ?? '-',
               ),
               InfoRow(
-                label: 'Status',
+                label: loc.status,
                 value: sub['status'] ?? '-',
                 valueColor:
                     sub['status'] == 'active' ? Colors.green : Colors.red,
               ),
               InfoRow(
-                label: 'Expires',
+                label: loc.expires,
                 value: expiresAt != null
                     ? '${expiresAt.day}/${expiresAt.month}/${expiresAt.year}'
                     : '-',
               ),
               InfoRow(
-                label: 'Days remaining',
-                value: '$daysRemaining days',
+                label: loc.daysRemaining,
+                value: '$daysRemaining ${loc.daysSuffix}',
                 valueColor: daysRemaining < 7 ? Colors.red : Colors.green,
               ),
             ],
           ),
           const SizedBox(height: 16),
           InfoCard(
-            title: 'Server',
+            title: loc.server,
             icon: Icons.dns_outlined,
             children: [
-              InfoRow(label: 'Location', value: server['name'] ?? '-'),
+              InfoRow(label: loc.location, value: server['name'] ?? '-'),
             ],
           ),
           const SizedBox(height: 16),
           InfoCard(
-            title: 'Devices',
+            title: loc.devices,
             icon: Icons.devices_outlined,
             children: [
               InfoRow(
-                label: 'Active connections',
+                label: loc.activeConnections,
                 value: '$activeDevices / $maxDevices',
                 valueColor:
                     activeDevices >= maxDevices ? Colors.red : Colors.green,

@@ -26,6 +26,7 @@ class SettingsTab extends StatelessWidget {
     showDialog(
       context: context,
       builder: (BuildContext context) {
+        final loc = AppLocalizations.of(context)!;
         return AlertDialog(
           title: Text(loc.language),
           content: Column(
@@ -55,6 +56,8 @@ class SettingsTab extends StatelessWidget {
   }
 
   Future<void> _showDebugInfo(BuildContext context) async {
+    final loc = AppLocalizations.of(context)!;
+
     // Show loading
     showDialog(
       context: context,
@@ -77,11 +80,11 @@ class SettingsTab extends StatelessWidget {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Row(
+            title: Row(
               children: [
-                Icon(Icons.bug_report, color: Colors.blue),
-                SizedBox(width: 8),
-                Text('Debug Info'),
+                const Icon(Icons.bug_report, color: Colors.blue),
+                const SizedBox(width: 8),
+                Text(loc.debugInfo),
               ],
             ),
             content: SingleChildScrollView(
@@ -89,22 +92,22 @@ class SettingsTab extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Email: ${email ?? "Not logged in"}'),
+                  Text('${loc.email}: ${email ?? loc.notLoggedIn}'),
                   const SizedBox(height: 8),
-                  Text('Device ID: ${deviceId ?? "Not registered"}'),
+                  Text('${loc.deviceId}: ${deviceId ?? loc.notRegistered}'),
                   const SizedBox(height: 8),
-                  Text('API Key: ${apiKey != null ? apiKey.substring(0, 16) : "Missing"}...'),
+                  Text('${loc.apiKey}: ${apiKey != null ? apiKey.substring(0, 16) : loc.missing}...'),
                   const Divider(),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Last VPN Config:',
-                    style: TextStyle(fontWeight: FontWeight.bold),
+                  Text(
+                    loc.lastVpnConfig,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   // ⭐ Show last config data
                   Text(
                     VpnConfigService.lastDebugInfo.isEmpty
-                      ? 'No config built yet. Try connecting first.'
+                      ? loc.noConfigYet
                       : VpnConfigService.lastDebugInfo,
                     style: const TextStyle(
                       fontSize: 11,
@@ -121,7 +124,7 @@ class SettingsTab extends StatelessWidget {
                     showDialog(
                       context: context,
                       builder: (context) => AlertDialog(
-                        title: const Text('Full Config'),
+                        title: Text(loc.fullConfig),
                         content: SingleChildScrollView(
                           child: SelectableText(
                             VpnConfigService.lastFullConfig,
@@ -134,17 +137,17 @@ class SettingsTab extends StatelessWidget {
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(context),
-                            child: const Text('Close'),
+                            child: Text(loc.close),
                           ),
                         ],
                       ),
                     );
                   },
-                  child: const Text('View Full Config'),
+                  child: Text(loc.viewFullConfig),
                 ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
+                child: Text(loc.close),
               ),
             ],
           ),
@@ -156,12 +159,12 @@ class SettingsTab extends StatelessWidget {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Error'),
-            content: Text('Failed to load debug info:\n$e'),
+            title: Text(loc.error),
+            content: Text('${loc.failedLoadDebug}\n$e'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
+                child: Text(loc.ok),
               ),
             ],
           ),
@@ -171,15 +174,17 @@ class SettingsTab extends StatelessWidget {
   }
 
   void _showLogoutDialog(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Logout'),
-        content: const Text('Are you sure you want to logout?'),
+        title: Text(loc.logout),
+        content: Text(loc.logoutConfirmation),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: Text(loc.cancel),
           ),
           TextButton(
             onPressed: () async {
@@ -189,9 +194,9 @@ class SettingsTab extends StatelessWidget {
               }
               onLogout();
             },
-            child: const Text(
-              'Logout',
-              style: TextStyle(color: Colors.red),
+            child: Text(
+              loc.logout,
+              style: const TextStyle(color: Colors.red),
             ),
           ),
         ],
@@ -201,18 +206,20 @@ class SettingsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final loc = AppLocalizations.of(context)!;
+
     return ListView(
       padding: const EdgeInsets.all(20),
       children: [
         InfoCard(
-          title: 'Account',
+          title: loc.account,
           icon: Icons.person_outline,
           children: [
             FutureBuilder<String?>(
               future: AuthService.getStoredEmail(),
               builder: (context, snapshot) {
                 return InfoRow(
-                  label: 'Email',
+                  label: loc.email,
                   value: snapshot.data ?? '—',
                 );
               },
@@ -221,7 +228,7 @@ class SettingsTab extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         InfoCard(
-          title: 'Preferences',
+          title: loc.preferences,
           icon: Icons.tune_outlined,
           children: [
             InkWell(
@@ -241,8 +248,8 @@ class SettingsTab extends StatelessWidget {
                       children: [
                         Text(
                           Localizations.localeOf(context).languageCode == 'fr'
-                              ? '🇫🇷 Français'
-                              : '🇬🇧 English',
+                              ? '🇫🇷 ${loc.french}'
+                              : '🇬🇧 ${loc.english}',
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
@@ -259,9 +266,9 @@ class SettingsTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 16),
-        // ⭐ Ajout de la section Debug
+        // ⭐ Debug section
         InfoCard(
-          title: 'Debug',
+          title: loc.debug,
           icon: Icons.bug_report,
           children: [
             InkWell(
@@ -273,14 +280,14 @@ class SettingsTab extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'Debug Info',
+                      loc.debugInfo,
                       style: TextStyle(color: Colors.grey[600], fontSize: 14),
                     ),
                     Row(
                       children: [
-                        const Text(
-                          'Show',
-                          style: TextStyle(
+                        Text(
+                          loc.show,
+                          style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
                           ),
@@ -302,9 +309,9 @@ class SettingsTab extends StatelessWidget {
           child: OutlinedButton.icon(
             onPressed: () => _showLogoutDialog(context),
             icon: const Icon(Icons.logout, color: Colors.red),
-            label: const Text(
-              'Logout',
-              style: TextStyle(
+            label: Text(
+              loc.logout,
+              style: const TextStyle(
                 color: Colors.red,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,

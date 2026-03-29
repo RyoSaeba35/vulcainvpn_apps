@@ -185,21 +185,20 @@ class _VpnHomePageState extends State<VpnHomePage> {
   }
 
   Future<void> _checkAdminRights() async {
+    final loc = AppLocalizations.of(context)!;
+
     try {
       final result = await Process.run('net', ['session'], runInShell: true);
       if (result.exitCode != 0 && mounted) {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Admin Rights Required'),
-            content: const Text(
-              'Managing VPN tunnels on Windows requires administrator privileges. '
-              'Please restart the app as administrator.',
-            ),
+            title: Text(loc.adminRequiredTitle),
+            content: Text(loc.adminRequiredMessage),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
+                child: Text(loc.ok),
               ),
             ],
           ),
@@ -306,6 +305,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
   }
 
   void _toggleConnection() async {
+    final loc = AppLocalizations.of(context)!;
+
     if (_connectionState == 'disconnected') {
       setState(() => _connectionState = 'connecting');
 
@@ -326,13 +327,12 @@ class _VpnHomePageState extends State<VpnHomePage> {
             showDialog(
               context: context,
               builder: (context) => AlertDialog(
-                title: const Text('Connection Failed'),
-                content: const Text(
-                    'Failed to start VPN. Please check permissions.'),
+                title: Text(loc.connectionFailedTitle),
+                content: Text(loc.connectionFailedMessage),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('OK'),
+                    child: Text(loc.ok),
                   ),
                 ],
               ),
@@ -342,7 +342,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
       } catch (e) {
         setState(() => _connectionState = 'disconnected');
         if (mounted) {
-          String title = 'Connection Error';
+          String title = loc.connectionErrorTitle;
           String message;
 
           final errorString = e.toString();
@@ -351,9 +351,8 @@ class _VpnHomePageState extends State<VpnHomePage> {
           if (errorString.contains('No active subscription') ||
               errorString.contains('Subscription is not active') ||
               errorString.contains('Subscription expired')) {
-            title = 'Subscription Required';
-            message = 'Your VPN subscription has expired or is not active.\n\n'
-                    'Please renew your subscription to continue using the VPN.';
+            title = loc.subscriptionRequiredTitle;
+            message = loc.subscriptionExpiredMessage;
 
             // Show dialog with action button to open website
             showDialog(
@@ -364,7 +363,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+                    child: Text(loc.cancel),
                   ),
                   ElevatedButton(
                     onPressed: () async {
@@ -387,7 +386,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: MyColors.myOrange,
                     ),
-                    child: const Text('Renew Now'),
+                    child: Text(loc.renewNow),
                   ),
                 ],
               ),
@@ -396,31 +395,27 @@ class _VpnHomePageState extends State<VpnHomePage> {
           }
           // Rest of existing error handling...
           else if (errorString.contains('Maximum active devices reached')) {
-            title = 'Device Limit Reached';
-            message = 'You can only connect 3 devices at the same time.\n\n'
-                    'Please disconnect another device and try again.';
+            title = loc.deviceLimitTitle;
+            message = loc.deviceLimitMessage;
           } else if (errorString.contains('Device not registered')) {
-            title = 'Not Registered';
-            message = 'Your device is not registered. Please logout and login again.';
+            title = loc.notRegisteredTitle;
+            message = loc.notRegisteredMessage;
           } else if (Platform.isAndroid &&
               e is PlatformException &&
               (e.code == 'NOTIFICATION_PERMISSION_DENIED' ||
                   e.message?.contains('null') == true)) {
-            title = 'Permission Required';
-            message = 'Notification permission is required for the VPN to stay active.\n\n'
-                    'Please allow it and try again.';
+            title = loc.permissionRequiredTitle;
+            message = loc.notificationPermissionMessage;
           } else if (Platform.isAndroid &&
               e is PlatformException &&
               (e.code == 'VPN_PERMISSION_DENIED' || e.details == null)) {
-            title = 'Permission Required';
-            message = 'VPN permission is required to protect your connection.\n\n'
-                    'Please allow it and try again.';
+            title = loc.permissionRequiredTitle;
+            message = loc.vpnPermissionMessage;
           } else if (errorString.contains('Failed to connect: 429')) {
-            title = 'Device Limit Reached';
-            message = 'Maximum number of active connections reached.\n\n'
-                    'Please disconnect another device first.';
+            title = loc.deviceLimitTitle;
+            message = loc.deviceLimit429Message;
           } else {
-            message = 'Failed to start VPN.\n\n'
+            message = '${loc.connectionFailedMessage}\n\n'
                     'Error: ${errorString.replaceAll('Exception: ', '')}';
           }
 
@@ -432,7 +427,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
+                  child: Text(loc.ok),
                 ),
               ],
             ),
@@ -490,21 +485,21 @@ class _VpnHomePageState extends State<VpnHomePage> {
         onTap: (index) => setState(() => _selectedIndex = index),
         selectedItemColor: MyColors.myOrange,
         unselectedItemColor: Colors.grey,
-        items: const [
+        items: [
           BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
+            icon: const Icon(Icons.home_outlined),
+            activeIcon: const Icon(Icons.home),
+            label: loc.navHome,
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.card_membership_outlined),
-            activeIcon: Icon(Icons.card_membership),
-            label: 'Subscription',
+            icon: const Icon(Icons.card_membership_outlined),
+            activeIcon: const Icon(Icons.card_membership),
+            label: loc.navSubscription,
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings_outlined),
-            activeIcon: Icon(Icons.settings),
-            label: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            activeIcon: const Icon(Icons.settings),
+            label: loc.navSettings,
           ),
         ],
       ),
