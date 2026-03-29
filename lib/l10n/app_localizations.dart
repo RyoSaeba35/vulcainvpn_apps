@@ -24,7 +24,7 @@ class AppLocalizations {
       'disconnecting': 'Disconnecting...',
 
       // Home tab
-      'location': 'Location',
+      'location': 'IP',
       'duration': 'Duration',
       'secure_connection': '🔒 Your connection is secure',
       'disconnect': 'Disconnect',
@@ -125,7 +125,7 @@ class AppLocalizations {
       'disconnecting': 'Déconnexion en cours...',
 
       // Home tab
-      'location': 'Localisation',
+      'location': 'IP',
       'duration': 'Durée',
       'secure_connection': '🔒 Votre connexion est sécurisée',
       'disconnect': 'Déconnecter',
