@@ -2,6 +2,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';  // ✅ FIX #7: For cryptographically secure random
 import 'package:device_info_plus/device_info_plus.dart';
 
 class AuthService {
@@ -235,9 +236,30 @@ class AuthService {
     }
   }
 
+  /// ✅ FIX #7: Generate cryptographically secure device ID
+  ///
+  /// Uses UUID v4 format with Random.secure() for unpredictable IDs
+  /// Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  /// - 4: version 4 (random)
+  /// - y: variant bits (8, 9, a, or b)
   static String _generateFallbackId() {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    return 'device_$timestamp';
+    final random = Random.secure();
+
+    // Generate 16 random bytes
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+
+    // Set version to 4 (random UUID)
+    bytes[6] = (bytes[6] & 0x0F) | 0x40;
+
+    // Set variant to RFC 4122
+    bytes[8] = (bytes[8] & 0x3F) | 0x80;
+
+    // Convert to UUID string format
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+           '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+           '${hex.substring(20, 32)}';
   }
 
   static Future<String> _getDeviceName() async {

@@ -60,8 +60,8 @@ class _SubscriptionTabState extends State<SubscriptionTab> {
       final token = await AuthService.getValidAccessToken();
       await _log('   Token available: ${token != null}');
       if (token != null) {
+        // ✅ FIX #4: Only log token length, NOT the token value
         await _log('   Token length: ${token.length}');
-        await _log('   Token preview: ${token.substring(0, token.length > 20 ? 20 : token.length)}...');
       } else {
         await _log('   ❌ No token found!');
       }

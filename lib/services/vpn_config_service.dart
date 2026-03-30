@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';  // ✅ FIX #5: For kDebugMode
 
 class VpnConfigService {
   static String lastDebugInfo = '';
@@ -11,31 +12,64 @@ class VpnConfigService {
     required Map<String, dynamic>? hysteria2,
     required Map<String, dynamic>? shadowsocks,
   }) {
-    // ⭐ Build debug string
-    StringBuffer debug = StringBuffer();
-    debug.writeln('📦 WireGuard:');
-    wireguard.forEach((key, value) {
-      String valStr = value.toString();
-      int len = valStr.length > 30 ? 30 : valStr.length;
-      debug.writeln('  $key: ${valStr.substring(0, len)}...');
-    });
-    debug.writeln('\n📦 Shadowsocks: ${shadowsocks != null ? "YES" : "NO"}');
-    debug.writeln('📦 Hysteria2: ${hysteria2 != null ? "YES" : "NO"}');
+    // ✅ FIX #5: Only populate debug info in debug builds (not in production)
+    if (kDebugMode) {
+      // ✅ FIX #4: Build debug string WITHOUT credential values
+      StringBuffer debug = StringBuffer();
+      debug.writeln('📦 WireGuard:');
+      wireguard.forEach((key, value) {
+        // ✅ Only log field names, NOT values (prevents credential leaks)
+        debug.writeln('  $key: [REDACTED]');
+      });
+      debug.writeln('\n📦 Shadowsocks: ${shadowsocks != null ? "YES" : "NO"}');
+      debug.writeln('📦 Hysteria2: ${hysteria2 != null ? "YES" : "NO"}');
 
-    lastDebugInfo = debug.toString();
+      lastDebugInfo = debug.toString();
 
-    print('🔧 Building config...');
-    print(lastDebugInfo);
+      print('🔧 Building config...');
+      print(lastDebugInfo);
+    }
 
-    // ⭐ Build the config
+    // ⭐ Build the config with REAL credentials
     final config = Platform.isWindows || Platform.isMacOS || Platform.isLinux
         ? _buildDesktopConfig(wireguard, hysteria2, shadowsocks)
         : _buildMobileConfig(wireguard, hysteria2, shadowsocks);
 
-    // ⭐ Store full config for debugging
-    lastFullConfig = toJsonString(config);
+    // ✅ FIX #5: Only store redacted config in debug builds
+    if (kDebugMode) {
+      // ✅ FIX #4: Store redacted JSON string for logging (doesn't modify original)
+      // Uses string replacement on JSON - original config object stays intact
+      try {
+        final configJson = toJsonString(config);
+        lastFullConfig = _redactCredentialsFromJson(configJson);
+      } catch (e) {
+        lastFullConfig = 'Error creating redacted config: $e';
+      }
+    }
 
+    // ✅ CRITICAL: Return ORIGINAL config with REAL credentials for VPN!
     return config;
+  }
+
+  // ✅ FIX #4: Redact credentials from JSON string (string-based, doesn't touch config object)
+  static String _redactCredentialsFromJson(String jsonString) {
+    // Pattern matches: "field_name": "base64_or_sensitive_value"
+    final sensitiveFields = [
+      'private_key',
+      'public_key',
+      'pre_shared_key',
+      'peer_public_key',
+      'password',
+    ];
+
+    String redacted = jsonString;
+    for (var field in sensitiveFields) {
+      // Replace: "private_key": "actual_value" → "private_key": "[REDACTED]"
+      final regex = RegExp('"$field"\\s*:\\s*"[^"]*"');
+      redacted = redacted.replaceAll(regex, '"$field": "[REDACTED]"');
+    }
+
+    return redacted;
   }
 
   // DESKTOP (Windows/macOS/Linux) - Uses "endpoints" array
@@ -45,7 +79,7 @@ class VpnConfigService {
     Map<String, dynamic>? ss,
   ) {
     return {
-      "log": {"level": "debug", "timestamp": true},
+      "log": {"level": "error", "timestamp": true},  // ✅ FIX #5: Error-only logging
       "dns": {
         "servers": [
           {"type": "udp", "tag": "dns-direct", "server": "223.5.5.5"},
@@ -184,7 +218,7 @@ class VpnConfigService {
     Map<String, dynamic>? ss,
   ) {
     return {
-      "log": {"level": "info", "timestamp": true},
+      "log": {"level": "error", "timestamp": true},  // ✅ FIX #5: Error-only logging
       "dns": {
         "servers": [
           {"tag": "dns-direct", "address": "223.5.5.5", "detour": "direct"},

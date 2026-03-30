@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math';  // ✅ FIX #6: For Random.secure()
 import 'package:encrypt/encrypt.dart' as encrypt;
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -162,7 +163,13 @@ class SecureConfigService {
     }
   }
 
-  /// Securely delete config file (overwrite with random data before deleting)
+  /// Securely delete config file using DoD 5220.22-M standard
+  ///
+  /// Uses 3-pass overwrite:
+  /// - Pass 1: Write 0x00 (zeros)
+  /// - Pass 2: Write 0xFF (ones)
+  /// - Pass 3: Write cryptographically secure random data
+  /// - Finally: Delete file and verify deletion
   ///
   /// @param filePath File to securely delete
   static Future<void> secureDelete(String filePath) async {
@@ -176,17 +183,35 @@ class SecureConfigService {
       // Get file size
       final fileSize = await file.length();
 
-      // Overwrite with random data (3 passes for extra security)
-      for (int pass = 0; pass < 3; pass++) {
-        final randomData = Uint8List(fileSize);
-        for (int i = 0; i < fileSize; i++) {
-          randomData[i] = DateTime.now().microsecondsSinceEpoch % 256;
-        }
-        await file.writeAsBytes(randomData);
+      // ✅ FIX #6: DoD 5220.22-M standard 3-pass overwrite
+
+      // Pass 1: Write zeros (0x00)
+      final zerosData = Uint8List(fileSize);
+      // Uint8List is already initialized with zeros
+      await file.writeAsBytes(zerosData);
+
+      // Pass 2: Write ones (0xFF)
+      final onesData = Uint8List(fileSize);
+      for (int i = 0; i < fileSize; i++) {
+        onesData[i] = 0xFF;
       }
+      await file.writeAsBytes(onesData);
+
+      // Pass 3: Write cryptographically secure random data
+      final random = Random.secure();  // ✅ FIX #6: Secure random generator
+      final randomData = Uint8List(fileSize);
+      for (int i = 0; i < fileSize; i++) {
+        randomData[i] = random.nextInt(256);
+      }
+      await file.writeAsBytes(randomData);
 
       // Finally delete the file
       await file.delete();
+
+      // ✅ FIX #6: Verify deletion was successful
+      if (await file.exists()) {
+        throw Exception('File still exists after deletion: $filePath');
+      }
 
       print('✅ Config file securely deleted: $filePath');
     } catch (e) {

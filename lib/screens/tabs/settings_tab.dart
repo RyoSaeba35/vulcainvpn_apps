@@ -6,7 +6,6 @@ import '../../services/auth_service.dart';
 import '../../services/vpn_service.dart';
 import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
-import '../../services/vpn_config_service.dart';
 
 class SettingsTab extends StatelessWidget {
   final VoidCallback onLogout;
@@ -53,124 +52,6 @@ class SettingsTab extends StatelessWidget {
         );
       },
     );
-  }
-
-  Future<void> _showDebugInfo(BuildContext context) async {
-    final loc = AppLocalizations.of(context)!;
-
-    // Show loading
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-
-    try {
-      final email = await AuthService.getStoredEmail();
-      final deviceId = await AuthService.getDeviceId();
-      final apiKey = await AuthService.getApiKey();
-
-      // Close loading
-      if (context.mounted) Navigator.pop(context);
-
-      // Show debug info
-      if (context.mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Row(
-              children: [
-                const Icon(Icons.bug_report, color: Colors.blue),
-                const SizedBox(width: 8),
-                Text(loc.debugInfo),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('${loc.email}: ${email ?? loc.notLoggedIn}'),
-                  const SizedBox(height: 8),
-                  Text('${loc.deviceId}: ${deviceId ?? loc.notRegistered}'),
-                  const SizedBox(height: 8),
-                  Text('${loc.apiKey}: ${apiKey != null ? apiKey.substring(0, 16) : loc.missing}...'),
-                  const Divider(),
-                  const SizedBox(height: 8),
-                  Text(
-                    loc.lastVpnConfig,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  // ⭐ Show last config data
-                  Text(
-                    VpnConfigService.lastDebugInfo.isEmpty
-                      ? loc.noConfigYet
-                      : VpnConfigService.lastDebugInfo,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              if (VpnConfigService.lastFullConfig.isNotEmpty)
-                TextButton(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => AlertDialog(
-                        title: Text(loc.fullConfig),
-                        content: SingleChildScrollView(
-                          child: SelectableText(
-                            VpnConfigService.lastFullConfig,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: Text(loc.close),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                  child: Text(loc.viewFullConfig),
-                ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(loc.close),
-              ),
-            ],
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) Navigator.pop(context);
-      if (context.mounted) {
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(loc.error),
-            content: Text('${loc.failedLoadDebug}\n$e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text(loc.ok),
-              ),
-            ],
-          ),
-        );
-      }
-    }
   }
 
   void _showLogoutDialog(BuildContext context) {
@@ -265,43 +146,7 @@ class SettingsTab extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        // ⭐ Debug section
-        InfoCard(
-          title: loc.debug,
-          icon: Icons.bug_report,
-          children: [
-            InkWell(
-              onTap: () => _showDebugInfo(context),
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      loc.debugInfo,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
-                    ),
-                    Row(
-                      children: [
-                        Text(
-                          loc.show,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.chevron_right, color: Colors.grey[400]),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
+        // ✅ FIX #5: Debug section completely removed for production
         const SizedBox(height: 32),
         SizedBox(
           width: double.infinity,
