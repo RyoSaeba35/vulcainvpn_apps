@@ -396,7 +396,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   // ✅ UPDATED: Extract renewal URL from error string
   void _showSubscriptionExpiredDialog(AppLocalizations loc, String errorString) {
     // Try to extract renewal URL from error (format: "error|renewal_url:https://...")
-    String renewalUrl = 'https://vulcainvpn.com/pricing';
+    String renewalUrl = 'https://www.vulcainvpn.com/dashboard';
     if (errorString.contains('renewal_url:')) {
       try {
         final urlPart = errorString.split('renewal_url:')[1];
