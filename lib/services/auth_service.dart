@@ -29,13 +29,38 @@ class AuthService {
 
   // Login — stores both access and refresh tokens
   static Future<bool> login(String email, String password) async {
+    // ✅ FIX #14: Validate inputs before sending
+    if (email.isEmpty || password.isEmpty) {
+      print('❌ Empty credentials');
+      return false;
+    }
+
+    // ✅ FIX #14: Basic email validation
+    final emailRegex = RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$');
+    if (!emailRegex.hasMatch(email)) {
+      print('❌ Invalid email format');
+      return false;
+    }
+
+    // ✅ FIX #14: Password length check
+    if (password.length < 6) {
+      print('❌ Password too short (minimum 6 characters)');
+      return false;
+    }
+
+    // ✅ FIX #14: Sanitize email (remove whitespace, lowercase)
+    final sanitizedEmail = email.trim().toLowerCase();
+
     try {
       // Step 1 — Login and get tokens
       // ✅ FIX #10: Add timeout to auth requests
       final response = await http.post(
         Uri.parse('$_baseUrl/login'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'email': email, 'password': password}),
+        body: json.encode({
+          'email': sanitizedEmail,  // ✅ FIX #14: Use sanitized email
+          'password': password,
+        }),
       ).timeout(_authTimeout);
 
       if (response.statusCode != 200) return false;
@@ -227,7 +252,12 @@ class AuthService {
       // ✅ FIX #10: Always clear local storage even if backend call fails
     }
 
+    // ✅ FIX #13: Comprehensive session cleanup
     await _storage.deleteAll();
+
+    // ✅ FIX #13: Note - ApiService.clearRateLimitCache() should also be called
+    // This should be done at the app layer to avoid circular dependencies
+    // Example: await AuthService.logout(); ApiService.clearRateLimitCache();
   }
 
   // DEPRECATED: Use getValidAccessToken() instead
