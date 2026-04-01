@@ -78,7 +78,7 @@ class WindowsVpnService extends VpnService {
         final errorData = json.decode(response.body);
         throw Exception(
           '${errorData['error'] ?? 'No active subscription'}|'
-          'renewal_url:${errorData['renewal_url'] ?? 'https://vulcainvpn.com/pricing'}'
+          'renewal_url:${errorData['renewal_url'] ?? 'https://www.vulcainvpn.com/dashboard'}'
         );
       }
 
