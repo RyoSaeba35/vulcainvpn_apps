@@ -11,6 +11,10 @@ class ApiService {
   static const Duration _requestTimeout = Duration(seconds: 15);  // API requests
   static const Duration _connectionTimeout = Duration(seconds: 10);  // Initial connection
 
+  // ✅ FIX #11: API rate limiting protection
+  static final Map<String, DateTime> _lastRequestTimes = {};
+  static const Duration _minRequestInterval = Duration(milliseconds: 500);  // 500ms between requests
+
   // ⭐ Get exe directory (same as vpn_service_windows.dart)
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
 
@@ -46,12 +50,78 @@ class ApiService {
     */
   }
 
+  // ✅ FIX #11: Check and enforce rate limiting
+  static Future<void> _checkRateLimit(String endpoint) async {
+    // ✅ FIX #11: Clean up old entries (prevent unbounded growth)
+    if (_lastRequestTimes.length > 50) {
+      final now = DateTime.now();
+      _lastRequestTimes.removeWhere((key, value) =>
+        now.difference(value) > Duration(minutes: 5)
+      );
+    }
+
+    final lastTime = _lastRequestTimes[endpoint];
+
+    if (lastTime != null) {
+      final timeSinceLastRequest = DateTime.now().difference(lastTime);
+
+      if (timeSinceLastRequest < _minRequestInterval) {
+        final waitTime = _minRequestInterval - timeSinceLastRequest;
+        await _log('⏱️ Rate limit: waiting ${waitTime.inMilliseconds}ms for $endpoint');
+        await Future.delayed(waitTime);
+      }
+    }
+
+    // Update last request time
+    _lastRequestTimes[endpoint] = DateTime.now();
+  }
+
+  // ✅ FIX #12: Sanitize error messages to prevent information leakage
+  static String _sanitizeError(dynamic error) {
+    final errorStr = error.toString();
+
+    // Remove file paths (Windows and Unix style)
+    var sanitized = errorStr.replaceAll(
+      RegExp(r'[A-Z]:\\[^\s]+\.dart|\/[^\s]+\.dart'),
+      '[file]'
+    );
+
+    // Remove IP addresses
+    sanitized = sanitized.replaceAll(
+      RegExp(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b'),
+      '[ip]'
+    );
+
+    // Remove tokens/keys (base64-like strings, 20+ chars)
+    sanitized = sanitized.replaceAll(
+      RegExp(r'[A-Za-z0-9+/]{20,}={0,2}'),
+      '[token]'
+    );
+
+    // Remove Bearer tokens specifically
+    sanitized = sanitized.replaceAll(
+      RegExp(r'Bearer\s+[A-Za-z0-9\-._~+/]+'),
+      'Bearer [token]'
+    );
+
+    // Remove URLs with sensitive info
+    sanitized = sanitized.replaceAll(
+      RegExp(r'https?://[^\s]+'),
+      '[url]'
+    );
+
+    return sanitized;
+  }
+
   // Generic authenticated request with auto-refresh
   static Future<Map<String, dynamic>> _makeAuthenticatedRequest(
     String endpoint, {
     String method = 'GET',
     Map<String, dynamic>? body,
   }) async {
+    // ✅ FIX #11: Enforce rate limiting before making request
+    await _checkRateLimit(endpoint);
+
     await _log('📊 Making $method request to: $endpoint');
 
     final token = await AuthService.getValidAccessToken();
@@ -88,11 +158,15 @@ class ApiService {
       await _log('📥 Response: ${response.statusCode}');
     } on TimeoutException catch (e) {
       // ✅ FIX #9: Handle timeout specifically
-      await _log('❌ Request timeout after ${_requestTimeout.inSeconds}s: $e');
+      // ✅ FIX #12: Sanitize error message
+      final sanitized = _sanitizeError(e);
+      await _log('❌ Request timeout after ${_requestTimeout.inSeconds}s: $sanitized');
       throw Exception('Request timeout - please check your connection');
     } catch (e) {
-      await _log('❌ Network error: $e');
-      throw Exception('Network error: $e');
+      // ✅ FIX #12: Sanitize error message
+      final sanitized = _sanitizeError(e);
+      await _log('❌ Network error: $sanitized');
+      throw Exception('Network error: $sanitized');
     }
 
     // Handle 401 - token might have expired between check and request
@@ -123,11 +197,15 @@ class ApiService {
           await _log('   Retry response: ${response.statusCode}');
         } on TimeoutException catch (e) {
           // ✅ FIX #9: Handle retry timeout
-          await _log('   ❌ Retry timeout after ${_requestTimeout.inSeconds}s: $e');
+          // ✅ FIX #12: Sanitize error message
+          final sanitized = _sanitizeError(e);
+          await _log('   ❌ Retry timeout after ${_requestTimeout.inSeconds}s: $sanitized');
           throw Exception('Retry timeout - please check your connection');
         } catch (e) {
-          await _log('   ❌ Retry failed: $e');
-          throw Exception('Retry failed: $e');
+          // ✅ FIX #12: Sanitize error message
+          final sanitized = _sanitizeError(e);
+          await _log('   ❌ Retry failed: $sanitized');
+          throw Exception('Retry failed: $sanitized');
         }
       } else {
         await _log('   ❌ Refresh failed, logging out...');
@@ -141,13 +219,19 @@ class ApiService {
       try {
         return json.decode(response.body);
       } catch (e) {
-        await _log('❌ JSON decode error: $e');
-        await _log('   Response body: ${response.body}');
-        throw Exception('Failed to parse response: $e');
+        // ✅ FIX #12: Sanitize error and response body
+        final sanitized = _sanitizeError(e);
+        final sanitizedBody = _sanitizeError(response.body);
+        await _log('❌ JSON decode error: $sanitized');
+        await _log('   Response body: $sanitizedBody');
+        throw Exception('Failed to parse response: $sanitized');
       }
     } else {
+      // ✅ FIX #12: Sanitize response body before logging
+      final bodyPreview = response.body.substring(0, response.body.length > 200 ? 200 : response.body.length);
+      final sanitizedBody = _sanitizeError(bodyPreview);
       await _log('❌ Request failed: ${response.statusCode}');
-      await _log('   Body: ${response.body.substring(0, response.body.length > 200 ? 200 : response.body.length)}');
+      await _log('   Body: $sanitizedBody');
       throw Exception('API request failed: ${response.statusCode}');
     }
   }
@@ -164,6 +248,9 @@ class ApiService {
 
   // Authenticated POST with api_key (for VPN operations)
   static Future<Map<String, dynamic>> postWithApiKey(String endpoint) async {
+    // ✅ FIX #11: Enforce rate limiting
+    await _checkRateLimit(endpoint);
+
     final apiKey = await AuthService.getApiKey();
     if (apiKey == null) throw Exception('No API key found');
 
@@ -186,12 +273,23 @@ class ApiService {
       }
     } on TimeoutException catch (e) {
       // ✅ FIX #9: Handle API key request timeout
+      // ✅ FIX #12: Sanitize error message
+      final sanitized = _sanitizeError(e);
+      await _log('❌ API key request timeout: $sanitized');
       throw Exception('Request timeout - please check your connection');
+    } catch (e) {
+      // ✅ FIX #12: Sanitize unexpected errors
+      final sanitized = _sanitizeError(e);
+      await _log('❌ API key request error: $sanitized');
+      throw Exception('Request failed: $sanitized');
     }
   }
 
   // Fetch status (uses API key for device-specific status)
   static Future<Map<String, dynamic>> fetchStatus() async {
+    // ✅ FIX #11: Enforce rate limiting
+    await _checkRateLimit('status');
+
     final apiKey = await AuthService.getApiKey();
     if (apiKey == null) throw Exception('No API key found');
 
@@ -212,7 +310,20 @@ class ApiService {
       }
     } on TimeoutException catch (e) {
       // ✅ FIX #9: Handle status request timeout
+      // ✅ FIX #12: Sanitize error message
+      final sanitized = _sanitizeError(e);
+      await _log('❌ Status request timeout: $sanitized');
       throw Exception('Request timeout - please check your connection');
+    } catch (e) {
+      // ✅ FIX #12: Sanitize unexpected errors
+      final sanitized = _sanitizeError(e);
+      await _log('❌ Status request error: $sanitized');
+      throw Exception('Failed to load status: $sanitized');
     }
+  }
+
+  // ✅ FIX #11: Clear rate limit cache (call on logout)
+  static void clearRateLimitCache() {
+    _lastRequestTimes.clear();
   }
 }
