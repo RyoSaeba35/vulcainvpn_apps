@@ -21,9 +21,13 @@ class AuthService {
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
+      resetOnError: true,  // ✅ FIX #15: Clear on corruption
     ),
     wOptions: WindowsOptions(
       useBackwardCompatibility: true,
+    ),
+    iOptions: IOSOptions(
+      accessibility: KeychainAccessibility.first_unlock,  // ✅ FIX #15: Better security
     ),
   );
 

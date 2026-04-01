@@ -2,6 +2,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';  // ✅ FIX #9: For TimeoutException
+import 'package:flutter/foundation.dart';  // ✅ FIX #15: For kDebugMode
 import 'auth_service.dart';
 
 class ApiService {
@@ -15,14 +16,18 @@ class ApiService {
   static final Map<String, DateTime> _lastRequestTimes = {};
   static const Duration _minRequestInterval = Duration(milliseconds: 500);  // 500ms between requests
 
+  // ✅ FIX #15: User-Agent header for API requests
+  static const String _userAgent = 'VulcainVPN/1.0';
+
   // ⭐ Get exe directory (same as vpn_service_windows.dart)
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
 
   // ✅ FIX #4 PREVIEW: Simplified logging (file logging disabled to fix Windows issue)
   static Future<void> _log(String message) async {
-    // Only print to console - no file writing
-    // This prevents Windows file permission issues
-    print(message);
+    // ✅ FIX #15: Only log in debug mode for production security
+    if (kDebugMode) {
+      print(message);
+    }
 
     /* ORIGINAL FILE LOGGING (disabled for now):
     try {
@@ -113,6 +118,11 @@ class ApiService {
     return sanitized;
   }
 
+  // ✅ FIX #15: Generate unique request ID for debugging/correlation
+  static String _generateRequestId() {
+    return DateTime.now().millisecondsSinceEpoch.toString();
+  }
+
   // Generic authenticated request with auto-refresh
   static Future<Map<String, dynamic>> _makeAuthenticatedRequest(
     String endpoint, {
@@ -122,20 +132,23 @@ class ApiService {
     // ✅ FIX #11: Enforce rate limiting before making request
     await _checkRateLimit(endpoint);
 
-    await _log('📊 Making $method request to: $endpoint');
+    // ✅ FIX #15: Generate request ID for correlation
+    final requestId = _generateRequestId();
+    await _log('📊 [$requestId] Making $method request to: $endpoint');
 
     final token = await AuthService.getValidAccessToken();
 
     if (token == null) {
-      await _log('❌ No valid authentication token');
+      await _log('❌ [$requestId] No valid authentication token');
       throw Exception('No valid authentication token');
     }
 
-    await _log('✅ Token found (${token.length} chars)');
+    await _log('✅ [$requestId] Token found (${token.length} chars)');
 
     final headers = {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
+      'User-Agent': _userAgent,  // ✅ FIX #15: Professional User-Agent header
     };
 
     http.Response response;
@@ -155,30 +168,30 @@ class ApiService {
         ).timeout(_requestTimeout);
       }
 
-      await _log('📥 Response: ${response.statusCode}');
+      await _log('📥 [$requestId] Response: ${response.statusCode}');
     } on TimeoutException catch (e) {
       // ✅ FIX #9: Handle timeout specifically
       // ✅ FIX #12: Sanitize error message
       final sanitized = _sanitizeError(e);
-      await _log('❌ Request timeout after ${_requestTimeout.inSeconds}s: $sanitized');
+      await _log('❌ [$requestId] Request timeout after ${_requestTimeout.inSeconds}s: $sanitized');
       throw Exception('Request timeout - please check your connection');
     } catch (e) {
       // ✅ FIX #12: Sanitize error message
       final sanitized = _sanitizeError(e);
-      await _log('❌ Network error: $sanitized');
+      await _log('❌ [$requestId] Network error: $sanitized');
       throw Exception('Network error: $sanitized');
     }
 
     // Handle 401 - token might have expired between check and request
     if (response.statusCode == 401) {
-      await _log('⚠️  Token expired (401), attempting refresh...');
+      await _log('⚠️ [$requestId] Token expired (401), attempting refresh...');
       final refreshed = await AuthService.refreshAccessToken();
-      await _log('   Refresh result: ${refreshed ? "SUCCESS" : "FAILED"}');
+      await _log('   [$requestId] Refresh result: ${refreshed ? "SUCCESS" : "FAILED"}');
 
       if (refreshed) {
         // Retry with new token
         final newToken = await AuthService.getValidAccessToken();
-        await _log('   New token: ${newToken != null ? "EXISTS" : "NULL"}');
+        await _log('   [$requestId] New token: ${newToken != null ? "EXISTS" : "NULL"}');
         headers['Authorization'] = 'Bearer $newToken';
 
         try {
@@ -194,44 +207,44 @@ class ApiService {
                   body: body != null ? json.encode(body) : null,
                 ).timeout(_requestTimeout);
 
-          await _log('   Retry response: ${response.statusCode}');
+          await _log('   [$requestId] Retry response: ${response.statusCode}');
         } on TimeoutException catch (e) {
           // ✅ FIX #9: Handle retry timeout
           // ✅ FIX #12: Sanitize error message
           final sanitized = _sanitizeError(e);
-          await _log('   ❌ Retry timeout after ${_requestTimeout.inSeconds}s: $sanitized');
+          await _log('   ❌ [$requestId] Retry timeout after ${_requestTimeout.inSeconds}s: $sanitized');
           throw Exception('Retry timeout - please check your connection');
         } catch (e) {
           // ✅ FIX #12: Sanitize error message
           final sanitized = _sanitizeError(e);
-          await _log('   ❌ Retry failed: $sanitized');
+          await _log('   ❌ [$requestId] Retry failed: $sanitized');
           throw Exception('Retry failed: $sanitized');
         }
       } else {
-        await _log('   ❌ Refresh failed, logging out...');
+        await _log('   ❌ [$requestId] Refresh failed, logging out...');
         await AuthService.logout();
         throw Exception('Session expired - please login again');
       }
     }
 
     if (response.statusCode == 200) {
-      await _log('✅ Request successful');
+      await _log('✅ [$requestId] Request successful');
       try {
         return json.decode(response.body);
       } catch (e) {
         // ✅ FIX #12: Sanitize error and response body
         final sanitized = _sanitizeError(e);
         final sanitizedBody = _sanitizeError(response.body);
-        await _log('❌ JSON decode error: $sanitized');
-        await _log('   Response body: $sanitizedBody');
+        await _log('❌ [$requestId] JSON decode error: $sanitized');
+        await _log('   [$requestId] Response body: $sanitizedBody');
         throw Exception('Failed to parse response: $sanitized');
       }
     } else {
       // ✅ FIX #12: Sanitize response body before logging
       final bodyPreview = response.body.substring(0, response.body.length > 200 ? 200 : response.body.length);
       final sanitizedBody = _sanitizeError(bodyPreview);
-      await _log('❌ Request failed: ${response.statusCode}');
-      await _log('   Body: $sanitizedBody');
+      await _log('❌ [$requestId] Request failed: ${response.statusCode}');
+      await _log('   [$requestId] Body: $sanitizedBody');
       throw Exception('API request failed: ${response.statusCode}');
     }
   }
@@ -261,6 +274,7 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'X-Api-Key': apiKey,
+          'User-Agent': _userAgent,  // ✅ FIX #15: Professional User-Agent header
         },
       ).timeout(_requestTimeout);
 
@@ -300,6 +314,7 @@ class ApiService {
         headers: {
           'Content-Type': 'application/json',
           'X-Api-Key': apiKey,
+          'User-Agent': _userAgent,  // ✅ FIX #15: Professional User-Agent header
         },
       ).timeout(_requestTimeout);
 
