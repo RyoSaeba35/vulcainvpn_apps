@@ -45,7 +45,7 @@ class AppLocalizations {
 
       // Error dialogs - Subscription
       'subscription_required_title': 'Subscription Required',
-      'subscription_expired_message': 'Your VPN subscription has expired or is not active.\n\nPlease renew your subscription to continue using the VPN.',
+      'subscription_expired_message': 'Your VPN subscription has expired.\n\nPlease renew your subscription to continue using the VPN.',
       'renew_now': 'Renew Now',
 
       // Error dialogs - Device limit
@@ -147,7 +147,7 @@ class AppLocalizations {
 
       // Error dialogs - Subscription
       'subscription_required_title': 'Abonnement Requis',
-      'subscription_expired_message': 'Votre abonnement VPN a expiré ou n\'est pas actif.\n\nVeuillez renouveler votre abonnement pour continuer à utiliser le VPN.',
+      'subscription_expired_message': 'Votre abonnement VPN a expiré.\n\nVeuillez renouveler votre abonnement pour continuer à utiliser le VPN.',
       'renew_now': 'Renouveler Maintenant',
 
       // Error dialogs - Device limit

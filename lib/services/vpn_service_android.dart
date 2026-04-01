@@ -5,15 +5,10 @@ import 'package:http/http.dart' as http;
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
-import 'secure_config_service.dart';  // ✅ FIX #3: For future use if needed
 
 class AndroidVpnService extends VpnService {
   static const MethodChannel _platform = MethodChannel('com.vulcain.vpn/control');
   static const EventChannel _statusChannel = EventChannel('com.vulcain.vpn/status');
-
-  // ⭐ NOTE: Android passes config directly to native code via MethodChannel
-  // The native Android code should handle secure storage if needed
-  // For now, config is only in memory, not written to disk on Android
 
   @override
   Stream<bool> get statusStream =>
@@ -39,20 +34,50 @@ class AndroidVpnService extends VpnService {
         headers: {'X-Api-Key': apiKey},
       );
 
+      // ✅ NEW: Handle different status codes with proper error messages
+      if (response.statusCode == 401) {
+        print('❌ Unauthorized (401)');
+        final errorData = json.decode(response.body);
+        throw Exception(errorData['message'] ?? 'Device not registered. Please login again.');
+      }
+
+      if (response.statusCode == 403) {
+        print('❌ Forbidden - No active subscription (403)');
+        final errorData = json.decode(response.body);
+        // Include renewal URL in exception for frontend to parse
+        throw Exception(
+          '${errorData['error'] ?? 'No active subscription'}|'
+          'renewal_url:${errorData['renewal_url'] ?? 'https://www.vulcainvpn.com/dashboard'}'
+        );
+      }
+
       if (response.statusCode == 429) {
-        print('❌ Maximum devices reached');
-        throw Exception('Maximum active devices reached. Please disconnect another device first.');
+        print('❌ Too Many Requests - Device limit (429)');
+        final errorData = json.decode(response.body);
+        throw Exception(errorData['message'] ?? 'Maximum active devices reached. Please disconnect another device first.');
       }
 
       if (response.statusCode != 200) {
         print('❌ API error: ${response.statusCode}');
         print('   Body: ${response.body}');
-        throw Exception('Failed to connect: ${response.statusCode}');
+
+        // Try to parse error message from response
+        try {
+          final errorData = json.decode(response.body);
+          throw Exception(errorData['message'] ?? 'Failed to connect: ${response.statusCode}');
+        } catch (_) {
+          throw Exception('Failed to connect: ${response.statusCode}');
+        }
       }
 
-      // Parse credentials
+      // ✅ Parse credentials from new response format
       final data = json.decode(response.body);
       final credentials = data['credentials'];
+
+      if (credentials == null) {
+        print('❌ No credentials in response');
+        throw Exception('Failed to get connection credentials');
+      }
 
       if (credentials['wireguard'] == null) {
         print('❌ No WireGuard credentials available (all slots in use)');
@@ -71,7 +96,7 @@ class AndroidVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       print('✅ Config built (${configJson.length} chars)');
 
-      // Start VPN with only config (no credentials needed)
+      // Start VPN with config
       final result = await _platform.invokeMethod('startVpn', {
         'config': configJson,
       });

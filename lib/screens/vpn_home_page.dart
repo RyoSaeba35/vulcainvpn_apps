@@ -323,138 +323,66 @@ class _VpnHomePageState extends State<VpnHomePage> {
           _fetchUntilIpChanges(ipBeforeConnect);
         } else {
           setState(() => _connectionState = 'disconnected');
-          if (mounted) {
-            showDialog(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: Text(loc.connectionFailedTitle),
-                content: Text(loc.connectionFailedMessage),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(loc.ok),
-                  ),
-                ],
-              ),
-            );
-          }
+          _showGenericError(loc);
         }
       } catch (e) {
         setState(() => _connectionState = 'disconnected');
-        if (mounted) {
-          String title = loc.connectionErrorTitle;
-          String message;
 
-          final errorString = e.toString();
+        if (!mounted) return;
 
-          // 🐛 DEBUG: Print the actual error to console
-          print('❌ VPN Connection Error: $errorString');
-          if (e is PlatformException) {
-            print('   Code: ${e.code}');
-            print('   Message: ${e.message}');
-            print('   Details: ${e.details}');
-          }
+        final errorString = e.toString();
 
-          // Check for expired/no subscription FIRST
-          if (errorString.contains('No active subscription') ||
-              errorString.contains('Subscription is not active') ||
-              errorString.contains('Subscription expired')) {
-            title = loc.subscriptionRequiredTitle;
-            message = loc.subscriptionExpiredMessage;
+        // 🐛 DEBUG: Print the actual error to console
+        print('❌ VPN Connection Error: $errorString');
+        if (e is PlatformException) {
+          print('   Code: ${e.code}');
+          print('   Message: ${e.message}');
+          print('   Details: ${e.details}');
+        }
 
-            showDialog(
-              context: context,
-              builder: (context) => AlertDialog(
-                title: Text(title),
-                content: Text(message),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(loc.cancel),
-                  ),
-                  ElevatedButton(
-                    onPressed: () async {
-                      Navigator.pop(context);
-                      final url = Uri.parse('https://vulcainvpn.com/');
-                      if (await canLaunchUrl(url)) {
-                        await launchUrl(url, mode: LaunchMode.externalApplication);
-                      } else {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Please visit vulcainvpn.com to renew'),
-                            ),
-                          );
-                        }
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: MyColors.myOrange,
-                    ),
-                    child: Text(loc.renewNow),
-                  ),
-                ],
-              ),
-            );
+        // ✅ PRIORITY 1: Check subscription status (403 Forbidden)
+        if (errorString.contains('No active subscription') ||
+            errorString.contains('Subscription expired') ||
+            errorString.contains('403')) {
+          _showSubscriptionExpiredDialog(loc, errorString);
+          return;
+        }
+
+        // ✅ PRIORITY 2: Check device registration (401 Unauthorized ONLY)
+        if (errorString.contains('Device not registered') ||
+            errorString.contains('401') ||
+            errorString.contains('Unauthorized')) {
+          _showNotRegisteredDialog(loc);
+          return;
+        }
+
+        // ✅ PRIORITY 3: Check device limits (429 Too Many Requests)
+        if (errorString.contains('Maximum active devices reached') ||
+            errorString.contains('429')) {
+          _showDeviceLimitDialog(loc);
+          return;
+        }
+
+        // ✅ PRIORITY 4: Android permissions (specific codes)
+        if (Platform.isAndroid && e is PlatformException) {
+          if (e.code == 'NOTIFICATION_PERMISSION_DENIED') {
+            _showPermissionDialog(loc, loc.notificationPermissionMessage);
             return;
           }
-          // Check for device registration issues BEFORE permission errors
-          else if (errorString.contains('Device not registered') ||
-                  errorString.contains('not registered') ||
-                  errorString.contains('401') ||
-                  errorString.contains('403') ||
-                  errorString.contains('Unauthorized')) {
-            title = loc.notRegisteredTitle;
-            message = loc.notRegisteredMessage;
+          if (e.code == 'VPN_PERMISSION_DENIED') {
+            _showPermissionDialog(loc, loc.vpnPermissionMessage);
+            return;
           }
-          // Device limit errors
-          else if (errorString.contains('Maximum active devices reached')) {
-            title = loc.deviceLimitTitle;
-            message = loc.deviceLimitMessage;
-          }
-          else if (errorString.contains('Failed to connect: 429')) {
-            title = loc.deviceLimitTitle;
-            message = loc.deviceLimit429Message;
-          }
-          // Android permission errors - ONLY specific codes
-          else if (Platform.isAndroid && e is PlatformException) {
-            if (e.code == 'NOTIFICATION_PERMISSION_DENIED') {
-              title = loc.permissionRequiredTitle;
-              message = loc.notificationPermissionMessage;
-            } else if (e.code == 'VPN_PERMISSION_DENIED') {
-              title = loc.permissionRequiredTitle;
-              message = loc.vpnPermissionMessage;
-            } else {
-              // Unknown Android error - show the actual error
-              message = '${loc.connectionFailedMessage}\n\n'
-                      'Error: ${e.code}\n${e.message ?? errorString}';
-            }
-          }
-          else {
-            message = '${loc.connectionFailedMessage}\n\n'
-                    'Error: ${errorString.replaceAll('Exception: ', '')}';
-          }
-
-          showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: Text(title),
-              content: Text(message),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(loc.ok),
-                ),
-              ],
-            ),
-          );
         }
+
+        // ✅ PRIORITY 5: Generic error
+        _showGenericError(loc, errorString);
       }
-    } else if (_connectionState == 'connected') {
+    }
+    else if (_connectionState == 'connected') {
       setState(() => _connectionState = 'disconnecting');
 
       await _vpnService.stopVpn();
-
       _stopDisplayTimer();
 
       setState(() {
@@ -463,6 +391,155 @@ class _VpnHomePageState extends State<VpnHomePage> {
 
       _fetchCurrentIpAndLocationWithRetry();
     }
+  }
+
+  // ✅ UPDATED: Extract renewal URL from error string
+  void _showSubscriptionExpiredDialog(AppLocalizations loc, String errorString) {
+    // Try to extract renewal URL from error (format: "error|renewal_url:https://...")
+    String renewalUrl = 'https://vulcainvpn.com/pricing';
+    if (errorString.contains('renewal_url:')) {
+      try {
+        final urlPart = errorString.split('renewal_url:')[1];
+        renewalUrl = urlPart.split('|')[0].trim();
+      } catch (_) {
+        // Use default URL if parsing fails
+      }
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.card_membership, color: MyColors.myOrange),
+            SizedBox(width: 8),
+            Expanded(child: Text(loc.subscriptionRequiredTitle)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              loc.subscriptionExpiredMessage,
+              style: TextStyle(fontSize: 16),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              loc.cancel,
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(context);
+              final url = Uri.parse(renewalUrl);
+              try {
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                } else {
+                  throw 'Could not launch URL';
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please visit $renewalUrl to renew'),
+                      backgroundColor: MyColors.myOrange,
+                      duration: Duration(seconds: 5),
+                    ),
+                  );
+                }
+              }
+            },
+            icon: Icon(Icons.shopping_cart),
+            label: Text(loc.renewNow),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Device not registered dialog
+  void _showNotRegisteredDialog(AppLocalizations loc) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(loc.notRegisteredTitle),
+        content: Text(loc.notRegisteredMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(loc.ok),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Device limit dialog
+  void _showDeviceLimitDialog(AppLocalizations loc) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(loc.deviceLimitTitle),
+        content: Text('You can only have 3 devices connected simultaneously. Please disconnect another device first.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(loc.ok),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Permission dialog
+  void _showPermissionDialog(AppLocalizations loc, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(loc.permissionRequiredTitle),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(loc.ok),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Generic error dialog
+  void _showGenericError(AppLocalizations loc, [String? errorString]) {
+    final message = errorString != null
+        ? '${loc.connectionFailedMessage}\n\nError: ${errorString.replaceAll('Exception: ', '').split('|')[0]}'  // Strip metadata
+        : loc.connectionFailedMessage;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(loc.connectionErrorTitle),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(loc.ok),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

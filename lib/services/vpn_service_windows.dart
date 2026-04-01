@@ -6,14 +6,13 @@ import 'package:http/http.dart' as http;
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
-import 'secure_config_service.dart';  // ✅ FIX #3: Encrypted config files
+import 'secure_config_service.dart';
 
 class WindowsVpnService extends VpnService {
   static Process? _singBoxProcess;
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
 
-  // ✅ FIX #3: Track config file paths for cleanup
   static String? _configPath;
   static String? _plaintextPath;
 
@@ -56,7 +55,7 @@ class WindowsVpnService extends VpnService {
 
       if (deviceId == null || apiKey == null) {
         await _log('Error: Device not registered');
-        return false;
+        throw Exception('Device not registered. Please login again.');
       }
 
       await _log('Fetching credentials for device: $deviceId');
@@ -67,13 +66,46 @@ class WindowsVpnService extends VpnService {
         headers: {'X-Api-Key': apiKey},
       );
 
+      // ✅ NEW: Handle different status codes
+      if (response.statusCode == 401) {
+        await _log('Unauthorized (401)');
+        final errorData = json.decode(response.body);
+        throw Exception(errorData['message'] ?? 'Device not registered. Please login again.');
+      }
+
+      if (response.statusCode == 403) {
+        await _log('Forbidden - No active subscription (403)');
+        final errorData = json.decode(response.body);
+        throw Exception(
+          '${errorData['error'] ?? 'No active subscription'}|'
+          'renewal_url:${errorData['renewal_url'] ?? 'https://vulcainvpn.com/pricing'}'
+        );
+      }
+
+      if (response.statusCode == 429) {
+        await _log('Too Many Requests - Device limit (429)');
+        final errorData = json.decode(response.body);
+        throw Exception(errorData['message'] ?? 'Maximum active devices reached');
+      }
+
       if (response.statusCode != 200) {
         await _log('Failed to get credentials: ${response.statusCode}');
-        return false;
+        try {
+          final errorData = json.decode(response.body);
+          throw Exception(errorData['message'] ?? 'Failed to connect: ${response.statusCode}');
+        } catch (_) {
+          throw Exception('Failed to connect: ${response.statusCode}');
+        }
       }
 
       final data = json.decode(response.body);
       final credentials = data['credentials'];
+
+      if (credentials == null || credentials['wireguard'] == null) {
+        await _log('No credentials available');
+        throw Exception('Failed to get connection credentials');
+      }
+
       await _log('Credentials received');
 
       // Step 3: Build dynamic config
@@ -93,22 +125,19 @@ class WindowsVpnService extends VpnService {
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
 
       final tempDir = await getTemporaryDirectory();
-      _configPath = '${tempDir.path}\\config.json.enc';  // .enc extension
+      _configPath = '${tempDir.path}\\config.json.enc';
       _plaintextPath = '${tempDir.path}\\config.json';
 
-      // ✅ FIX #3: Encrypt config before writing to disk
       await SecureConfigService.writeEncryptedConfig(_configPath!, configJson);
       await _log('encrypted config written to: $_configPath');
 
-      // For sing-box, we need to decrypt it temporarily
-      // Decrypt to memory, write plaintext temporarily, start process, then delete
+      // For sing-box, write plaintext temporarily
       await File(_plaintextPath!).writeAsString(configJson);
 
       // Step 6: Start sing-box process
-      // Step 6: Start sing-box process
       _singBoxProcess = await Process.start(
         _singBoxPath,
-        ['run', '-c', _plaintextPath!],  // Use temporary plaintext file
+        ['run', '-c', _plaintextPath!],
       );
       await _log('process started with pid: ${_singBoxProcess!.pid}');
 
@@ -122,7 +151,7 @@ class WindowsVpnService extends VpnService {
       _singBoxProcess!.exitCode.then((code) async {
         _log('sing-box exited with code: $code');
 
-        // ✅ FIX #3: Securely delete config files on exit
+        // Clean up config files on exit
         if (_plaintextPath != null) {
           await SecureConfigService.secureDelete(_plaintextPath!);
         }
@@ -146,7 +175,7 @@ class WindowsVpnService extends VpnService {
       return true;
     } catch (e) {
       await _log('Windows VPN error: $e');
-      return false;
+      rethrow;  // ✅ CHANGED: Rethrow instead of returning false
     }
   }
 
@@ -170,11 +199,11 @@ class WindowsVpnService extends VpnService {
       await _log('Failed to notify backend: $e');
     }
 
-    // Kill by reference if we have it
+    // Kill process
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
-    // ✅ FIX #3: Explicitly clean up config files
+    // Clean up config files
     try {
       if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
         await SecureConfigService.secureDelete(_plaintextPath!);
@@ -190,7 +219,7 @@ class WindowsVpnService extends VpnService {
       await _log('Config cleanup error: $e');
     }
 
-    // Also kill by name in case process was started in a previous session
+    // Kill by name in case process was started in a previous session
     try {
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);

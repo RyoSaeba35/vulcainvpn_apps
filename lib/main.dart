@@ -6,10 +6,29 @@ import 'dart:io';
 import 'colors.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/auth_gate.dart';
+import 'services/security_checker.dart';  // ✅ FIX #8: Add security checker
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // ✅ FIX #8: Check device security before app starts
+  final securityAction = await SecurityChecker.evaluateSecurity(
+    policy: SecurityPolicy(
+      blockRootedDevices: false,   // Warn, don't block
+      warnRootedDevices: true,
+      blockDebuggers: true,         // Always block debuggers
+      blockEmulators: false,
+      warnEmulators: false,
+    ), // Use strict for production
+  );
+
+  // Handle security check result
+  if (securityAction == SecurityAction.block) {
+    runApp(const SecurityBlockedApp());
+    return;
+  }
+
+  // Window manager setup (Windows only)
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
     const windowOptions = WindowOptions(
@@ -22,11 +41,19 @@ void main() async {
     });
   }
 
-  runApp(const MyApp());
+  // Start app normally (or with warning)
+  runApp(MyApp(
+    showSecurityWarning: securityAction == SecurityAction.warn,
+  ));
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  final bool showSecurityWarning;
+
+  const MyApp({
+    super.key,
+    this.showSecurityWarning = false,
+  });
 
   @override
   State<MyApp> createState() => _MyAppState();
@@ -42,6 +69,49 @@ class _MyAppState extends State<MyApp> {
 
   void setLocale(Locale locale) {
     setState(() => _locale = locale);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    // ✅ FIX #8: Show security warning if needed
+    if (widget.showSecurityWarning) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showSecurityWarning();
+      });
+    }
+  }
+
+  void _showSecurityWarning() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('Security Warning'),
+          ],
+        ),
+        content: const Text(
+          'Your device appears to be rooted/jailbroken. '
+          'This may reduce the security of your VPN connection. '
+          'Continue at your own risk.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => exit(0),
+            child: const Text('Exit'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Continue Anyway'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -64,6 +134,69 @@ class _MyAppState extends State<MyApp> {
         useMaterial3: false,
       ),
       home: const AuthGate(),
+    );
+  }
+}
+
+// ✅ FIX #8: Security blocked screen
+class SecurityBlockedApp extends StatelessWidget {
+  const SecurityBlockedApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Vulcain VPN - Security Error',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.red),
+        useMaterial3: false,
+      ),
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.security,
+                  size: 80,
+                  color: Colors.red,
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Security Check Failed',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'This app cannot run on rooted or jailbroken devices '
+                  'or while being debugged for security reasons.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  onPressed: () => exit(0),
+                  icon: const Icon(Icons.exit_to_app),
+                  label: const Text('Exit App'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
