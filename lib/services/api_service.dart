@@ -1,10 +1,15 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';  // ✅ FIX #9: For TimeoutException
 import 'auth_service.dart';
 
 class ApiService {
   static const String baseUrl = 'https://api.vulcainvpn.com/api';
+
+  // ✅ FIX #9: Network timeout configuration
+  static const Duration _requestTimeout = Duration(seconds: 15);  // API requests
+  static const Duration _connectionTimeout = Duration(seconds: 10);  // Initial connection
 
   // ⭐ Get exe directory (same as vpn_service_windows.dart)
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
@@ -66,17 +71,25 @@ class ApiService {
     http.Response response;
 
     try {
+      // ✅ FIX #9: Add timeout to prevent hanging connections
       if (method == 'GET') {
-        response = await http.get(Uri.parse('$baseUrl/$endpoint'), headers: headers);
+        response = await http.get(
+          Uri.parse('$baseUrl/$endpoint'),
+          headers: headers,
+        ).timeout(_requestTimeout);
       } else {
         response = await http.post(
           Uri.parse('$baseUrl/$endpoint'),
           headers: headers,
           body: body != null ? json.encode(body) : null,
-        );
+        ).timeout(_requestTimeout);
       }
 
       await _log('📥 Response: ${response.statusCode}');
+    } on TimeoutException catch (e) {
+      // ✅ FIX #9: Handle timeout specifically
+      await _log('❌ Request timeout after ${_requestTimeout.inSeconds}s: $e');
+      throw Exception('Request timeout - please check your connection');
     } catch (e) {
       await _log('❌ Network error: $e');
       throw Exception('Network error: $e');
@@ -95,15 +108,23 @@ class ApiService {
         headers['Authorization'] = 'Bearer $newToken';
 
         try {
+          // ✅ FIX #9: Add timeout to retry requests too
           response = method == 'GET'
-              ? await http.get(Uri.parse('$baseUrl/$endpoint'), headers: headers)
+              ? await http.get(
+                  Uri.parse('$baseUrl/$endpoint'),
+                  headers: headers,
+                ).timeout(_requestTimeout)
               : await http.post(
                   Uri.parse('$baseUrl/$endpoint'),
                   headers: headers,
                   body: body != null ? json.encode(body) : null,
-                );
+                ).timeout(_requestTimeout);
 
           await _log('   Retry response: ${response.statusCode}');
+        } on TimeoutException catch (e) {
+          // ✅ FIX #9: Handle retry timeout
+          await _log('   ❌ Retry timeout after ${_requestTimeout.inSeconds}s: $e');
+          throw Exception('Retry timeout - please check your connection');
         } catch (e) {
           await _log('   ❌ Retry failed: $e');
           throw Exception('Retry failed: $e');
@@ -146,20 +167,26 @@ class ApiService {
     final apiKey = await AuthService.getApiKey();
     if (apiKey == null) throw Exception('No API key found');
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/$endpoint'),
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': apiKey,
-      },
-    );
+    try {
+      // ✅ FIX #9: Add timeout to API key requests
+      final response = await http.post(
+        Uri.parse('$baseUrl/$endpoint'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': apiKey,
+        },
+      ).timeout(_requestTimeout);
 
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return json.decode(response.body);
-    } else if (response.statusCode == 429) {
-      throw Exception('Maximum devices reached');
-    } else {
-      throw Exception('Request failed: ${response.statusCode}');
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return json.decode(response.body);
+      } else if (response.statusCode == 429) {
+        throw Exception('Maximum devices reached');
+      } else {
+        throw Exception('Request failed: ${response.statusCode}');
+      }
+    } on TimeoutException catch (e) {
+      // ✅ FIX #9: Handle API key request timeout
+      throw Exception('Request timeout - please check your connection');
     }
   }
 
@@ -168,18 +195,24 @@ class ApiService {
     final apiKey = await AuthService.getApiKey();
     if (apiKey == null) throw Exception('No API key found');
 
-    final response = await http.get(
-      Uri.parse('$baseUrl/status'),
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': apiKey,
-      },
-    );
+    try {
+      // ✅ FIX #9: Add timeout to status requests
+      final response = await http.get(
+        Uri.parse('$baseUrl/status'),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': apiKey,
+        },
+      ).timeout(_requestTimeout);
 
-    if (response.statusCode == 200) {
-      return json.decode(response.body);
-    } else {
-      throw Exception('Failed to load status');
+      if (response.statusCode == 200) {
+        return json.decode(response.body);
+      } else {
+        throw Exception('Failed to load status');
+      }
+    } on TimeoutException catch (e) {
+      // ✅ FIX #9: Handle status request timeout
+      throw Exception('Request timeout - please check your connection');
     }
   }
 }
