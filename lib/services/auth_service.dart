@@ -2,6 +2,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';  // ✅ FIX #10: For timeout handling
 import 'dart:math';  // ✅ FIX #7: For cryptographically secure random
 import 'package:device_info_plus/device_info_plus.dart';
 
@@ -12,6 +13,10 @@ class AuthService {
   static const String _apiKeyKey = 'api_key';
   static const String _deviceIdKey = 'device_id';
   static const String _emailKey = 'user_email';
+  static const String _tokenExpiryKey = 'token_expiry';  // ✅ FIX #10: Track token expiry
+
+  // ✅ FIX #10: Timeout configuration (matching Fix #9)
+  static const Duration _authTimeout = Duration(seconds: 15);
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
@@ -26,11 +31,12 @@ class AuthService {
   static Future<bool> login(String email, String password) async {
     try {
       // Step 1 — Login and get tokens
+      // ✅ FIX #10: Add timeout to auth requests
       final response = await http.post(
         Uri.parse('$_baseUrl/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({'email': email, 'password': password}),
-      );
+      ).timeout(_authTimeout);
 
       if (response.statusCode != 200) return false;
 
@@ -41,6 +47,9 @@ class AuthService {
       await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
       await saveEmail(data['user']['email']);
 
+      // ✅ FIX #10: Store token expiry time for better tracking
+      await _storeTokenExpiry(data['access_token']);
+
       // Step 2 — Generate unique device ID
       final deviceId = await _getDeviceId();
       final platform = Platform.isAndroid ? 'android' :
@@ -50,6 +59,7 @@ class AuthService {
       final deviceName = await _getDeviceName();
 
       // Step 3 — Register device and store api_key
+      // ✅ FIX #10: Add timeout to device registration
       final registerResponse = await http.post(
         Uri.parse('$_baseUrl/devices/register'),
         headers: {
@@ -61,7 +71,7 @@ class AuthService {
           'platform': platform,
           'name': deviceName,
         }),
-      );
+      ).timeout(_authTimeout);
 
       if (registerResponse.statusCode == 200 ||
           registerResponse.statusCode == 201) {
@@ -78,26 +88,60 @@ class AuthService {
   }
 
   // Refresh the access token
+  // ✅ FIX #10: Enhanced with timeout and retry logic
   static Future<bool> refreshAccessToken() async {
     try {
       final refreshToken = await _storage.read(key: _refreshTokenKey);
       if (refreshToken == null) return false;
 
-      final response = await http.post(
-        Uri.parse('$_baseUrl/refresh'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({'refresh_token': refreshToken}),
-      );
+      // ✅ FIX #10: Retry token refresh once on failure (network resilience)
+      for (int attempt = 1; attempt <= 2; attempt++) {
+        try {
+          final response = await http.post(
+            Uri.parse('$_baseUrl/refresh'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'refresh_token': refreshToken}),
+          ).timeout(_authTimeout);
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
 
-        // Store new tokens (both are rotated)
-        await _storage.write(key: _accessTokenKey, value: data['access_token']);
-        await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
+            // Store new tokens (both are rotated)
+            await _storage.write(key: _accessTokenKey, value: data['access_token']);
+            await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
 
-        return true;
+            // ✅ FIX #10: Store new token expiry
+            await _storeTokenExpiry(data['access_token']);
+
+            print('✅ Token refreshed successfully${attempt > 1 ? " (retry $attempt)" : ""}');
+            return true;
+          }
+
+          // Don't retry on 401 (invalid refresh token)
+          if (response.statusCode == 401) {
+            print('❌ Refresh token invalid, logout required');
+            return false;
+          }
+
+          // Retry on other errors
+          if (attempt < 2) {
+            print('⚠️ Token refresh failed (attempt $attempt), retrying...');
+            await Future.delayed(Duration(seconds: 1));
+            continue;
+          }
+
+          return false;
+        } on TimeoutException {
+          if (attempt < 2) {
+            print('⚠️ Token refresh timeout (attempt $attempt), retrying...');
+            await Future.delayed(Duration(seconds: 1));
+            continue;
+          }
+          print('❌ Token refresh timeout after $attempt attempts');
+          return false;
+        }
       }
+
       return false;
     } catch (e) {
       print('Token refresh error: $e');
@@ -145,18 +189,42 @@ class AuthService {
     }
   }
 
+  // ✅ FIX #10: Store token expiry timestamp for better tracking
+  static Future<void> _storeTokenExpiry(String token) async {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return;
+
+      final payload = json.decode(
+        utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
+      );
+
+      final exp = payload['exp'];
+      if (exp != null) {
+        await _storage.write(
+          key: _tokenExpiryKey,
+          value: exp.toString(),
+        );
+      }
+    } catch (e) {
+      print('Failed to store token expiry: $e');
+    }
+  }
+
   // Logout — calls backend and clears all stored credentials
   static Future<void> logout() async {
     try {
       final token = await _storage.read(key: _accessTokenKey);
       if (token != null) {
+        // ✅ FIX #10: Add timeout to logout request
         await http.delete(
           Uri.parse('$_baseUrl/logout'),
           headers: {'Authorization': 'Bearer $token'},
-        );
+        ).timeout(_authTimeout);
       }
     } catch (e) {
       print('Logout API call failed: $e');
+      // ✅ FIX #10: Always clear local storage even if backend call fails
     }
 
     await _storage.deleteAll();
