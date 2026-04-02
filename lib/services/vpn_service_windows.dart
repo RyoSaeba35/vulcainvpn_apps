@@ -13,6 +13,7 @@ class WindowsVpnService extends VpnService {
   static Process? _singBoxProcess;
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
+  static bool _isNormalStop = false; // ✅ Track if disconnect was intentional
 
   static String? _configPath;
   static String? _plaintextPath;
@@ -65,18 +66,20 @@ class WindowsVpnService extends VpnService {
       final isRunning = await _isSingBoxRunning();
 
       if (!isRunning && _isConnected) {
-        // ✅ sing-box process died unexpectedly!
-        await _log('⚠️ sing-box process died unexpectedly!');
+        // ✅ Only send death event if NOT a normal stop
+        if (!_isNormalStop) {
+          await _log('⚠️ sing-box process died unexpectedly!');
 
-        _isConnected = false;
-        _statusController.add(false);
+          _isConnected = false;
+          _statusController.add(false);
 
-        // Send death event
-        _eventController.add(VpnEvent(
-          type: VpnEventType.died,
-          reason: 'process_crashed',
-          message: 'VPN process crashed unexpectedly',
-        ));
+          // Send death event
+          _eventController.add(VpnEvent(
+            type: VpnEventType.died,
+            reason: 'process_crashed',
+            message: 'VPN process crashed unexpectedly',
+          ));
+        }
 
         timer.cancel();
       }
@@ -123,6 +126,9 @@ class WindowsVpnService extends VpnService {
   Future<bool> startVpn() async {
     try {
       await _log('startVpn called');
+
+      // ✅ Reset normal stop flag
+      _isNormalStop = false;
 
       // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();
@@ -241,8 +247,8 @@ class WindowsVpnService extends VpnService {
           _isConnected = false;
           _statusController.add(false);
 
-          // ✅ PRIORITY 1: Send death event if process crashed
-          if (code != 0) {
+          // ✅ PRIORITY 1: Only send death event if NOT a normal stop and exit code != 0
+          if (!_isNormalStop && code != 0) {
             _eventController.add(VpnEvent(
               type: VpnEventType.died,
               reason: 'process_exited',
@@ -275,6 +281,9 @@ class WindowsVpnService extends VpnService {
   @override
   Future<void> stopVpn() async {
     await _log('stopVpn called');
+
+    // ✅ Set flag BEFORE stopping (prevents false "died" event)
+    _isNormalStop = true;
 
     // ✅ PRIORITY 1: Stop process checker
     _stopProcessChecker();
