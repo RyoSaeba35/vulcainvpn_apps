@@ -6,7 +6,8 @@ import 'dart:io';
 import 'colors.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/auth_gate.dart';
-import 'services/security_checker.dart';  // ✅ FIX #8: Add security checker
+import 'services/security_checker.dart';
+import 'services/vpn_service_android.dart';  // ✅ NEW
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,6 +22,11 @@ void main() async {
       warnEmulators: false,
     ), // Use strict for production
   );
+
+  // ✅ PRIORITY 1: Setup Android event listener
+  if (Platform.isAndroid) {
+    AndroidVpnService.setupEventListener();
+  }
 
   // Handle security check result
   if (securityAction == SecurityAction.block) {

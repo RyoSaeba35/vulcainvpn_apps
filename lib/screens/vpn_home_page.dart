@@ -9,10 +9,26 @@ import '../services/ip_service.dart';
 import '../services/vpn_service.dart';
 import '../services/tray_window_service.dart';
 import '../services/vpn_service_android.dart';
+import '../services/vpn_service_windows.dart';  // ✅ NEW
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+// ✅ PRIORITY 1: ADD THIS INITIALIZATION CODE
+// Put this in your main.dart or app initialization:
+/*
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ✅ PRIORITY 1: Setup Android event listener
+  if (Platform.isAndroid) {
+    AndroidVpnService.setupEventListener();
+  }
+
+  runApp(MyApp());
+}
+*/
 
 class VpnHomePage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -39,6 +55,10 @@ class _VpnHomePageState extends State<VpnHomePage> {
   String _currentCountryCode = '';
   bool _isLoadingIp = true;
   StreamSubscription<bool>? _vpnSubscription;
+
+  // ✅ PRIORITY 1: Add event subscription
+  StreamSubscription<VpnEvent>? _eventSubscription;
+
   TrayWindowService? _trayService;
 
   late final VpnService _vpnService = VpnService.instance;
@@ -51,6 +71,9 @@ class _VpnHomePageState extends State<VpnHomePage> {
     super.initState();
     _initTrayIfWindows();
     _init();
+
+    // ✅ PRIORITY 1: Setup event listener
+    _setupVpnEventListener();
   }
 
   @override
@@ -58,8 +81,194 @@ class _VpnHomePageState extends State<VpnHomePage> {
     _displayTimer?.cancel();
     _ipCheckTimer?.cancel();
     _vpnSubscription?.cancel();
+    _eventSubscription?.cancel();  // ✅ NEW
     _trayService?.dispose();
     super.dispose();
+  }
+
+  // ✅ PRIORITY 1: Setup VPN event listener
+  void _setupVpnEventListener() {
+    if (Platform.isAndroid) {
+      _eventSubscription = AndroidVpnService.eventStream.listen((event) {
+        print('📡 Flutter received VPN event: $event');
+        _handleVpnEvent(event);
+      });
+    } else if (Platform.isWindows) {
+      _eventSubscription = WindowsVpnService.eventStream.listen((event) {
+        print('📡 Flutter received VPN event: $event');
+        _handleVpnEvent(event);
+      });
+    }
+  }
+
+  // ✅ PRIORITY 1: Handle VPN events
+  void _handleVpnEvent(VpnEvent event) {
+    if (!mounted) return;
+
+    print('🔔 Handling event: ${event.type}');
+
+    switch (event.type) {
+      case VpnEventType.died:
+        // ✅ VPN DIED! Critical event!
+        print('💀 VPN DIED: ${event.reason} - ${event.message}');
+
+        setState(() {
+          _connectionState = 'disconnected';
+          _stopDisplayTimer();
+        });
+
+        _trayService?.updateState(false);
+        _fetchCurrentIpAndLocationWithRetry();
+
+        // Show alert to user
+        _showVpnDiedAlert(event);
+        break;
+
+      case VpnEventType.connected:
+        print('✅ VPN connected event');
+        // Already handled by statusStream, but we can add extra logic here
+        break;
+
+      case VpnEventType.disconnected:
+        print('🔴 VPN disconnected event');
+        // Already handled by statusStream
+        break;
+
+      case VpnEventType.error:
+        print('❌ VPN error event: ${event.message}');
+        _showErrorSnackbar(event.message);
+        break;
+    }
+  }
+
+  // ✅ PRIORITY 1: Show VPN died alert
+  void _showVpnDiedAlert(VpnEvent event) {
+    if (!mounted) return;
+
+    final loc = AppLocalizations.of(context)!;
+
+    String title = 'VPN Disconnected';
+    String message = event.message;
+    IconData icon = Icons.warning_amber_rounded;
+    Color iconColor = Colors.orange;
+
+    // Customize based on reason
+    if (event.reason == 'service_killed') {
+      title = 'VPN Service Stopped';
+      message = Platform.isAndroid
+          ? 'Android stopped your VPN (low memory or system cleanup). Your connection is no longer protected.'
+          : 'The VPN service was stopped by the system.';
+      icon = Icons.memory;
+      iconColor = Colors.red;
+    } else if (event.reason == 'permission_revoked') {
+      title = 'Permission Revoked';
+      message = 'VPN permission was revoked. Please reconnect to restore protection.';
+      icon = Icons.block;
+      iconColor = Colors.red;
+    } else if (event.reason == 'process_crashed') {
+      title = 'VPN Crashed';
+      message = 'The VPN process crashed unexpectedly. Please reconnect.';
+      icon = Icons.error_outline;
+      iconColor = Colors.red;
+    }
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,  // Force user to acknowledge
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  color: iconColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.red, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your real IP may be exposed!',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Dismiss',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              _toggleConnection();  // Reconnect
+            },
+            icon: Icon(Icons.vpn_lock),
+            label: Text('Reconnect'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ PRIORITY 1: Show error snackbar
+  void _showErrorSnackbar(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.white),
+            SizedBox(width: 12),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: Colors.red,
+        duration: Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   Future<void> _initTrayIfWindows() async {

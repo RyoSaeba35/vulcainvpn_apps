@@ -7,6 +7,7 @@ import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
 import 'secure_config_service.dart';
+import 'vpn_service_android.dart'; // For VpnEvent types
 
 class WindowsVpnService extends VpnService {
   static Process? _singBoxProcess;
@@ -15,6 +16,10 @@ class WindowsVpnService extends VpnService {
 
   static String? _configPath;
   static String? _plaintextPath;
+
+  // ✅ PRIORITY 1: Process checker timer
+  static Timer? _processChecker;
+  static final StreamController<VpnEvent> _eventController = StreamController<VpnEvent>.broadcast();
 
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
@@ -41,8 +46,78 @@ class WindowsVpnService extends VpnService {
     return '$_exeDir\\$binary';
   }
 
+  // ✅ PRIORITY 1: Expose event stream
+  static Stream<VpnEvent> get eventStream => _eventController.stream;
+
   @override
   Stream<bool> get statusStream => _statusController.stream;
+
+  // ✅ PRIORITY 1: Start process checker (checks if sing-box is running)
+  static void _startProcessChecker() {
+    _processChecker?.cancel();
+
+    _processChecker = Timer.periodic(Duration(seconds: 3), (timer) async {
+      if (!_isConnected) {
+        timer.cancel();
+        return;
+      }
+
+      final isRunning = await _isSingBoxRunning();
+
+      if (!isRunning && _isConnected) {
+        // ✅ sing-box process died unexpectedly!
+        await _log('⚠️ sing-box process died unexpectedly!');
+
+        _isConnected = false;
+        _statusController.add(false);
+
+        // Send death event
+        _eventController.add(VpnEvent(
+          type: VpnEventType.died,
+          reason: 'process_crashed',
+          message: 'VPN process crashed unexpectedly',
+        ));
+
+        timer.cancel();
+      }
+    });
+  }
+
+  // ✅ PRIORITY 1: Stop process checker
+  static void _stopProcessChecker() {
+    _processChecker?.cancel();
+    _processChecker = null;
+  }
+
+  // ✅ PRIORITY 1: Check if sing-box process is running
+  static Future<bool> _isSingBoxRunning() async {
+    try {
+      // Check for amd64 version
+      final result1 = await Process.run(
+        'tasklist',
+        ['/FI', 'IMAGENAME eq sing-box-amd64.exe', '/NH'],
+      );
+
+      if (result1.stdout.toString().contains('sing-box-amd64.exe')) {
+        return true;
+      }
+
+      // Check for arm64 version
+      final result2 = await Process.run(
+        'tasklist',
+        ['/FI', 'IMAGENAME eq sing-box-arm64.exe', '/NH'],
+      );
+
+      if (result2.stdout.toString().contains('sing-box-arm64.exe')) {
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      await _log('Error checking process: $e');
+      return false;
+    }
+  }
 
   @override
   Future<bool> startVpn() async {
@@ -165,12 +240,30 @@ class WindowsVpnService extends VpnService {
         if (_isConnected) {
           _isConnected = false;
           _statusController.add(false);
+
+          // ✅ PRIORITY 1: Send death event if process crashed
+          if (code != 0) {
+            _eventController.add(VpnEvent(
+              type: VpnEventType.died,
+              reason: 'process_exited',
+              message: 'sing-box exited with code $code',
+            ));
+          }
         }
       });
 
       await Future.delayed(const Duration(seconds: 2));
       _isConnected = true;
       _statusController.add(true);
+
+      // ✅ PRIORITY 1: Start process checker
+      _startProcessChecker();
+
+      // ✅ PRIORITY 1: Send connected event
+      _eventController.add(VpnEvent(
+        type: VpnEventType.connected,
+        message: 'VPN connected successfully',
+      ));
 
       return true;
     } catch (e) {
@@ -182,6 +275,9 @@ class WindowsVpnService extends VpnService {
   @override
   Future<void> stopVpn() async {
     await _log('stopVpn called');
+
+    // ✅ PRIORITY 1: Stop process checker
+    _stopProcessChecker();
 
     // Notify backend of disconnection
     try {
@@ -229,6 +325,12 @@ class WindowsVpnService extends VpnService {
 
     _isConnected = false;
     _statusController.add(false);
+
+    // ✅ PRIORITY 1: Send disconnected event
+    _eventController.add(VpnEvent(
+      type: VpnEventType.disconnected,
+      message: 'VPN disconnected by user',
+    ));
   }
 
   @override

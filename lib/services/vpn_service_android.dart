@@ -10,9 +10,71 @@ class AndroidVpnService extends VpnService {
   static const MethodChannel _platform = MethodChannel('com.vulcain.vpn/control');
   static const EventChannel _statusChannel = EventChannel('com.vulcain.vpn/status');
 
+  // ✅ PRIORITY 1: New stream controller for VPN events
+  static final StreamController<VpnEvent> _eventController = StreamController<VpnEvent>.broadcast();
+
+  // ✅ PRIORITY 1: Setup event listener (call this once at app startup)
+  static void setupEventListener() {
+    _statusChannel.receiveBroadcastStream().listen((event) {
+      print('📡 Received event from native: $event');
+
+      if (event is Map) {
+        // ✅ New format: Map with event details
+        final eventType = event['event'] as String?;
+        final reason = event['reason'] as String?;
+        final message = event['message'] as String?;
+
+        print('📡 Event type: $eventType, reason: $reason');
+
+        if (eventType == 'vpn_died') {
+          // ✅ VPN died unexpectedly!
+          _eventController.add(VpnEvent(
+            type: VpnEventType.died,
+            reason: reason ?? 'unknown',
+            message: message ?? 'VPN disconnected unexpectedly',
+          ));
+        } else if (eventType == 'connected') {
+          _eventController.add(VpnEvent(
+            type: VpnEventType.connected,
+            message: message ?? 'Connected',
+          ));
+        } else if (eventType == 'disconnected') {
+          _eventController.add(VpnEvent(
+            type: VpnEventType.disconnected,
+            message: message ?? 'Disconnected',
+          ));
+        } else if (eventType == 'error') {
+          _eventController.add(VpnEvent(
+            type: VpnEventType.error,
+            message: message ?? 'Error',
+          ));
+        }
+      } else if (event is bool) {
+        // ✅ Old format: Simple bool (for backward compatibility)
+        print('📡 Received legacy bool event: $event');
+        _eventController.add(VpnEvent(
+          type: event ? VpnEventType.connected : VpnEventType.disconnected,
+          message: event ? 'Connected' : 'Disconnected',
+        ));
+      }
+    }, onError: (error) {
+      print('❌ Event stream error: $error');
+    });
+  }
+
+  // ✅ PRIORITY 1: Expose event stream
+  static Stream<VpnEvent> get eventStream => _eventController.stream;
+
   @override
   Stream<bool> get statusStream =>
-      _statusChannel.receiveBroadcastStream().map((e) => e as bool);
+      _statusChannel.receiveBroadcastStream().map((e) {
+        // Map events to bool for backward compatibility
+        if (e is Map) {
+          final eventType = e['event'] as String?;
+          return eventType == 'connected';
+        }
+        return e as bool;
+      });
 
   @override
   Future<bool> startVpn() async {
@@ -137,12 +199,45 @@ class AndroidVpnService extends VpnService {
   Future<bool> checkNotificationPermission() async =>
       await _platform.invokeMethod('checkNotificationPermission');
 
+  // ✅ PRIORITY 1: IMPROVED - Actually verify VPN is running
   Future<bool> checkVpnState() async {
     try {
-      final result = await _platform.invokeMethod('getStatus');
-      return result as bool;
+      // Step 1: Check SharedPreferences
+      final isRunningInPrefs = await _platform.invokeMethod('getStatus') as bool;
+
+      if (!isRunningInPrefs) {
+        print('✅ SharedPrefs says VPN not running');
+        return false;  // Definitely not running
+      }
+
+      print('🔍 SharedPrefs says running, verifying actual VPN state...');
+
+      // Step 2: ✅ NEW - Actually verify VPN interface is active
+      final isActuallyActive = await _platform.invokeMethod('isVpnActive') as bool;
+
+      if (!isActuallyActive) {
+        // SharedPrefs says running but VPN is actually dead!
+        print('⚠️ MISMATCH DETECTED! SharedPrefs says running but VPN is dead!');
+        print('🧹 Clearing stale state...');
+
+        // Clear the stale state
+        await _platform.invokeMethod('clearVpnState');
+
+        // ✅ PRIORITY 1: Send "died" event to UI
+        _eventController.add(VpnEvent(
+          type: VpnEventType.died,
+          reason: 'state_mismatch',
+          message: 'VPN was disconnected while app was closed',
+        ));
+
+        return false;
+      }
+
+      print('✅ VPN is actually running');
+      return true;
+
     } catch (e) {
-      print('Failed to check VPN state: $e');
+      print('❌ Failed to check VPN state: $e');
       return false;
     }
   }
@@ -154,4 +249,30 @@ class AndroidVpnService extends VpnService {
       return null;
     }
   }
+}
+
+// ✅ PRIORITY 1: VPN Event types
+enum VpnEventType {
+  connected,
+  disconnected,
+  died,      // ← NEW! VPN died unexpectedly
+  error,
+}
+
+// ✅ PRIORITY 1: VPN Event class
+class VpnEvent {
+  final VpnEventType type;
+  final String? reason;
+  final String message;
+  final int? timestamp;
+
+  VpnEvent({
+    required this.type,
+    this.reason,
+    required this.message,
+    this.timestamp,
+  });
+
+  @override
+  String toString() => 'VpnEvent(type: $type, reason: $reason, message: $message)';
 }

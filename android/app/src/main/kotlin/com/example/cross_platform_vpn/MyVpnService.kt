@@ -54,6 +54,9 @@ class MyVpnService : VpnService(), PlatformInterface {
     private var cachedInterfaces: List<LibboxNetworkInterface>? = null
     private var cachedConfig: String? = null
 
+    // ✅ PRIORITY 1: Track if this is a normal stop or unexpected death
+    private var isNormalStop = false
+
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -69,6 +72,8 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         when (intent?.action) {
             "STOP_VPN" -> {
+                // ✅ PRIORITY 1: Mark as normal stop
+                isNormalStop = true
                 stopVpnService()
                 return START_NOT_STICKY
             }
@@ -87,6 +92,9 @@ class MyVpnService : VpnService(), PlatformInterface {
 
     private fun startVpnService() {
         Log.d(TAG, "Starting VPN service")
+
+        // ✅ PRIORITY 1: Reset stop flag when starting
+        isNormalStop = false
 
         if (!areNotificationsEnabled()) {
             Log.e(TAG, "Notifications are disabled!")
@@ -119,14 +127,14 @@ class MyVpnService : VpnService(), PlatformInterface {
                 prefs.edit().putLong(KEY_START_TIME, System.currentTimeMillis()).apply()
                 Log.d(TAG, "✅ Stored start_time: ${System.currentTimeMillis()}")
 
-                // Post to main thread to avoid crash
-                mainHandler.post {
-                    MainActivity.statusSink?.success(true)
-                }
+                // ✅ PRIORITY 1: Send "connected" event to Flutter
+                notifyFlutterVpnState("connected", "VPN connected successfully")
+
                 Log.d(TAG, "✅ VPN started successfully")
 
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Failed to start VPN", e)
+                notifyFlutterVpnState("error", "Failed to start: ${e.message}")
                 stopSelf()
             }
         }.start()
@@ -151,7 +159,7 @@ class MyVpnService : VpnService(), PlatformInterface {
     }
 
     private fun stopVpnService() {
-        Log.d(TAG, "Stopping VPN service")
+        Log.d(TAG, "Stopping VPN service (normal stop: $isNormalStop)")
 
         try {
             runBlocking {
@@ -168,10 +176,13 @@ class MyVpnService : VpnService(), PlatformInterface {
             setVpnState(false)
             prefs.edit().remove(KEY_START_TIME).apply()
 
-            // Post to main thread to avoid crash
-            mainHandler.post {
-                MainActivity.statusSink?.success(false)
+            // ✅ PRIORITY 1: Send appropriate event based on stop type
+            if (isNormalStop) {
+                notifyFlutterVpnState("disconnected", "VPN disconnected by user")
+            } else {
+                notifyFlutterVpnState("died", "VPN stopped unexpectedly")
             }
+
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         } catch (e: Exception) {
@@ -179,26 +190,69 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     }
 
+    // ✅ PRIORITY 1: Enhanced onDestroy - detects unexpected deaths
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "Service destroyed")
+        Log.d(TAG, "🔴 Service destroyed (normal stop: $isNormalStop)")
 
-        // Only clear state if we explicitly stopped
-        if (boxService == null) {
-            setVpnState(false)
-            prefs.edit().remove(KEY_START_TIME).apply()
-        }
+        // Clear state
+        setVpnState(false)
+        prefs.edit().remove(KEY_START_TIME).apply()
 
-        // Post to main thread to avoid crash
-        mainHandler.post {
-            MainActivity.statusSink?.success(false)
+        // ✅ PRIORITY 1: Detect unexpected death
+        if (!isNormalStop) {
+            Log.e(TAG, "⚠️ VPN SERVICE KILLED UNEXPECTEDLY BY ANDROID!")
+            notifyFlutterVpnDeath("service_killed", "Android killed VPN service (low memory or system cleanup)")
         }
     }
 
+    // ✅ PRIORITY 1: Enhanced onRevoke - permission was revoked
     override fun onRevoke() {
         super.onRevoke()
-        Log.d(TAG, "VPN permission revoked")
+        Log.e(TAG, "🔴 VPN PERMISSION REVOKED!")
+
+        // Mark as unexpected death (user didn't click disconnect)
+        isNormalStop = false
+
+        notifyFlutterVpnDeath("permission_revoked", "VPN permission was revoked")
         stopVpnService()
+    }
+
+    // ✅ PRIORITY 1: New method - notify Flutter of VPN death
+    private fun notifyFlutterVpnDeath(reason: String, message: String) {
+        Log.e(TAG, "💀 VPN DIED: reason=$reason, message=$message")
+
+        mainHandler.post {
+            try {
+                MainActivity.statusSink?.success(mapOf(
+                    "event" to "vpn_died",
+                    "reason" to reason,
+                    "message" to message,
+                    "timestamp" to System.currentTimeMillis()
+                ))
+                Log.d(TAG, "✅ Sent vpn_died event to Flutter")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to send vpn_died event to Flutter", e)
+            }
+        }
+    }
+
+    // ✅ PRIORITY 1: New method - notify Flutter of VPN state changes
+    private fun notifyFlutterVpnState(event: String, message: String) {
+        Log.d(TAG, "📡 VPN State: event=$event, message=$message")
+
+        mainHandler.post {
+            try {
+                MainActivity.statusSink?.success(mapOf(
+                    "event" to event,
+                    "message" to message,
+                    "timestamp" to System.currentTimeMillis()
+                ))
+                Log.d(TAG, "✅ Sent $event event to Flutter")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to send $event event to Flutter", e)
+            }
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)

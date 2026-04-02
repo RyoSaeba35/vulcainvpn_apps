@@ -15,6 +15,8 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
 import android.content.Context
 import android.app.NotificationManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 
 class MainActivity : FlutterActivity() {
 
@@ -86,6 +88,39 @@ class MainActivity : FlutterActivity() {
                     val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                     val startTime = prefs.getLong("start_time", 0)
                     result.success(if (startTime > 0) startTime else null)
+                }
+                // ✅ PRIORITY 1: New method to verify VPN is actually active
+                "isVpnActive" -> {
+                    try {
+                        val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                        val activeNetwork = connectivityManager.activeNetwork
+
+                        if (activeNetwork == null) {
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+
+                        val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
+                        val isVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+
+                        Log.d(TAG, "🔍 VPN active check: $isVpn")
+                        result.success(isVpn)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error checking VPN active state", e)
+                        result.success(false)
+                    }
+                }
+                // ✅ PRIORITY 1: Clear stale VPN state
+                "clearVpnState" -> {
+                    try {
+                        val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                        prefs.edit().clear().apply()
+                        Log.d(TAG, "✅ Cleared stale VPN state")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error clearing VPN state", e)
+                        result.error("CLEAR_FAILED", e.message, null)
+                    }
                 }
                 else -> result.notImplemented()
             }
@@ -159,31 +194,61 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun verifyVpnStarted(result: MethodChannel.Result) {
-        val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-        val isRunning = prefs.getBoolean("is_running", false)
+        // ✅ IMPROVED: Check actual VPN state instead of SharedPreferences
+        // SharedPreferences doesn't sync instantly across processes!
+        try {
+            val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val activeNetwork = connectivityManager.activeNetwork
 
-        if (isRunning) {
-            Log.d(TAG, "✅ VPN verified as running")
-            result.success(true)
-        } else {
-            Log.w(TAG, "⚠️ VPN may not have started properly, retrying...")
+            if (activeNetwork != null) {
+                val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
+                val isVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
 
-            // Retry once (for first-time permission scenario)
-            Handler(mainLooper).postDelayed({
-                val isRunningAfterRetry = prefs.getBoolean("is_running", false)
-
-                if (isRunningAfterRetry) {
-                    Log.d(TAG, "✅ VPN verified as running after retry check")
+                if (isVpn) {
+                    Log.d(TAG, "✅ VPN verified as running (actual network check)")
                     result.success(true)
-                } else {
-                    Log.e(TAG, "❌ VPN failed to start even after retry")
-                    result.error(
-                        "VPN_START_FAILED",
-                        "VPN service did not start properly. Please try again.",
-                        null
-                    )
+                    return
                 }
-            }, 1000) // Wait another second before giving up
+            }
+
+            // VPN not active yet, retry once
+            Log.w(TAG, "⚠️ VPN not active yet, retrying in 1.5 seconds...")
+
+            Handler(mainLooper).postDelayed({
+                try {
+                    val activeNetwork2 = connectivityManager.activeNetwork
+                    if (activeNetwork2 != null) {
+                        val caps2 = connectivityManager.getNetworkCapabilities(activeNetwork2)
+                        val isVpn2 = caps2?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+
+                        if (isVpn2) {
+                            Log.d(TAG, "✅ VPN verified as running after retry (actual network check)")
+                            result.success(true)
+                        } else {
+                            Log.e(TAG, "❌ VPN failed to start even after retry")
+                            result.error(
+                                "VPN_START_FAILED",
+                                "VPN service did not start properly. Please try again.",
+                                null
+                            )
+                        }
+                    } else {
+                        Log.e(TAG, "❌ No active network after retry")
+                        result.error(
+                            "VPN_START_FAILED",
+                            "No network connection available.",
+                            null
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error in retry check: ${e.message}", e)
+                    result.error("VPN_VERIFY_ERROR", e.message, null)
+                }
+            }, 1500) // Wait 1.5 seconds before retry
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error verifying VPN: ${e.message}", e)
+            result.error("VPN_VERIFY_ERROR", e.message, null)
         }
     }
 
