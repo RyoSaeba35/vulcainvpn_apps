@@ -14,6 +14,7 @@ import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 // ✅ PRIORITY 1: ADD THIS INITIALIZATION CODE
 // Put this in your main.dart or app initialization:
@@ -39,7 +40,7 @@ class VpnHomePage extends StatefulWidget {
   State<VpnHomePage> createState() => _VpnHomePageState();
 }
 
-class _VpnHomePageState extends State<VpnHomePage> {
+class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
   String _connectionState = 'disconnected';
@@ -69,21 +70,43 @@ class _VpnHomePageState extends State<VpnHomePage> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
+
     _initTrayIfWindows();
     _init();
 
     // ✅ PRIORITY 1: Setup event listener
     _setupVpnEventListener();
+
+    // ✅ NEW: Check for death events on startup
+  _checkForStoredDeathEvents();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
     _displayTimer?.cancel();
     _ipCheckTimer?.cancel();
     _vpnSubscription?.cancel();
     _eventSubscription?.cancel();  // ✅ NEW
     _trayService?.dispose();
     super.dispose();
+  }
+
+  // ✅ NEW: Called when app lifecycle changes
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    print('📱 App lifecycle changed: $state');
+
+    // When app comes back to foreground, check for stored death events
+    if (state == AppLifecycleState.resumed) {
+      print('📱 App resumed from background - checking for death events');
+      _checkForStoredDeathEvents();
+    }
   }
 
   // ✅ PRIORITY 1: Setup VPN event listener
@@ -105,7 +128,7 @@ class _VpnHomePageState extends State<VpnHomePage> {
   void _handleVpnEvent(VpnEvent event) {
     if (!mounted) return;
 
-    print('🔔 Handling event: ${event.type}');
+    print('🔔 Handling event: ${event.type}, reason: ${event.reason}');
 
     switch (event.type) {
       case VpnEventType.died:
@@ -120,18 +143,24 @@ class _VpnHomePageState extends State<VpnHomePage> {
         _trayService?.updateState(false);
         _fetchCurrentIpAndLocationWithRetry();
 
-        // Show alert to user
-        _showVpnDiedAlert(event);
+        // ✅ Show appropriate alert based on reason
+        if (event.reason == 'subscription_expired') {
+          _showSubscriptionExpiredAlert(event);  // ← NEW!
+        } else {
+          _showVpnDiedAlert(event);  // Other reasons
+        }
         break;
 
       case VpnEventType.connected:
         print('✅ VPN connected event');
-        // Already handled by statusStream, but we can add extra logic here
         break;
 
       case VpnEventType.disconnected:
         print('🔴 VPN disconnected event');
-        // Already handled by statusStream
+        setState(() {
+          _connectionState = 'disconnected';
+          _stopDisplayTimer();
+        });
         break;
 
       case VpnEventType.error:
@@ -374,6 +403,105 @@ class _VpnHomePageState extends State<VpnHomePage> {
     _displayTimer?.cancel();
     _vpnStartTime = null;
     _elapsedTime = Duration.zero;
+  }
+
+  // ✅ NEW: Show subscription expired alert
+  void _showSubscriptionExpiredAlert(VpnEvent event) {
+    if (!mounted) return;
+
+    final loc = AppLocalizations.of(context)!;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.card_membership, color: Colors.red, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Subscription Expired',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              event.message,
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.red, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'VPN has been disconnected. Your real IP is now exposed!',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Dismiss',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(context);
+              final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
+              try {
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please visit vulcainvpn.com to renew'),
+                      backgroundColor: MyColors.myOrange,
+                    ),
+                  );
+                }
+              }
+            },
+            icon: Icon(Icons.shopping_cart),
+            label: Text('Renew Subscription'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ⭐ NEW: Load VPN start time from native
@@ -858,6 +986,38 @@ class _VpnHomePageState extends State<VpnHomePage> {
       }
     } catch (e) {
       print('❌ Failed to restore VPN state: $e');
+    }
+  }
+
+  Future<void> _checkForStoredDeathEvents() async {
+    if (!Platform.isAndroid) return;
+
+    try {
+      print('🔍 Calling checkForDeathEvents method...');
+
+      final deathEvent = await MethodChannel('com.vulcain.vpn/control')
+          .invokeMethod('checkForDeathEvents');
+
+      print('🔍 Result from checkForDeathEvents: $deathEvent');
+
+      if (deathEvent != null && deathEvent is Map) {
+        print('📨 Found stored death event: ${deathEvent['reason']}');
+
+        // Create VpnEvent from stored data
+        final event = VpnEvent(
+          type: VpnEventType.died,
+          reason: deathEvent['reason'] as String?,
+          message: deathEvent['message'] as String,
+          timestamp: deathEvent['timestamp'] as int?,
+        );
+
+        // Handle it!
+        _handleVpnEvent(event);
+      } else {
+        print('✅ No stored death events found');
+      }
+    } catch (e) {
+      print('❌ Error checking for death events: $e');
     }
   }
 }

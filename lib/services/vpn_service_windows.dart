@@ -22,6 +22,14 @@ class WindowsVpnService extends VpnService {
   static Timer? _processChecker;
   static final StreamController<VpnEvent> _eventController = StreamController<VpnEvent>.broadcast();
 
+  // ✅ PRIORITY 2: Heartbeat monitoring
+  static Timer? _heartbeatTimer;
+  static int _consecutiveFailures = 0;
+  static DateTime? _lastSuccessfulPing;
+  static const int _heartbeatIntervalSeconds = 10;
+  static const int _maxConsecutiveFailures = 3; // 30 seconds total
+  static const String _pingHost = '1.1.1.1'; // Cloudflare DNS
+
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
 
@@ -122,6 +130,227 @@ class WindowsVpnService extends VpnService {
     }
   }
 
+  // ✅ PRIORITY 2: Start heartbeat monitoring
+  static void _startHeartbeatMonitoring() {
+    _stopHeartbeatMonitoring(); // Cancel any existing timer
+
+    _log('💓 Starting heartbeat monitoring (every ${_heartbeatIntervalSeconds}s)');
+    _consecutiveFailures = 0;
+    _lastSuccessfulPing = DateTime.now();
+
+    _heartbeatTimer = Timer.periodic(
+      Duration(seconds: _heartbeatIntervalSeconds),
+      (timer) async {
+        if (!_isConnected) {
+          timer.cancel();
+          return;
+        }
+
+        try {
+          final isReachable = await _performHeartbeatCheck();
+
+          if (isReachable) {
+            // ✅ Ping successful
+            if (_consecutiveFailures > 0) {
+              await _log('💚 Heartbeat recovered after $_consecutiveFailures failures');
+            }
+            _consecutiveFailures = 0;
+            _lastSuccessfulPing = DateTime.now();
+          } else {
+            // ❌ Ping failed
+            _consecutiveFailures++;
+            final timeSinceLastSuccess = DateTime.now().difference(_lastSuccessfulPing!).inSeconds;
+
+            await _log('💔 Heartbeat failed ($_consecutiveFailures/$_maxConsecutiveFailures) - Last success: ${timeSinceLastSuccess}s ago');
+
+            if (_consecutiveFailures >= _maxConsecutiveFailures) {
+              // Multiple failures detected
+              await _handleHeartbeatFailure();
+            }
+          }
+        } catch (e) {
+          await _log('Heartbeat check error: $e');
+        }
+      },
+    );
+  }
+
+  // ✅ PRIORITY 2: Stop heartbeat monitoring
+  static void _stopHeartbeatMonitoring() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _consecutiveFailures = 0;
+    _log('💓 Stopped heartbeat monitoring');
+  }
+
+  // ✅ PRIORITY 2: Perform heartbeat check
+  static Future<bool> _performHeartbeatCheck() async {
+    try {
+      // Use ping command to check internet connectivity
+      final result = await Process.run(
+        'ping',
+        ['-n', '1', '-w', '3000', _pingHost], // 1 ping, 3 second timeout
+      );
+
+      final success = result.exitCode == 0;
+
+      if (success) {
+        await _log('💚 Ping OK: $_pingHost');
+      } else {
+        await _log('💔 Ping FAILED: $_pingHost');
+      }
+
+      return success;
+    } catch (e) {
+      await _log('💔 Ping exception: $e');
+      return false;
+    }
+  }
+
+  // ✅ PRIORITY 2: Handle heartbeat failure - SMART detection
+  static Future<void> _handleHeartbeatFailure() async {
+    await _log('🚨 HEARTBEAT FAILURE DETECTED!');
+    await _log('   VPN is connected but no internet access through VPN');
+    await _log('   3 consecutive ping failures detected');
+
+    // ✅ SMART: Check if device has ANY network at all
+    final hasAnyNetwork = await _checkForAnyNetwork();
+
+    if (!hasAnyNetwork) {
+      // No network adapters active at all
+      // User may be in tunnel, airplane mode, or network is down
+      // DON'T stop VPN - just wait for network to return
+      await _log('📶 NO NETWORK DETECTED');
+      await _log('   User may be in tunnel, out of range, or network is down');
+      await _log('   Keeping VPN connected - will resume when network returns');
+      _consecutiveFailures = 0; // Reset counter
+      return;
+    }
+
+    // ✅ We have network adapters but VPN pings fail
+    // This means VPN itself is broken (expired credentials, server down, etc)
+    await _log('🔴 VPN IS BROKEN!');
+    await _log('   ✅ Device has active network adapters');
+    await _log('   ❌ VPN pings are failing');
+    await _log('   → VPN credentials likely expired or connection broken');
+
+    final reason = 'vpn_broken';
+    final message = 'VPN is connected but internet is not accessible. Your credentials may have expired or the connection is broken. VPN has been disconnected.';
+
+    // ✅ Actually STOP the VPN!
+    await _log('🛑 STOPPING BROKEN VPN...');
+
+    // Send death event FIRST
+    _eventController.add(VpnEvent(
+      type: VpnEventType.died,
+      reason: reason,
+      message: message,
+    ));
+
+    // ✅ Inline stop logic (can't call instance method from static)
+    _isNormalStop = true; // Mark as normal to prevent duplicate death event
+    _stopProcessChecker();
+    _stopHeartbeatMonitoring();
+
+    // Notify backend
+    try {
+      final deviceId = await AuthService.getDeviceId();
+      final apiKey = await AuthService.getApiKey();
+      if (deviceId != null && apiKey != null) {
+        await http.post(
+          Uri.parse('https://api.vulcainvpn.com/api/disconnect/$deviceId'),
+          headers: {'X-Api-Key': apiKey},
+        );
+      }
+    } catch (e) {
+      await _log('Failed to notify backend: $e');
+    }
+
+    // Kill process
+    _singBoxProcess?.kill();
+    _singBoxProcess = null;
+
+    // Clean up config files
+    try {
+      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
+        await SecureConfigService.secureDelete(_plaintextPath!);
+      }
+      if (_configPath != null && await File(_configPath!).exists()) {
+        await SecureConfigService.secureDelete(_configPath!);
+      }
+      _plaintextPath = null;
+      _configPath = null;
+    } catch (e) {
+      await _log('Config cleanup error: $e');
+    }
+
+    // Kill by name
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+    } catch (e) {
+      await _log('taskkill error: $e');
+    }
+
+    _isConnected = false;
+    _statusController.add(false);
+
+    // Reset counter
+    _consecutiveFailures = 0;
+
+    await _log('✅ VPN stopped due to broken connection');
+  }
+
+  // ✅ PRIORITY 2: Check basic network connectivity
+  static Future<bool> _checkBasicConnectivity() async {
+    try {
+      // Try to ping Google DNS
+      final result = await Process.run(
+        'ping',
+        ['-n', '1', '-w', '3000', '8.8.8.8'],
+      );
+
+      return result.exitCode == 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ✅ PRIORITY 2: Check if device has any active network
+  static Future<bool> _checkForAnyNetwork() async {
+    try {
+      // Check for active network adapters (excluding VPN)
+      final result = await Process.run(
+        'netsh',
+        ['interface', 'show', 'interface'],
+      );
+
+      final output = result.stdout.toString();
+
+      // Look for "Connected" status on WiFi, Ethernet, or Cellular interfaces
+      // Exclude VPN adapters (usually named "sing-box" or similar)
+      final lines = output.split('\n');
+
+      for (final line in lines) {
+        if (line.contains('Connected') &&
+            !line.toLowerCase().contains('vpn') &&
+            !line.toLowerCase().contains('sing-box') &&
+            !line.toLowerCase().contains('wintun')) {
+          // Found active non-VPN network adapter
+          await _log('   Found active network: ${line.trim()}');
+          return true;
+        }
+      }
+
+      await _log('   No active non-VPN network adapters found');
+      return false;
+    } catch (e) {
+      await _log('   Error checking network adapters: $e');
+      // On error, assume we have network (safer to stop VPN than leave broken)
+      return true;
+    }
+  }
+
   @override
   Future<bool> startVpn() async {
     try {
@@ -129,6 +358,10 @@ class WindowsVpnService extends VpnService {
 
       // ✅ Reset normal stop flag
       _isNormalStop = false;
+
+      // ✅ PRIORITY 2: Reset heartbeat counters
+      _consecutiveFailures = 0;
+      _lastSuccessfulPing = DateTime.now();
 
       // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();
@@ -265,6 +498,9 @@ class WindowsVpnService extends VpnService {
       // ✅ PRIORITY 1: Start process checker
       _startProcessChecker();
 
+      // ✅ PRIORITY 2: Start heartbeat monitoring
+      _startHeartbeatMonitoring();
+
       // ✅ PRIORITY 1: Send connected event
       _eventController.add(VpnEvent(
         type: VpnEventType.connected,
@@ -287,6 +523,9 @@ class WindowsVpnService extends VpnService {
 
     // ✅ PRIORITY 1: Stop process checker
     _stopProcessChecker();
+
+    // ✅ PRIORITY 2: Stop heartbeat monitoring
+    _stopHeartbeatMonitoring();
 
     // Notify backend of disconnection
     try {
