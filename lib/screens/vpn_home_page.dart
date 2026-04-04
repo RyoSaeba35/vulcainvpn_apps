@@ -9,27 +9,13 @@ import '../services/ip_service.dart';
 import '../services/vpn_service.dart';
 import '../services/tray_window_service.dart';
 import '../services/vpn_service_android.dart';
-import '../services/vpn_service_windows.dart';  // ✅ NEW
+import '../services/vpn_service_windows.dart';
+import '../services/settings_service.dart'; // ✅ NEW
+import '../services/notification_service.dart'; // ✅ NEW
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter/services.dart';
-
-// ✅ PRIORITY 1: ADD THIS INITIALIZATION CODE
-// Put this in your main.dart or app initialization:
-/*
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // ✅ PRIORITY 1: Setup Android event listener
-  if (Platform.isAndroid) {
-    AndroidVpnService.setupEventListener();
-  }
-
-  runApp(MyApp());
-}
-*/
 
 class VpnHomePage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -60,6 +46,15 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   // ✅ PRIORITY 1: Add event subscription
   StreamSubscription<VpnEvent>? _eventSubscription;
 
+  // ✅ PRIORITY 3: Add reconnecting flag
+  bool _isReconnecting = false;
+
+  // ✅ NEW: Auto-reconnect state
+  bool _isAutoReconnecting = false;
+  int _reconnectAttempt = 0;
+  Timer? _reconnectTimer;
+  static const int _maxReconnectAttempts = 4; // ~30 seconds total
+
   TrayWindowService? _trayService;
 
   late final VpnService _vpnService = VpnService.instance;
@@ -80,7 +75,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     _setupVpnEventListener();
 
     // ✅ NEW: Check for death events on startup
-  _checkForStoredDeathEvents();
+    _checkForStoredDeathEvents();
   }
 
   @override
@@ -90,7 +85,8 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     _displayTimer?.cancel();
     _ipCheckTimer?.cancel();
     _vpnSubscription?.cancel();
-    _eventSubscription?.cancel();  // ✅ NEW
+    _eventSubscription?.cancel();
+    _reconnectTimer?.cancel(); // ✅ NEW
     _trayService?.dispose();
     super.dispose();
   }
@@ -124,7 +120,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ PRIORITY 1: Handle VPN events
+  // ✅ UPDATED: Handle VPN events with auto-reconnect
   void _handleVpnEvent(VpnEvent event) {
     if (!mounted) return;
 
@@ -132,7 +128,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
     switch (event.type) {
       case VpnEventType.died:
-        // ✅ VPN DIED! Critical event!
         print('💀 VPN DIED: ${event.reason} - ${event.message}');
 
         setState(() {
@@ -143,12 +138,8 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         _trayService?.updateState(false);
         _fetchCurrentIpAndLocationWithRetry();
 
-        // ✅ Show appropriate alert based on reason
-        if (event.reason == 'subscription_expired') {
-          _showSubscriptionExpiredAlert(event);  // ← NEW!
-        } else {
-          _showVpnDiedAlert(event);  // Other reasons
-        }
+        // ✅ NEW: Check if we should auto-reconnect
+        _handleVpnDeath(event);
         break;
 
       case VpnEventType.connected:
@@ -168,6 +159,501 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         _showErrorSnackbar(event.message);
         break;
     }
+  }
+
+  // ✅ NEW: Handle VPN death with auto-reconnect logic
+  Future<void> _handleVpnDeath(VpnEvent event) async {
+    // Check if auto-reconnect is enabled
+    final autoReconnectEnabled = await SettingsService.getAutoReconnect();
+
+    // Determine if this reason is reconnectable
+    final shouldAutoReconnect = autoReconnectEnabled &&
+      _isReconnectableReason(event.reason);
+
+    if (shouldAutoReconnect) {
+      print('🔄 Auto-reconnect enabled for reason: ${event.reason}');
+      await _startAutoReconnect(event);
+    } else {
+      print('⏸️ Auto-reconnect disabled or not applicable');
+      // Show alert immediately
+      _showAppropriateAlert(event);
+    }
+  }
+
+  // ✅ NEW: Check if reason is reconnectable
+  bool _isReconnectableReason(String? reason) {
+    // Don't auto-reconnect for these reasons:
+    if (reason == 'permission_revoked') return false; // User action
+
+    // DO auto-reconnect for these:
+    if (reason == 'service_killed') return true;      // Android killed it
+    if (reason == 'process_crashed') return true;     // Windows crash
+    if (reason == 'vpn_broken') return true;          // Server down or expired
+    if (reason == 'subscription_expired') return true; // Will fail, but worth trying
+
+    return false; // Unknown reasons: don't auto-reconnect
+  }
+
+  // ✅ NEW: Start auto-reconnect attempts
+  Future<void> _startAutoReconnect(VpnEvent event) async {
+    if (_isAutoReconnecting) {
+      print('⚠️ Already auto-reconnecting, skipping');
+      return;
+    }
+
+    setState(() {
+      _isAutoReconnecting = true;
+      _reconnectAttempt = 0;
+    });
+
+    print('🔄 Starting auto-reconnect (max $_maxReconnectAttempts attempts)');
+
+    // Show subtle indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              SizedBox(width: 12),
+              Text('Auto-reconnecting...'),
+            ],
+          ),
+          duration: Duration(seconds: 30),
+          backgroundColor: MyColors.myOrange,
+        ),
+      );
+    }
+
+    // Try reconnecting with exponential backoff
+    final delays = [0, 5, 10, 15]; // seconds: 0s, 5s, 10s, 15s = ~30s total
+
+    for (int i = 0; i < _maxReconnectAttempts; i++) {
+      if (!_isAutoReconnecting) break; // User manually stopped
+
+      _reconnectAttempt = i + 1;
+      print('🔄 Auto-reconnect attempt $_reconnectAttempt/$_maxReconnectAttempts');
+
+      // Wait before attempt (except first one)
+      if (delays[i] > 0) {
+        print('⏳ Waiting ${delays[i]}s before retry...');
+        await Future.delayed(Duration(seconds: delays[i]));
+      }
+
+      if (!_isAutoReconnecting) break;
+
+      try {
+        // Attempt reconnect (with subscription check)
+        if (Platform.isAndroid) {
+          await (VpnService.instance as AndroidVpnService).reconnectVpn();
+        } else if (Platform.isWindows) {
+          await (VpnService.instance as WindowsVpnService).reconnectVpn();
+        } else {
+          await _vpnService.startVpn();
+        }
+
+        // ✅ SUCCESS!
+        print('✅ Auto-reconnect successful on attempt $_reconnectAttempt');
+
+        setState(() {
+          _isAutoReconnecting = false;
+          _connectionState = 'connected';
+          _vpnStartTime = DateTime.now();
+        });
+        _startDisplayTimer();
+
+        // Close any existing snackbar
+        ScaffoldMessenger.of(context).clearSnackBars();
+
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 12),
+                  Text('✅ Reconnected automatically!'),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+
+        // Cancel notification if it was shown
+        if (Platform.isAndroid) {
+          await NotificationService.cancelAll();
+        }
+
+        return; // Success - exit
+
+      } catch (e) {
+        print('❌ Auto-reconnect attempt $_reconnectAttempt failed: $e');
+
+        // Check if subscription expired
+        if (e.toString().contains('subscription_expired')) {
+          print('🔴 Subscription expired - stopping auto-reconnect');
+          break; // Don't retry if subscription expired
+        }
+
+        // Continue to next attempt
+        continue;
+      }
+    }
+
+    // ❌ All attempts failed
+    print('🔴 Auto-reconnect FAILED after $_maxReconnectAttempts attempts');
+
+    setState(() => _isAutoReconnecting = false);
+
+    // Close reconnecting snackbar
+    ScaffoldMessenger.of(context).clearSnackBars();
+
+    // Show notification if app is backgrounded
+    if (!mounted || WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      if (Platform.isAndroid) {
+        await NotificationService.showVpnDisconnectedNotification(
+          reason: event.reason ?? 'unknown',
+          message: event.message,
+        );
+      }
+    }
+
+    // Show alert if app is in foreground
+    if (mounted) {
+      _showAppropriateAlert(event);
+    }
+  }
+
+  // ✅ NEW: Show appropriate alert based on event
+  void _showAppropriateAlert(VpnEvent event) {
+    if (event.reason == 'vpn_broken') {
+      _showReconnectDialog(event);
+    } else if (event.reason == 'subscription_expired') {
+      _showSubscriptionExpiredAlert(event);
+    } else {
+      _showVpnDiedAlert(event);
+    }
+  }
+
+  // ✅ PRIORITY 3: Show reconnect dialog
+  void _showReconnectDialog(VpnEvent event) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'VPN Connection Lost',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'The VPN connection has been lost. Would you like to reconnect?',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.red, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your real IP may be exposed!',
+                      style: TextStyle(
+                        color: Colors.red,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Not Now',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _handleReconnect();
+            },
+            icon: Icon(Icons.vpn_lock),
+            label: Text('Reconnect'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ PRIORITY 3: Handle reconnect with subscription check
+  Future<void> _handleReconnect() async {
+    if (!mounted || _isReconnecting) return;
+
+    setState(() => _isReconnecting = true);
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: Card(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  'Reconnecting...',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Checking subscription...',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      print('🔄 Attempting to reconnect with subscription check...');
+
+      if (Platform.isAndroid) {
+        await (VpnService.instance as AndroidVpnService).reconnectVpn();
+      } else if (Platform.isWindows) {
+        await (VpnService.instance as WindowsVpnService).reconnectVpn();
+      } else {
+        await _vpnService.startVpn();
+      }
+
+      // Close loading dialog
+      if (mounted) Navigator.pop(context);
+
+      // Success!
+      print('✅ Reconnected successfully');
+
+      setState(() {
+        _connectionState = 'connected';
+        _vpnStartTime = DateTime.now();
+      });
+      _startDisplayTimer();
+
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Text('✅ Reconnected successfully!'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+    } catch (e) {
+      print('❌ Reconnect failed: $e');
+
+      // Close loading dialog
+      if (mounted) Navigator.pop(context);
+
+      final errorString = e.toString();
+
+      // ✅ PRIORITY 3: Check if subscription expired
+      if (errorString.contains('subscription_expired')) {
+        _showSubscriptionExpiredAfterReconnect();
+      } else {
+        _showReconnectFailedAlert(errorString);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isReconnecting = false);
+      }
+    }
+  }
+
+  // ✅ PRIORITY 3: Show subscription expired alert after failed reconnect
+  void _showSubscriptionExpiredAfterReconnect() {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.card_membership, color: Colors.red, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Subscription Expired',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Your VPN subscription has expired. Please renew your subscription to continue using the VPN.',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info, color: Colors.orange, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your connection is currently unprotected',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Close',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              Navigator.pop(context);
+              final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
+              try {
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Please visit vulcainvpn.com to renew'),
+                      backgroundColor: MyColors.myOrange,
+                    ),
+                  );
+                }
+              }
+            },
+            icon: Icon(Icons.shopping_cart),
+            label: Text('Renew Subscription'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ PRIORITY 3: Show generic reconnect failed alert
+  void _showReconnectFailedAlert(String errorString) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 28),
+            SizedBox(width: 12),
+            Text('Reconnect Failed'),
+          ],
+        ),
+        content: Text(
+          'Could not reconnect to VPN. Please check your internet connection and try again later.',
+          style: TextStyle(fontSize: 16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: TextStyle(fontSize: 16)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _handleReconnect(); // Try again
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+            ),
+            child: Text('Try Again'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ✅ PRIORITY 1: Show VPN died alert
@@ -203,7 +689,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
     showDialog(
       context: context,
-      barrierDismissible: false,  // Force user to acknowledge
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
@@ -265,7 +751,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
-              _toggleConnection();  // Reconnect
+              _toggleConnection();
             },
             icon: Icon(Icons.vpn_lock),
             label: Text('Reconnect'),
@@ -328,7 +814,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       if (result.stdout.toString().contains('sing-box-amd64.exe')) {
         setState(() {
           _connectionState = 'connected';
-          // ⭐ CHANGED: Start timestamp-based timer instead
           _vpnStartTime = DateTime.now();
           _startDisplayTimer();
         });
@@ -356,7 +841,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       setState(() {
         if (isConnected) {
           _connectionState = 'connected';
-          // ⭐ CHANGED: Set start time instead of counter
           if (_vpnStartTime == null) {
             _vpnStartTime = DateTime.now();
           }
@@ -377,18 +861,15 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     });
   }
 
-  // ⭐ NEW: Start display timer (updates UI every second)
   void _startDisplayTimer() {
     _displayTimer?.cancel();
 
-    // ⭐ CRITICAL: Calculate elapsed time IMMEDIATELY (don't wait for first tick)
     if (_vpnStartTime != null && mounted) {
       setState(() {
         _elapsedTime = DateTime.now().difference(_vpnStartTime!);
       });
     }
 
-    // Then start periodic updates
     _displayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_vpnStartTime != null && mounted) {
         setState(() {
@@ -398,14 +879,12 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     });
   }
 
-  // ⭐ NEW: Stop display timer and reset
   void _stopDisplayTimer() {
     _displayTimer?.cancel();
     _vpnStartTime = null;
     _elapsedTime = Duration.zero;
   }
 
-  // ✅ NEW: Show subscription expired alert
   void _showSubscriptionExpiredAlert(VpnEvent event) {
     if (!mounted) return;
 
@@ -504,7 +983,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ⭐ NEW: Load VPN start time from native
   Future<void> _loadVpnStartTime() async {
     if (!Platform.isAndroid) return;
 
@@ -669,7 +1147,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
         final errorString = e.toString();
 
-        // 🐛 DEBUG: Print the actual error to console
         print('❌ VPN Connection Error: $errorString');
         if (e is PlatformException) {
           print('   Code: ${e.code}');
@@ -677,7 +1154,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           print('   Details: ${e.details}');
         }
 
-        // ✅ PRIORITY 1: Check subscription status (403 Forbidden)
         if (errorString.contains('No active subscription') ||
             errorString.contains('Subscription expired') ||
             errorString.contains('403')) {
@@ -685,7 +1161,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           return;
         }
 
-        // ✅ PRIORITY 2: Check device registration (401 Unauthorized ONLY)
         if (errorString.contains('Device not registered') ||
             errorString.contains('401') ||
             errorString.contains('Unauthorized')) {
@@ -693,14 +1168,12 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           return;
         }
 
-        // ✅ PRIORITY 3: Check device limits (429 Too Many Requests)
         if (errorString.contains('Maximum active devices reached') ||
             errorString.contains('429')) {
           _showDeviceLimitDialog(loc);
           return;
         }
 
-        // ✅ PRIORITY 4: Android permissions (specific codes)
         if (Platform.isAndroid && e is PlatformException) {
           if (e.code == 'NOTIFICATION_PERMISSION_DENIED') {
             _showPermissionDialog(loc, loc.notificationPermissionMessage);
@@ -712,7 +1185,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           }
         }
 
-        // ✅ PRIORITY 5: Generic error
         _showGenericError(loc, errorString);
       }
     }
@@ -730,17 +1202,13 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ UPDATED: Extract renewal URL from error string
   void _showSubscriptionExpiredDialog(AppLocalizations loc, String errorString) {
-    // Try to extract renewal URL from error (format: "error|renewal_url:https://...")
     String renewalUrl = 'https://www.vulcainvpn.com/dashboard';
     if (errorString.contains('renewal_url:')) {
       try {
         final urlPart = errorString.split('renewal_url:')[1];
         renewalUrl = urlPart.split('|')[0].trim();
-      } catch (_) {
-        // Use default URL if parsing fails
-      }
+      } catch (_) {}
     }
 
     showDialog(
@@ -807,7 +1275,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ Device not registered dialog
   void _showNotRegisteredDialog(AppLocalizations loc) {
     showDialog(
       context: context,
@@ -824,7 +1291,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ Device limit dialog
   void _showDeviceLimitDialog(AppLocalizations loc) {
     showDialog(
       context: context,
@@ -841,7 +1307,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ Permission dialog
   void _showPermissionDialog(AppLocalizations loc, String message) {
     showDialog(
       context: context,
@@ -858,10 +1323,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ✅ Generic error dialog
   void _showGenericError(AppLocalizations loc, [String? errorString]) {
     final message = errorString != null
-        ? '${loc.connectionFailedMessage}\n\nError: ${errorString.replaceAll('Exception: ', '').split('|')[0]}'  // Strip metadata
+        ? '${loc.connectionFailedMessage}\n\nError: ${errorString.replaceAll('Exception: ', '').split('|')[0]}'
         : loc.connectionFailedMessage;
 
     showDialog(
@@ -936,7 +1400,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
-  // ⭐ UPDATED: Restore VPN state and load start time with fallback
   Future<void> _restoreVpnState() async {
     if (!Platform.isAndroid) return;
 
@@ -948,13 +1411,11 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       if (isRunning) {
         print('🔄 Restoring VPN state: connected');
 
-        // ⭐ Try to load the actual start time from native
         print('🔄 Loading start time from native...');
         final startTimeMs = await (VpnService.instance as AndroidVpnService).getConnectionStartTimeMs();
         print('🔄 Start time from native: $startTimeMs');
 
         if (startTimeMs != null && startTimeMs > 0) {
-          // ✅ Use stored start time
           final startTime = DateTime.fromMillisecondsSinceEpoch(startTimeMs);
           final elapsed = DateTime.now().difference(startTime);
 
@@ -966,10 +1427,8 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           print('✅ Loaded start time: $startTime');
           print('✅ Elapsed time: ${elapsed.inHours}h ${elapsed.inMinutes % 60}m ${elapsed.inSeconds % 60}s');
 
-          // Start the display timer (this will calculate elapsed time immediately)
           _startDisplayTimer();
         } else {
-          // ⚠️ Fallback: Use current time if we can't load stored time
           print('⚠️ No stored start time found, using current time as fallback');
           setState(() {
             _connectionState = 'connected';
@@ -1003,7 +1462,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       if (deathEvent != null && deathEvent is Map) {
         print('📨 Found stored death event: ${deathEvent['reason']}');
 
-        // Create VpnEvent from stored data
         final event = VpnEvent(
           type: VpnEventType.died,
           reason: deathEvent['reason'] as String?,
@@ -1011,7 +1469,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           timestamp: deathEvent['timestamp'] as int?,
         );
 
-        // Handle it!
         _handleVpnEvent(event);
       } else {
         print('✅ No stored death events found');

@@ -13,4 +13,7 @@ abstract class VpnService {
   Future<bool> startVpn();
   Future<void> stopVpn();
   Future<bool> checkNotificationPermission();
+  Future<String> checkSubscription();
+  Future<void> reconnectVpn();
+  Future<VpnEvent?> checkForDeathEvents();
 }

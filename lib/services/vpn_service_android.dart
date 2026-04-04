@@ -249,6 +249,71 @@ class AndroidVpnService extends VpnService {
       return null;
     }
   }
+
+  // ✅ PRIORITY 1: Check for stored death events (when app resumes)
+  @override
+  Future<VpnEvent?> checkForDeathEvents() async {
+    try {
+      final result = await _platform.invokeMethod('checkForDeathEvents');
+
+      if (result != null && result is Map) {
+        return VpnEvent(
+          type: VpnEventType.died,
+          reason: result['reason'] as String?,
+          message: result['message'] as String,
+          timestamp: result['timestamp'] as int?,
+        );
+      }
+
+      return null;
+    } catch (e) {
+      print('❌ Error checking death events: $e');
+      return null;
+    }
+  }
+
+  // ✅ PRIORITY 3: Check subscription status
+  @override
+  Future<String> checkSubscription() async {
+    try {
+      print('🔍 Checking subscription status...');
+      final result = await _platform.invokeMethod('checkSubscription');
+      final status = result as String; // 'active', 'expired', or 'unknown'
+      print('📡 Subscription status: $status');
+      return status;
+    } catch (e) {
+      print('❌ Error checking subscription: $e');
+      return 'unknown';
+    }
+  }
+
+  // ✅ PRIORITY 3: Reconnect with subscription check
+  @override
+  Future<void> reconnectVpn() async {
+    try {
+      // CRITICAL: Check subscription FIRST
+      print('🔍 Checking subscription before reconnect...');
+      final subscriptionStatus = await checkSubscription();
+
+      if (subscriptionStatus == 'expired') {
+        print('❌ Subscription expired - blocking reconnect');
+        throw Exception('subscription_expired');
+      }
+
+      if (subscriptionStatus == 'active') {
+        print('✅ Subscription active - proceeding with reconnect');
+      } else {
+        print('⚠️ Could not verify subscription - allowing reconnect attempt');
+      }
+
+      // Subscription is OK - proceed with normal connection
+      await startVpn();
+
+    } catch (e) {
+      print('❌ Reconnect failed: $e');
+      rethrow;
+    }
+  }
 }
 
 // ✅ PRIORITY 1: VPN Event types

@@ -315,7 +315,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
             children: [
               InfoRow(
                 label: loc.plan,
-                value: '${plan['name'] ?? '-'} — ${plan['interval'] ?? '-'}',
+                value: '${plan['name'] ?? '-'}',
               ),
               InfoRow(
                 label: loc.reference,
@@ -338,14 +338,6 @@ class _SubscriptionTabState extends State<SubscriptionTab>
                 value: '$daysRemaining ${loc.daysSuffix}',
                 valueColor: daysRemaining < 7 ? Colors.red : Colors.green,
               ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          InfoCard(
-            title: loc.server,
-            icon: Icons.dns_outlined,
-            children: [
-              InfoRow(label: loc.location, value: server['name'] ?? '-'),
             ],
           ),
           const SizedBox(height: 16),

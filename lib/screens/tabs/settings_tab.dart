@@ -4,10 +4,11 @@ import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/vpn_service.dart';
+import '../../services/settings_service.dart'; // ✅ NEW
 import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
 
-class SettingsTab extends StatelessWidget {
+class SettingsTab extends StatefulWidget {
   final VoidCallback onLogout;
   final VpnService vpnService;
   final String connectionState;
@@ -20,6 +21,32 @@ class SettingsTab extends StatelessWidget {
     required this.connectionState,
     required this.loc,
   });
+
+  @override
+  State<SettingsTab> createState() => _SettingsTabState();
+}
+
+class _SettingsTabState extends State<SettingsTab> {
+  // ✅ NEW: Auto-reconnect state
+  bool _autoReconnectEnabled = true;
+  bool _isLoadingSettings = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  // ✅ NEW: Load settings from storage
+  Future<void> _loadSettings() async {
+    final autoReconnect = await SettingsService.getAutoReconnect();
+    if (mounted) {
+      setState(() {
+        _autoReconnectEnabled = autoReconnect;
+        _isLoadingSettings = false;
+      });
+    }
+  }
 
   void _showLanguageDialog(BuildContext context) {
     showDialog(
@@ -70,10 +97,10 @@ class SettingsTab extends StatelessWidget {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              if (connectionState == 'connected') {
-                await vpnService.stopVpn();
+              if (widget.connectionState == 'connected') {
+                await widget.vpnService.stopVpn();
               }
-              onLogout();
+              widget.onLogout();
             },
             child: Text(
               loc.logout,
@@ -112,6 +139,7 @@ class SettingsTab extends StatelessWidget {
           title: loc.preferences,
           icon: Icons.tune_outlined,
           children: [
+            // Language selector
             InkWell(
               onTap: () => _showLanguageDialog(context),
               borderRadius: BorderRadius.circular(8),
@@ -122,8 +150,7 @@ class SettingsTab extends StatelessWidget {
                   children: [
                     Text(
                       loc.language,
-                      style:
-                          TextStyle(color: Colors.grey[600], fontSize: 14),
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
                     ),
                     Row(
                       children: [
@@ -144,10 +171,80 @@ class SettingsTab extends StatelessWidget {
                 ),
               ),
             ),
+
+            const Divider(height: 24),
+
+            // ✅ NEW: Auto-reconnect toggle
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Row(
+                children: [
+                  Icon(
+                    Icons.sync,
+                    size: 20,
+                    color: Colors.grey[700],
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Auto-Reconnect',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                ],
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(left: 32, top: 4),
+                child: Text(
+                  'Automatically reconnect if VPN connection is lost',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ),
+              value: _autoReconnectEnabled,
+              activeColor: MyColors.myOrange,
+              onChanged: _isLoadingSettings
+                  ? null // Disable while loading
+                  : (bool value) async {
+                      setState(() => _autoReconnectEnabled = value);
+                      await SettingsService.setAutoReconnect(value);
+
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Row(
+                              children: [
+                                Icon(
+                                  value ? Icons.check_circle : Icons.info,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  value
+                                      ? 'Auto-reconnect enabled'
+                                      : 'Auto-reconnect disabled',
+                                ),
+                              ],
+                            ),
+                            backgroundColor: value ? Colors.green : Colors.grey[700],
+                            duration: const Duration(seconds: 2),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+            ),
           ],
         ),
-        // ✅ FIX #5: Debug section completely removed for production
+
         const SizedBox(height: 32),
+
+        // Logout button
         SizedBox(
           width: double.infinity,
           height: 50,

@@ -8,6 +8,7 @@ import android.net.VpnService
 import android.os.Handler
 import android.os.Build
 import android.os.Bundle
+import android.os.Looper
 import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,6 +20,9 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import kotlinx.coroutines.*
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
 class MainActivity : FlutterActivity() {
 
@@ -40,6 +44,9 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // ✅ NEW: Check if opened from notification
+        handleNotificationIntent(intent)
 
         // ✅ Register broadcast receiver for VPN death events
         vpnDeathReceiver = object : BroadcastReceiver() {
@@ -89,6 +96,37 @@ class MainActivity : FlutterActivity() {
             registerReceiver(vpnDeathReceiver, filter)
         }
         Log.d(TAG, "✅ Registered VPN death broadcast receiver")
+    }
+
+    // ✅ NEW: Handle notification tap when app already running
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    // ✅ NEW: Handle opening from notification
+    private fun handleNotificationIntent(intent: Intent?) {
+        // If user tapped notification, check for death events after Flutter initializes
+        if (intent?.action == Intent.ACTION_MAIN) {
+            Log.d(TAG, "📱 App opened from notification - will check for death events")
+
+            // Give Flutter time to initialize, then check for death events
+            Handler(Looper.getMainLooper()).postDelayed({
+                try {
+                    val channel = flutterEngine?.dartExecutor?.binaryMessenger
+                    if (channel != null) {
+                        MethodChannel(channel, CONTROL_CHANNEL)
+                            .invokeMethod("checkForDeathEvents", null)
+                        Log.d(TAG, "✅ Triggered death event check from notification")
+                    } else {
+                        Log.w(TAG, "⚠️ Flutter not ready yet, death check will happen on resume")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "❌ Error checking death events from notification: $e")
+                }
+            }, 500) // 500ms delay to ensure Flutter is ready
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -183,7 +221,6 @@ class MainActivity : FlutterActivity() {
                     try {
                         Log.d(TAG, "🔍 Checking for stored death events...")
 
-                        // ✅ Use the SAME SharedPreferences as MyVpnService!
                         val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                         val hasUnreadDeath = prefs.getBoolean("has_unread_death", false)
 
@@ -217,6 +254,26 @@ class MainActivity : FlutterActivity() {
                         result.error("CHECK_FAILED", e.message, null)
                     }
                 }
+
+                // ✅ PRIORITY 3: Check subscription status
+                "checkSubscription" -> {
+                    Thread {
+                        try {
+                            val status = runBlocking {
+                                checkSubscriptionStatus()
+                            }
+
+                            Handler(Looper.getMainLooper()).post {
+                                result.success(status)
+                            }
+                        } catch (e: Exception) {
+                            Handler(Looper.getMainLooper()).post {
+                                result.error("CHECK_FAILED", e.message, null)
+                            }
+                        }
+                    }.start()
+                }
+
                 else -> result.notImplemented()
             }
         }
@@ -235,6 +292,123 @@ class MainActivity : FlutterActivity() {
                 statusSink = null
             }
         })
+    }
+
+    // ✅ PRIORITY 3: Check subscription status
+    private suspend fun checkSubscriptionStatus(): String {
+        return withContext(Dispatchers.IO) {
+            var socket: java.net.Socket? = null
+            var sslSocket: javax.net.ssl.SSLSocket? = null
+
+            try {
+                Log.d(TAG, "🔍 Checking subscription status...")
+
+                // Get credentials from flutter_secure_storage
+                val masterKey = MasterKey.Builder(applicationContext)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+
+                val encryptedPrefs = EncryptedSharedPreferences.create(
+                    applicationContext,
+                    "FlutterSecureStorage",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+
+                val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
+                val accessToken = encryptedPrefs.getString("${prefix}_access_token", null)
+
+                if (accessToken == null) {
+                    Log.e(TAG, "❌ No access token found")
+                    return@withContext "unknown"
+                }
+
+                Log.d(TAG, "✅ Access token found")
+
+                // Resolve DNS (VPN is stopped, so DNS works!)
+                val addresses = java.net.InetAddress.getAllByName("api.vulcainvpn.com")
+                if (addresses.isEmpty()) {
+                    Log.e(TAG, "❌ Could not resolve api.vulcainvpn.com")
+                    return@withContext "unknown"
+                }
+
+                Log.d(TAG, "✅ DNS resolved to ${addresses[0].hostAddress}")
+
+                // Create socket and connect
+                socket = java.net.Socket()
+                socket.connect(java.net.InetSocketAddress(addresses[0], 443), 5000)
+                Log.d(TAG, "✅ Connected to server")
+
+                // Wrap with SSL
+                val sslFactory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
+                sslSocket = sslFactory.createSocket(socket, "api.vulcainvpn.com", 443, true) as javax.net.ssl.SSLSocket
+                sslSocket.startHandshake()
+                Log.d(TAG, "✅ SSL handshake OK")
+
+                // Send HTTP request
+                val writer = java.io.PrintWriter(java.io.OutputStreamWriter(sslSocket.outputStream))
+                writer.print("GET /api/subscription HTTP/1.1\r\n")
+                writer.print("Host: api.vulcainvpn.com\r\n")
+                writer.print("Authorization: Bearer $accessToken\r\n")
+                writer.print("Connection: close\r\n")
+                writer.print("\r\n")
+                writer.flush()
+
+                // Read response
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(sslSocket.inputStream))
+                var statusLine = ""
+                var line: String?
+                val body = StringBuilder()
+                var readingBody = false
+
+                while (reader.readLine().also { line = it } != null) {
+                    if (statusLine.isEmpty()) statusLine = line!!
+                    if (readingBody && line!!.isNotEmpty()) body.append(line)
+                    if (line!!.isEmpty()) readingBody = true
+                }
+
+                val statusCode = try {
+                    statusLine.split(" ")[1].toInt()
+                } catch (e: Exception) {
+                    0
+                }
+
+                Log.d(TAG, "📡 HTTP Response: $statusCode")
+
+                return@withContext when {
+                    statusCode == 200 -> {
+                        try {
+                            val json = org.json.JSONObject(body.toString())
+                            val sub = json.getJSONObject("subscription")
+                            val status = sub.getString("status")
+
+                            Log.d(TAG, "✅ Subscription status: $status")
+
+                            if (status != "active") "expired" else "active"
+                        } catch (e: Exception) {
+                            Log.e(TAG, "❌ JSON parse error: ${e.message}")
+                            "unknown"
+                        }
+                    }
+                    statusCode == 401 || statusCode == 403 -> {
+                        Log.d(TAG, "❌ Subscription expired (HTTP $statusCode)")
+                        "expired"
+                    }
+                    else -> {
+                        Log.w(TAG, "⚠️ Unexpected status code: $statusCode")
+                        "unknown"
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Subscription check error: ${e.message}")
+                return@withContext "unknown"
+            } finally {
+                try { sslSocket?.close() } catch (e: Exception) {}
+                try { socket?.close() } catch (e: Exception) {}
+            }
+        }
     }
 
     private fun getPackageName(result: MethodChannel.Result) {
@@ -292,7 +466,6 @@ class MainActivity : FlutterActivity() {
 
     private fun verifyVpnStarted(result: MethodChannel.Result) {
         // ✅ IMPROVED: Check actual VPN state instead of SharedPreferences
-        // SharedPreferences doesn't sync instantly across processes!
         try {
             val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val activeNetwork = connectivityManager.activeNetwork
@@ -385,12 +558,11 @@ class MainActivity : FlutterActivity() {
                     Log.d(TAG, "✅ VPN permission granted by user")
 
                     // ✅ FIX: Add delay after permission grant
-                    // This ensures Android fully processes the permission
                     Handler(mainLooper).postDelayed({
                         startVpnInternal(result)
                         pendingResult = null
                         pendingConfig = null
-                    }, 400) // 400ms delay instead of immediate Handler.post
+                    }, 400) // 400ms delay
 
                 } else {
                     Log.w(TAG, "❌ User denied VPN permission")

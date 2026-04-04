@@ -21,6 +21,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -45,7 +46,7 @@ android {
         }
     }
 
-    packagingOptions {
+    packaging {
         jniLibs {
             useLegacyPackaging = false
         }
@@ -61,4 +62,5 @@ dependencies {
     implementation(files("libs/libbox.aar"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

@@ -7,7 +7,8 @@ import 'colors.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/auth_gate.dart';
 import 'services/security_checker.dart';
-import 'services/vpn_service_android.dart';  // ✅ NEW
+import 'services/vpn_service_android.dart';
+import 'services/notification_service.dart'; // ✅ NEW: Add this import
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,12 +21,15 @@ void main() async {
       blockDebuggers: true,         // Always block debuggers
       blockEmulators: false,
       warnEmulators: false,
-    ), // Use strict for production
+    ),
   );
 
   // ✅ PRIORITY 1: Setup Android event listener
   if (Platform.isAndroid) {
     AndroidVpnService.setupEventListener();
+
+    // ✅ NEW: Initialize notification service
+    await NotificationService.initialize();
   }
 
   // Handle security check result

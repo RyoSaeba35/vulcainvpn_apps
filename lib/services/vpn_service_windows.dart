@@ -235,7 +235,7 @@ class WindowsVpnService extends VpnService {
     await _log('   → VPN credentials likely expired or connection broken');
 
     final reason = 'vpn_broken';
-    final message = 'VPN is connected but internet is not accessible. Your credentials may have expired or the connection is broken. VPN has been disconnected.';
+    final message = 'VPN connection lost. Please reconnect.';
 
     // ✅ Actually STOP the VPN!
     await _log('🛑 STOPPING BROKEN VPN...');
@@ -299,21 +299,6 @@ class WindowsVpnService extends VpnService {
     _consecutiveFailures = 0;
 
     await _log('✅ VPN stopped due to broken connection');
-  }
-
-  // ✅ PRIORITY 2: Check basic network connectivity
-  static Future<bool> _checkBasicConnectivity() async {
-    try {
-      // Try to ping Google DNS
-      final result = await Process.run(
-        'ping',
-        ['-n', '1', '-w', '3000', '8.8.8.8'],
-      );
-
-      return result.exitCode == 0;
-    } catch (e) {
-      return false;
-    }
   }
 
   // ✅ PRIORITY 2: Check if device has any active network
@@ -583,4 +568,91 @@ class WindowsVpnService extends VpnService {
 
   @override
   Future<bool> checkNotificationPermission() async => true;
+
+  // ✅ PRIORITY 3: Check for death events (Windows doesn't store them)
+  @override
+  Future<VpnEvent?> checkForDeathEvents() async {
+    // Windows doesn't have SharedPreferences like Android
+    // Events are sent via eventStream in real-time
+    return null;
+  }
+
+  // ✅ PRIORITY 3: Check subscription status
+  @override
+  Future<String> checkSubscription() async {
+    try {
+      await _log('🔍 Checking subscription status...');
+
+      // Get credentials
+      final deviceId = await AuthService.getDeviceId();
+      final apiKey = await AuthService.getApiKey();
+
+      if (deviceId == null || apiKey == null) {
+        await _log('❌ No credentials found');
+        return 'unknown';
+      }
+
+      // Make HTTP request to subscription endpoint
+      final response = await http.get(
+        Uri.parse('https://api.vulcainvpn.com/api/subscription'),
+        headers: {'X-Api-Key': apiKey},
+      );
+
+      await _log('📡 HTTP Response: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        try {
+          final json = jsonDecode(response.body);
+          final sub = json['subscription'];
+          final status = sub['status'] as String;
+
+          await _log('✅ Subscription status: $status');
+
+          return status != 'active' ? 'expired' : 'active';
+        } catch (e) {
+          await _log('❌ JSON parse error: $e');
+          return 'unknown';
+        }
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        await _log('❌ Subscription expired (HTTP ${response.statusCode})');
+        return 'expired';
+      } else {
+        await _log('⚠️ Unexpected status code: ${response.statusCode}');
+        return 'unknown';
+      }
+    } catch (e) {
+      await _log('❌ Subscription check error: $e');
+      return 'unknown';
+    }
+  }
+
+  // ✅ PRIORITY 3: Reconnect with subscription check
+  @override
+  Future<void> reconnectVpn() async {
+    try {
+      await _log('🔄 Attempting to reconnect...');
+
+      // CRITICAL: Check subscription FIRST
+      await _log('🔍 Checking subscription before reconnect...');
+      final subscriptionStatus = await checkSubscription();
+
+      if (subscriptionStatus == 'expired') {
+        await _log('❌ Subscription expired - blocking reconnect');
+        throw Exception('subscription_expired');
+      }
+
+      if (subscriptionStatus == 'active') {
+        await _log('✅ Subscription active - proceeding with reconnect');
+      } else {
+        await _log('⚠️ Could not verify subscription - allowing reconnect attempt');
+      }
+
+      // Subscription is OK - proceed with normal connection
+      await startVpn();
+
+    } catch (e) {
+      await _log('❌ Reconnect failed: $e');
+      rethrow;
+    }
+  }
 }
