@@ -75,7 +75,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     _setupVpnEventListener();
 
     // ✅ NEW: Check for death events on startup
-    _checkForStoredDeathEvents();
+    Future.delayed(Duration(milliseconds: 800), () {
+      _checkForStoredDeathEvents();
+    });
   }
 
   @override
