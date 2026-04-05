@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
@@ -33,6 +34,10 @@ class WindowsVpnService extends VpnService {
   // ✅ NEW: Network recovery tracking for airplane mode fix
   static bool _wasNetworkLost = false;
   static DateTime? _networkLostTimestamp;
+
+  // ✅ NEW: Race condition fix - Use 4 minutes to avoid race with backend's 5-minute grace period
+  // This gives 60-second safety margin for backend processing
+  static const int maxAutoReconnectDurationSeconds = 240; // 4 minutes
 
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
@@ -207,7 +212,7 @@ class WindowsVpnService extends VpnService {
           await _log('🔄 NETWORK RECOVERED after ${downtime}s!');
           await _log('   Attempting to restart VPN tunnel...');
 
-          // Trigger VPN restart
+          // Trigger VPN restart with race condition check
           await _handleNetworkRecovery();
 
           _wasNetworkLost = false;
@@ -243,6 +248,10 @@ class WindowsVpnService extends VpnService {
         _wasNetworkLost = true;
         _networkLostTimestamp = DateTime.now();
         await _log('   📍 Marking network as lost at ${_networkLostTimestamp}');
+
+        // ✅ NEW: Store timestamp in SharedPreferences for duration check
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('last_seen_at', _networkLostTimestamp!.millisecondsSinceEpoch);
       }
 
       _consecutiveFailures = 0; // Reset counter
@@ -325,10 +334,57 @@ class WindowsVpnService extends VpnService {
     await _log('✅ VPN stopped due to broken connection');
   }
 
-  // ✅ NEW: Handle network recovery by restarting VPN tunnel
+  // ✅ UPDATED: Handle network recovery with race condition check
   static Future<void> _handleNetworkRecovery() async {
     try {
-      await _log('🔄 Starting VPN recovery process...');
+      await _log('🔄 Network recovered - checking disconnection duration...');
+
+      // ✅ NEW: Check disconnection duration to avoid race condition
+      final prefs = await SharedPreferences.getInstance();
+      final lastSeenAt = prefs.getInt('last_seen_at') ?? DateTime.now().millisecondsSinceEpoch;
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final disconnectedSeconds = (now - lastSeenAt) ~/ 1000;
+
+      await _log('   ⏱️ Disconnected for ${disconnectedSeconds}s (threshold: ${maxAutoReconnectDurationSeconds}s)');
+
+      // ✅ Decision: Auto-reconnect vs Manual reconnect
+      if (disconnectedSeconds < maxAutoReconnectDurationSeconds) {
+        // SHORT disconnection - safe to auto-reconnect with cached config
+        await _log('   ✅ Short disconnection - restarting VPN with cached config');
+        await _restartVpnWithCachedConfig();
+      } else {
+        // LONG disconnection - credentials might be freed on backend
+        // Send death event, let Flutter handle reconnect with fresh API call
+        final minutes = disconnectedSeconds ~/ 60;
+        await _log('   ⚠️ Long disconnection (${minutes} min) - sending death event for manual reconnect');
+
+        // Stop current VPN process
+        _isNormalStop = true;
+        _singBoxProcess?.kill();
+        _singBoxProcess = null;
+
+        _isConnected = false;
+        _statusController.add(false);
+
+        // Send death event to Flutter (triggers API call for fresh credentials)
+        _eventController.add(VpnEvent(
+          type: VpnEventType.died,
+          reason: 'vpn_broken',
+          message: minutes > 0
+              ? 'You were offline for $minutes minute${minutes > 1 ? 's' : ''}. Tap to reconnect.'
+              : 'Network recovered. Tap to reconnect with fresh credentials.',
+        ));
+      }
+
+    } catch (e) {
+      await _log('❌ Failed to handle network recovery: $e');
+    }
+  }
+
+  // ✅ NEW: Restart VPN with cached config (for short disconnections < 4 min)
+  static Future<void> _restartVpnWithCachedConfig() async {
+    try {
+      await _log('   Starting VPN recovery process with cached config...');
 
       // Step 1: Stop current VPN instance cleanly
       await _log('   Step 1: Stopping current VPN instance...');
@@ -466,6 +522,10 @@ class WindowsVpnService extends VpnService {
 
       // ✅ NEW: Reset network loss flag
       _wasNetworkLost = false;
+
+      // ✅ NEW: Update last_seen_at timestamp
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('last_seen_at', DateTime.now().millisecondsSinceEpoch);
 
       // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();

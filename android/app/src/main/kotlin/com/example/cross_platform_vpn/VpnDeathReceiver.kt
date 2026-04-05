@@ -18,6 +18,12 @@ class VpnDeathReceiver : BroadcastReceiver() {
 
     private val TAG = "VpnDeathReceiver"
 
+    companion object {
+        // ✅ Use 4 minutes (240s) to avoid race condition with backend's 5-minute grace period
+        // This gives 60-second safety margin for backend processing
+        private const val MAX_AUTO_RECONNECT_DURATION_SECONDS = 240  // 4 minutes
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != "com.vulcain.vpn.VPN_DIED") return
 
@@ -67,18 +73,14 @@ class VpnDeathReceiver : BroadcastReceiver() {
             "service_killed" -> true
             "process_crashed" -> true
             "vpn_broken" -> true
-            "subscription_expired" -> true
+            "subscription_expired" -> false  // Don't auto-reconnect for expired subscriptions
             "permission_revoked" -> false
             else -> false
         }
 
         Log.d(TAG, "   🔄 Reason reconnectable: $isReconnectable")
 
-        // Start auto-reconnect in background
-        if (autoReconnectEnabled && isReconnectable) {
-            Log.d(TAG, "   🔄 Starting background auto-reconnect...")
-            startBackgroundAutoReconnect(context, reason, message)
-        } else {
+        if (!autoReconnectEnabled || !isReconnectable) {
             Log.d(TAG, "   ⏸️ Skipping auto-reconnect (disabled or not reconnectable)")
 
             // Just show notification
@@ -96,6 +98,37 @@ class VpnDeathReceiver : BroadcastReceiver() {
                     "permission_revoked" -> "Please re-enable VPN permission"
                     "subscription_expired" -> "Your VPN subscription has expired. Tap to renew."
                     else -> "Tap to reconnect"
+                }
+            )
+            return
+        }
+
+        // ✅ NEW: Check disconnection duration to avoid race condition
+        val statePrefs = context.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+        val lastSeenAt = statePrefs.getLong("last_seen_at", System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val disconnectedSeconds = (now - lastSeenAt) / 1000
+
+        Log.d(TAG, "   ⏱️ Disconnected for ${disconnectedSeconds}s (threshold: ${MAX_AUTO_RECONNECT_DURATION_SECONDS}s)")
+
+        // ✅ Decision: Auto-reconnect vs Manual reconnect
+        if (disconnectedSeconds < MAX_AUTO_RECONNECT_DURATION_SECONDS) {
+            // SHORT disconnection - safe to auto-reconnect with cached config
+            Log.d(TAG, "   ✅ Short disconnection - starting auto-reconnect with cached config")
+            startBackgroundAutoReconnect(context, reason, message)
+        } else {
+            // LONG disconnection - credentials might be freed on backend
+            // Show notification and require user to tap (triggers fresh API call via Flutter)
+            val minutes = disconnectedSeconds / 60
+            Log.d(TAG, "   ⚠️ Long disconnection (${minutes} min) - showing notification for manual reconnect")
+
+            showReconnectNotification(
+                context,
+                "VPN Disconnected",
+                if (minutes > 0) {
+                    "You were offline for $minutes minute${if (minutes > 1) "s" else ""}. Tap to reconnect."
+                } else {
+                    "Tap to reconnect with fresh credentials."
                 }
             )
         }
@@ -272,9 +305,10 @@ class VpnDeathReceiver : BroadcastReceiver() {
                 notificationManager.createNotificationChannel(channel)
             }
 
-            // Build notification
+            // Build notification with intent flag for auto-reconnect
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("auto_reconnect_needed", true)  // ✅ Flutter will see this and trigger API call
             }
             val pendingIntent = android.app.PendingIntent.getActivity(
                 context,
