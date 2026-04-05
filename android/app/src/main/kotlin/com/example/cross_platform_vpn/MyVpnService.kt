@@ -70,6 +70,10 @@ class MyVpnService : VpnService(), PlatformInterface {
     private var consecutiveFailures = 0
     private var lastSuccessfulPing: Long = 0
 
+    // ✅ NEW: Network recovery tracking for airplane mode fix
+    private var wasNetworkLost = false
+    private var networkLostTimestamp: Long = 0
+
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -103,6 +107,7 @@ class MyVpnService : VpnService(), PlatformInterface {
         isNormalStop = false
         consecutiveFailures = 0
         lastSuccessfulPing = System.currentTimeMillis()
+        wasNetworkLost = false  // ✅ NEW: Reset network loss flag
 
         if (!areNotificationsEnabled()) {
             Log.e(TAG, "Notifications are disabled!")
@@ -194,6 +199,7 @@ class MyVpnService : VpnService(), PlatformInterface {
         consecutiveFailures = 0
     }
 
+    // ✅ UPDATED: Enhanced heartbeat check with network recovery detection
     private suspend fun performHeartbeatCheck(): Boolean {
         return withContext(Dispatchers.IO) {
             var socket: java.net.Socket? = null
@@ -203,6 +209,21 @@ class MyVpnService : VpnService(), PlatformInterface {
                     java.net.InetSocketAddress("api.vulcainvpn.com", 443),
                     HEARTBEAT_TIMEOUT_MS
                 )
+
+                // ✅ NEW: Check if network just recovered
+                if (wasNetworkLost) {
+                    val downtime = System.currentTimeMillis() - networkLostTimestamp
+                    Log.d(TAG, "🔄 NETWORK RECOVERED after ${downtime / 1000}s!")
+                    Log.d(TAG, "   Attempting to restart VPN tunnel...")
+
+                    // Trigger VPN restart on main thread
+                    mainHandler.post {
+                        handleNetworkRecovery()
+                    }
+
+                    wasNetworkLost = false
+                }
+
                 true
             } catch (e: Exception) {
                 false
@@ -212,7 +233,7 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    // ✅ PRIORITY 2: Handle heartbeat failure - SMART detection
+    // ✅ UPDATED: Enhanced heartbeat failure handler with network loss tracking
     private suspend fun handleHeartbeatFailure() {
         withContext(Dispatchers.Main) {
             Log.e(TAG, "🚨 HEARTBEAT FAILURE DETECTED!")
@@ -239,23 +260,106 @@ class MyVpnService : VpnService(), PlatformInterface {
             }
 
             if (!hasAnyNetwork) {
-                // No underlying network - keep VPN and wait
+                // ✅ SCENARIO: NO NETWORK (airplane mode, out of range, etc.)
                 Log.w(TAG, "📶 NO UNDERLYING NETWORK DETECTED")
                 Log.w(TAG, "   Keeping VPN connected - will resume when network returns")
-                consecutiveFailures = 0
+
+                // ✅ NEW: Track that network was lost
+                if (!wasNetworkLost) {
+                    wasNetworkLost = true
+                    networkLostTimestamp = System.currentTimeMillis()
+                    Log.d(TAG, "   📍 Marking network as lost at ${networkLostTimestamp}")
+                }
+
+                consecutiveFailures = 0  // Reset counter
                 return@withContext
             }
 
-            // ✅ VPN broken - show generic message
-            // User will discover real reason (subscription_expired, server_down, etc.) when they reconnect
+            // ✅ SCENARIO: VPN BROKEN (server down, credentials expired, etc.)
             Log.e(TAG, "🔴 VPN IS BROKEN")
-            Log.e(TAG, "   Network exists but VPN tunnel is not working")
+            Log.e(TAG, "   ✅ Device has active network")
+            Log.e(TAG, "   ❌ VPN tunnel is not working")
+            Log.e(TAG, "   → Stopping VPN and notifying user")
+
+            // Reset network lost flag
+            wasNetworkLost = false
 
             isNormalStop = true
             notifyFlutterVpnDeath("vpn_broken", "VPN connection lost. Please reconnect.")
             stopVpnService()
             consecutiveFailures = 0
         }
+    }
+
+    // ✅ NEW: Handle network recovery by restarting VPN tunnel
+    private fun handleNetworkRecovery() {
+        Log.d(TAG, "🔄 Starting VPN recovery process...")
+
+        Thread {
+            try {
+                // Step 1: Stop current VPN instance cleanly
+                Log.d(TAG, "   Step 1: Stopping current VPN instance...")
+                isNormalStop = true  // Prevent death broadcast
+
+                // Close sing-box service
+                boxService?.close()
+                boxService = null
+
+                // Close TUN interface
+                fileDescriptor?.close()
+                fileDescriptor = null
+
+                // Step 2: Small delay to ensure cleanup
+                Log.d(TAG, "   Step 2: Waiting for cleanup...")
+                Thread.sleep(1000)
+
+                // Step 3: Get config
+                Log.d(TAG, "   Step 3: Loading config...")
+                val config = getConfig()
+                if (config.isEmpty()) {
+                    throw Exception("No config available for recovery")
+                }
+
+                // Step 4: Restart VPN with existing config
+                Log.d(TAG, "   Step 4: Restarting VPN service...")
+                isNormalStop = false
+                consecutiveFailures = 0
+                lastSuccessfulPing = System.currentTimeMillis()
+
+                val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+
+                runBlocking {
+                    DefaultNetworkMonitor.start(connectivityManager)
+                }
+
+                Libbox.setMemoryLimit(true)
+                val service = Libbox.newService(config, this)
+                service.start()
+                boxService = service
+
+                Log.d(TAG, "✅ VPN successfully restarted after network recovery")
+
+                // Notify Flutter
+                notifyFlutterVpnState("connected", "VPN reconnected after network recovery")
+
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to restart VPN after network recovery", e)
+
+                // If restart fails, send death event
+                isNormalStop = false
+                wasNetworkLost = false
+
+                notifyFlutterVpnDeath(
+                    "vpn_broken",
+                    "Failed to recover VPN after network change: ${e.message}"
+                )
+
+                // Stop service
+                mainHandler.post {
+                    stopSelf()
+                }
+            }
+        }.start()
     }
 
     // ✅ FOR FUTURE USE: Check subscription before reconnect (Priority 3)

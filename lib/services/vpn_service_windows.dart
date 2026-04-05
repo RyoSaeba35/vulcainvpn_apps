@@ -28,7 +28,11 @@ class WindowsVpnService extends VpnService {
   static DateTime? _lastSuccessfulPing;
   static const int _heartbeatIntervalSeconds = 10;
   static const int _maxConsecutiveFailures = 3; // 30 seconds total
-  static const String _pingHost = '1.1.1.1'; // Cloudflare DNS
+  static const String _pingHost = 'api.vulcainvpn.com'; // ✅ FIXED: Changed from 1.1.1.1 to match Android
+
+  // ✅ NEW: Network recovery tracking for airplane mode fix
+  static bool _wasNetworkLost = false;
+  static DateTime? _networkLostTimestamp;
 
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
@@ -183,10 +187,10 @@ class WindowsVpnService extends VpnService {
     _log('💓 Stopped heartbeat monitoring');
   }
 
-  // ✅ PRIORITY 2: Perform heartbeat check
+  // ✅ UPDATED: Enhanced heartbeat check with network recovery detection
   static Future<bool> _performHeartbeatCheck() async {
     try {
-      // Use ping command to check internet connectivity
+      // ✅ FIXED: Ping VPN API instead of generic internet (matches Android behavior)
       final result = await Process.run(
         'ping',
         ['-n', '1', '-w', '3000', _pingHost], // 1 ping, 3 second timeout
@@ -196,6 +200,18 @@ class WindowsVpnService extends VpnService {
 
       if (success) {
         await _log('💚 Ping OK: $_pingHost');
+
+        // ✅ NEW: Check if network just recovered
+        if (_wasNetworkLost) {
+          final downtime = DateTime.now().difference(_networkLostTimestamp!).inSeconds;
+          await _log('🔄 NETWORK RECOVERED after ${downtime}s!');
+          await _log('   Attempting to restart VPN tunnel...');
+
+          // Trigger VPN restart
+          await _handleNetworkRecovery();
+
+          _wasNetworkLost = false;
+        }
       } else {
         await _log('💔 Ping FAILED: $_pingHost');
       }
@@ -207,7 +223,7 @@ class WindowsVpnService extends VpnService {
     }
   }
 
-  // ✅ PRIORITY 2: Handle heartbeat failure - SMART detection
+  // ✅ UPDATED: Enhanced heartbeat failure handler with network loss tracking
   static Future<void> _handleHeartbeatFailure() async {
     await _log('🚨 HEARTBEAT FAILURE DETECTED!');
     await _log('   VPN is connected but no internet access through VPN');
@@ -217,18 +233,23 @@ class WindowsVpnService extends VpnService {
     final hasAnyNetwork = await _checkForAnyNetwork();
 
     if (!hasAnyNetwork) {
-      // No network adapters active at all
-      // User may be in tunnel, airplane mode, or network is down
-      // DON'T stop VPN - just wait for network to return
+      // ✅ SCENARIO: NO NETWORK (airplane mode, disconnected, etc.)
       await _log('📶 NO NETWORK DETECTED');
-      await _log('   User may be in tunnel, out of range, or network is down');
+      await _log('   User may be in tunnel, airplane mode, or network is down');
       await _log('   Keeping VPN connected - will resume when network returns');
+
+      // ✅ NEW: Track that network was lost
+      if (!_wasNetworkLost) {
+        _wasNetworkLost = true;
+        _networkLostTimestamp = DateTime.now();
+        await _log('   📍 Marking network as lost at ${_networkLostTimestamp}');
+      }
+
       _consecutiveFailures = 0; // Reset counter
       return;
     }
 
-    // ✅ We have network adapters but VPN pings fail
-    // This means VPN itself is broken (expired credentials, server down, etc)
+    // ✅ SCENARIO: VPN BROKEN (server down, credentials expired, etc.)
     await _log('🔴 VPN IS BROKEN!');
     await _log('   ✅ Device has active network adapters');
     await _log('   ❌ VPN pings are failing');
@@ -236,6 +257,9 @@ class WindowsVpnService extends VpnService {
 
     final reason = 'vpn_broken';
     final message = 'VPN connection lost. Please reconnect.';
+
+    // Reset network lost flag
+    _wasNetworkLost = false;
 
     // ✅ Actually STOP the VPN!
     await _log('🛑 STOPPING BROKEN VPN...');
@@ -301,6 +325,98 @@ class WindowsVpnService extends VpnService {
     await _log('✅ VPN stopped due to broken connection');
   }
 
+  // ✅ NEW: Handle network recovery by restarting VPN tunnel
+  static Future<void> _handleNetworkRecovery() async {
+    try {
+      await _log('🔄 Starting VPN recovery process...');
+
+      // Step 1: Stop current VPN instance cleanly
+      await _log('   Step 1: Stopping current VPN instance...');
+      _isNormalStop = true; // Prevent death broadcast
+
+      // Kill current process
+      _singBoxProcess?.kill();
+      _singBoxProcess = null;
+
+      // Step 2: Small delay to ensure cleanup
+      await _log('   Step 2: Waiting for cleanup...');
+      await Future.delayed(Duration(seconds: 1));
+
+      // Step 3: Verify we have config
+      await _log('   Step 3: Checking config availability...');
+      if (_plaintextPath == null || !await File(_plaintextPath!).exists()) {
+        throw Exception('No config available for recovery');
+      }
+
+      // Step 4: Restart sing-box process
+      await _log('   Step 4: Restarting sing-box process...');
+      _isNormalStop = false;
+      _consecutiveFailures = 0;
+      _lastSuccessfulPing = DateTime.now();
+
+      final singBoxExe = File(_singBoxPath);
+      if (!await singBoxExe.exists()) {
+        throw Exception('sing-box executable not found at $_singBoxPath');
+      }
+
+      await _log('   Starting sing-box process for recovery...');
+      _singBoxProcess = await Process.start(
+        _singBoxPath,
+        ['run', '-c', _plaintextPath!],
+        workingDirectory: _exeDir,
+      );
+
+      // Monitor process output
+      _singBoxProcess!.stdout
+          .transform(SystemEncoding().decoder)
+          .listen((data) => _log('sing-box: $data'));
+
+      _singBoxProcess!.stderr
+          .transform(SystemEncoding().decoder)
+          .listen((data) => _log('sing-box ERR: $data'));
+
+      // Step 5: Verify VPN started
+      await _log('   Step 5: Verifying VPN started...');
+      await Future.delayed(Duration(seconds: 3));
+
+      final isRunning = await _isSingBoxRunning();
+      if (!isRunning) {
+        throw Exception('sing-box process not running after recovery');
+      }
+
+      _isConnected = true;
+      _statusController.add(true);
+
+      await _log('✅ VPN successfully restarted after network recovery');
+
+      // Send success event to Flutter
+      _eventController.add(VpnEvent(
+        type: VpnEventType.connected,
+        message: 'VPN reconnected after network recovery',
+      ));
+
+      // Restart monitoring
+      _startProcessChecker();
+      _startHeartbeatMonitoring();
+
+    } catch (e) {
+      await _log('❌ Failed to restart VPN after network recovery: $e');
+
+      // If restart fails, send death event
+      _isNormalStop = false;
+      _wasNetworkLost = false;
+
+      _eventController.add(VpnEvent(
+        type: VpnEventType.died,
+        reason: 'vpn_broken',
+        message: 'Failed to recover VPN after network change: $e',
+      ));
+
+      _isConnected = false;
+      _statusController.add(false);
+    }
+  }
+
   // ✅ PRIORITY 2: Check if device has any active network
   static Future<bool> _checkForAnyNetwork() async {
     try {
@@ -347,6 +463,9 @@ class WindowsVpnService extends VpnService {
       // ✅ PRIORITY 2: Reset heartbeat counters
       _consecutiveFailures = 0;
       _lastSuccessfulPing = DateTime.now();
+
+      // ✅ NEW: Reset network loss flag
+      _wasNetworkLost = false;
 
       // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();

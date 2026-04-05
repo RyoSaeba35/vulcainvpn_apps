@@ -23,7 +23,6 @@ class _SubscriptionTabState extends State<SubscriptionTab>
   bool _isLoading = true;
   String? _error;
 
-  // ✅ FIX: Don't cache this tab - always refresh
   @override
   bool get wantKeepAlive => false;
 
@@ -33,7 +32,6 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     _loadSubscription();
   }
 
-  // ✅ FIX: Refresh subscription whenever tab becomes visible
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -42,13 +40,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
-  // ✅ FIX: Console logging only (no Windows file writing to prevent hangs)
-  Future<void> _log(String message) async {
-    print(message);
-  }
-
   Future<void> _loadSubscription() async {
-    // Prevent multiple simultaneous loads
     if (_isLoading && _subscriptionData != null) return;
 
     setState(() {
@@ -57,24 +49,14 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     });
 
     try {
-      await _log('📊 Loading subscription...');
+      print('📊 Loading subscription...');
 
-      // Check if we have tokens
       final token = await AuthService.getValidAccessToken();
-      await _log('   Token available: ${token != null}');
-      if (token != null) {
-        await _log('   Token length: ${token.length}');
-      } else {
-        await _log('   ❌ No token found!');
-      }
+      print('   Token available: ${token != null}');
 
-      // Try to fetch subscription
-      await _log('   Calling API...');
       final data = await ApiService.fetchSubscription();
-      await _log('   ✅ Subscription data received');
-      await _log('   Data keys: ${data.keys.toList()}');
+      print('   ✅ Subscription data received');
 
-      // ✅ Check if widget is still mounted before calling setState
       if (!mounted) return;
 
       setState(() {
@@ -82,14 +64,13 @@ class _SubscriptionTabState extends State<SubscriptionTab>
         _isLoading = false;
       });
 
-      // ✅ NEW: Check if subscription is expired and handle it
-      await _checkAndHandleExpiredSubscription();
+      // ✅ UPDATED: Just disconnect VPN if expired (no popup)
+      await _checkAndDisconnectIfExpired();
 
     } catch (e, stackTrace) {
-      await _log('❌ Subscription load error: $e');
-      await _log('   Stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
+      print('❌ Subscription load error: $e');
+      print('   Stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
 
-      // ✅ Check mounted before accessing context or calling setState
       if (!mounted) return;
 
       final loc = AppLocalizations.of(context)!;
@@ -100,8 +81,8 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
-  // ✅ NEW: Check if subscription is expired and disconnect VPN
-  Future<void> _checkAndHandleExpiredSubscription() async {
+  // ✅ UPDATED: Silently disconnect VPN if expired (no popup)
+  Future<void> _checkAndDisconnectIfExpired() async {
     if (_subscriptionData == null) return;
 
     final sub = _subscriptionData?['subscription'];
@@ -115,104 +96,43 @@ class _SubscriptionTabState extends State<SubscriptionTab>
                      (expiresAt != null && expiresAt.isBefore(DateTime.now()));
 
     if (isExpired) {
-      await _log('⚠️ Subscription is EXPIRED! Disconnecting VPN...');
-      await _disconnectVpnAndAlert();
+      print('⚠️ Subscription is EXPIRED! Disconnecting VPN silently...');
+      await _disconnectVpn();
     }
   }
 
-  // ✅ NEW: Disconnect VPN and show alert
-  Future<void> _disconnectVpnAndAlert() async {
+  // ✅ UPDATED: Just disconnect VPN (no popup, no alert)
+  Future<void> _disconnectVpn() async {
     try {
-      // Disconnect VPN based on platform
       if (Platform.isAndroid) {
         await AndroidVpnService().stopVpn();
-        await _log('✅ Android VPN disconnected');
+        print('✅ Android VPN disconnected (expired subscription)');
       } else if (Platform.isWindows) {
         await WindowsVpnService().stopVpn();
-        await _log('✅ Windows VPN disconnected');
+        print('✅ Windows VPN disconnected (expired subscription)');
       }
-
-      // Show alert to user
-      if (!mounted) return;
-
-      final loc = AppLocalizations.of(context)!;
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          title: Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
-              SizedBox(width: 12),
-              Text(
-                'Subscription Expired', // ✅ Hardcoded for now
-                style: TextStyle(color: Colors.red),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Your subscription has expired and VPN has been disconnected for your security.',
-                style: TextStyle(fontSize: 15),
-              ),
-              SizedBox(height: 12),
-              Text(
-                'Please renew your subscription to continue using VulcainVPN.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('OK'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _openRenewalPage();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: MyColors.myOrange,
-              ),
-              child: Text(
-                'Renew Now',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-      );
     } catch (e) {
-      await _log('❌ Failed to disconnect VPN: $e');
+      print('❌ Failed to disconnect VPN: $e');
     }
   }
 
-  // ✅ NEW: Open renewal page
+  // ✅ Open renewal page
   Future<void> _openRenewalPage() async {
     final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
     try {
       if (await canLaunchUrl(url)) {
         await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
-        await _log('❌ Could not launch URL: $url');
+        print('❌ Could not launch URL: $url');
       }
     } catch (e) {
-      await _log('❌ Error launching URL: $e');
+      print('❌ Error launching URL: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    super.build(context);
 
     final loc = AppLocalizations.of(context)!;
 
@@ -257,7 +177,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     final activeDevices = devices['active'] ?? 0;
     final maxDevices = devices['max'] ?? 3;
 
-    // ✅ NEW: Check if subscription is expired (for UI display)
+    // Check if subscription is expired
     final status = sub['status'] as String?;
     final isExpired = status != 'active' ||
                      (expiresAt != null && expiresAt.isBefore(DateTime.now()));
@@ -268,11 +188,11 @@ class _SubscriptionTabState extends State<SubscriptionTab>
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // ✅ NEW: Show warning banner if expired
+          // ✅ Red warning banner if expired
           if (isExpired)
             Container(
-              margin: EdgeInsets.only(bottom: 16),
-              padding: EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.red[50],
                 border: Border.all(color: Colors.red, width: 2),
@@ -280,23 +200,23 @@ class _SubscriptionTabState extends State<SubscriptionTab>
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, color: Colors.red, size: 32),
-                  SizedBox(width: 12),
+                  const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 32),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          'Subscription Expired', // ✅ Hardcoded
+                        const Text(
+                          'Subscription Expired',
                           style: TextStyle(
                             color: Colors.red,
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
                           ),
                         ),
-                        SizedBox(height: 4),
+                        const SizedBox(height: 4),
                         Text(
-                          'Please renew to continue using VulcainVPN', // ✅ Hardcoded
+                          'Please renew to continue using VulcainVPN',
                           style: TextStyle(
                             color: Colors.red[700],
                             fontSize: 13,
@@ -340,7 +260,9 @@ class _SubscriptionTabState extends State<SubscriptionTab>
               ),
             ],
           ),
+
           const SizedBox(height: 16),
+
           InfoCard(
             title: loc.devices,
             icon: Icons.devices_outlined,
@@ -368,7 +290,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
             ],
           ),
 
-          // ✅ NEW: Renew button if expired
+          // ✅ Renew button if expired
           if (isExpired) ...[
             const SizedBox(height: 24),
             SizedBox(
@@ -376,9 +298,9 @@ class _SubscriptionTabState extends State<SubscriptionTab>
               height: 50,
               child: ElevatedButton.icon(
                 onPressed: _openRenewalPage,
-                icon: Icon(Icons.refresh, color: Colors.white),
-                label: Text(
-                  'Renew Now', // ✅ Hardcoded
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                label: const Text(
+                  'Renew Now',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,

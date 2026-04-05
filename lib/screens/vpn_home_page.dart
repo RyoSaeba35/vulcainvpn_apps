@@ -235,7 +235,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     final delays = [0, 5, 10, 15]; // seconds: 0s, 5s, 10s, 15s = ~30s total
 
     for (int i = 0; i < _maxReconnectAttempts; i++) {
-      if (!_isAutoReconnecting) break; // User manually stopped
+      if (!_isAutoReconnecting) break;
 
       _reconnectAttempt = i + 1;
       print('🔄 Auto-reconnect attempt $_reconnectAttempt/$_maxReconnectAttempts');
@@ -298,13 +298,36 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       } catch (e) {
         print('❌ Auto-reconnect attempt $_reconnectAttempt failed: $e');
 
-        // Check if subscription expired
+        // ✅ NEW: Check if subscription expired
         if (e.toString().contains('subscription_expired')) {
           print('🔴 Subscription expired - stopping auto-reconnect');
-          break; // Don't retry if subscription expired
+
+          // ✅ UPDATE the stored death event to reflect subscription expiry
+          if (Platform.isAndroid) {
+            try {
+              await MethodChannel('com.vulcain.vpn/control')
+                  .invokeMethod('updateDeathReason', {
+                'reason': 'subscription_expired',
+                'message': 'Your VPN subscription has expired',
+              });
+              print('✅ Updated death event to subscription_expired');
+            } catch (updateError) {
+              print('❌ Failed to update death event: $updateError');
+            }
+          }
+
+          // Update the local event
+          final updatedEvent = VpnEvent(
+            type: VpnEventType.died,
+            reason: 'subscription_expired',
+            message: 'Your VPN subscription has expired',
+            timestamp: event.timestamp,
+          );
+
+          break; // Stop trying, show notification/alert with correct reason
         }
 
-        // Continue to next attempt
+        // Continue to next attempt for other errors
         continue;
       }
     }
@@ -317,19 +340,43 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     // Close reconnecting snackbar
     ScaffoldMessenger.of(context).clearSnackBars();
 
+    // ✅ NEW: Determine the correct event to show
+    // If subscription check revealed it's expired, use that event
+    VpnEvent finalEvent = event;
+
+    // Check if stored event was updated to subscription_expired
+    if (Platform.isAndroid) {
+      try {
+        final storedEvent = await MethodChannel('com.vulcain.vpn/control')
+            .invokeMethod('checkForDeathEvents');
+
+        if (storedEvent != null && storedEvent['reason'] == 'subscription_expired') {
+          finalEvent = VpnEvent(
+            type: VpnEventType.died,
+            reason: 'subscription_expired',
+            message: storedEvent['message'] as String,
+            timestamp: storedEvent['timestamp'] as int?,
+          );
+          print('✅ Using updated death event: subscription_expired');
+        }
+      } catch (e) {
+        print('❌ Failed to check updated death event: $e');
+      }
+    }
+
     // Show notification if app is backgrounded
     if (!mounted || WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
       if (Platform.isAndroid) {
         await NotificationService.showVpnDisconnectedNotification(
-          reason: event.reason ?? 'unknown',
-          message: event.message,
+          reason: finalEvent.reason ?? 'unknown',  // ✅ Now shows correct reason!
+          message: finalEvent.message,
         );
       }
     }
 
     // Show alert if app is in foreground
     if (mounted) {
-      _showAppropriateAlert(event);
+      _showAppropriateAlert(finalEvent);  // ✅ Now shows correct alert!
     }
   }
 

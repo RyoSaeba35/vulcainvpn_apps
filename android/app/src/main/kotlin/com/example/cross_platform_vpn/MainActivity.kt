@@ -18,8 +18,6 @@ import android.content.Context
 import android.app.NotificationManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
 import kotlinx.coroutines.*
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -40,305 +38,25 @@ class MainActivity : FlutterActivity() {
         var statusSink: EventChannel.EventSink? = null
     }
 
-    private var vpnDeathReceiver: BroadcastReceiver? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // ✅ NEW: Check if opened from notification
+        // ✅ Check if opened from notification
         handleNotificationIntent(intent)
-
-        // ✅ Register broadcast receiver for VPN death events
-        vpnDeathReceiver = object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == "com.vulcain.vpn.VPN_DIED") {
-                    val reason = intent.getStringExtra("reason") ?: "unknown"
-                    val message = intent.getStringExtra("message") ?: "VPN died"
-                    val timestamp = intent.getLongExtra("timestamp", 0)
-
-                    Log.d(TAG, "📻 Received VPN_DIED broadcast: $reason")
-
-                    // ✅ Store death event first (backup)
-                    try {
-                        val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-                        prefs.edit().apply {
-                            putString("death_reason", reason)
-                            putString("death_message", message)
-                            putLong("death_timestamp", timestamp)
-                            putBoolean("has_unread_death", true)
-                            apply()
-                        }
-                        Log.d(TAG, "   ✅ Stored death event in SharedPreferences")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "   ❌ Failed to store death event", e)
-                    }
-
-                    // ✅ Try to send via EventSink (if Flutter is running)
-                    if (statusSink != null) {
-                        statusSink?.success(mapOf(
-                            "event" to "vpn_died",
-                            "reason" to reason,
-                            "message" to message,
-                            "timestamp" to timestamp
-                        ))
-                        Log.d(TAG, "   ✅ Sent to Flutter via EventSink")
-                    }
-
-                    // ✅ NEW: Check if auto-reconnect is enabled
-                    val settingsPrefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                    val autoReconnectKey = "flutter.auto_reconnect_enabled"
-                    val autoReconnectEnabled = settingsPrefs.getBoolean(autoReconnectKey, true)
-
-                    Log.d(TAG, "   🔄 Auto-reconnect enabled: $autoReconnectEnabled")
-
-                    // ✅ NEW: Check if reason is reconnectable
-                    val isReconnectable = when (reason) {
-                        "service_killed" -> true
-                        "process_crashed" -> true
-                        "vpn_broken" -> true
-                        "subscription_expired" -> true
-                        "permission_revoked" -> false // User action required
-                        else -> false
-                    }
-
-                    Log.d(TAG, "   🔄 Reason reconnectable: $isReconnectable")
-
-                    // ✅ NEW: Trigger auto-reconnect in background
-                    if (autoReconnectEnabled && isReconnectable) {
-                        Log.d(TAG, "   🔄 Starting background auto-reconnect...")
-                        startBackgroundAutoReconnect(reason, message)
-                    } else {
-                        Log.d(TAG, "   ⏸️ Skipping auto-reconnect (disabled or not reconnectable)")
-                    }
-                }
-            }
-        }
-
-        val filter = IntentFilter("com.vulcain.vpn.VPN_DIED")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(vpnDeathReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(vpnDeathReceiver, filter)
-        }
-        Log.d(TAG, "✅ Registered VPN death broadcast receiver")
     }
 
-    // ✅ NEW: Handle notification tap when app already running
+    // ✅ Handle notification tap when app already running
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
     }
 
-    // ✅ NEW: Handle auto-reconnect in background (native)
-    private fun startBackgroundAutoReconnect(reason: String, message: String) {
-        Thread {
-            val maxAttempts = 4
-            val delays = listOf(0, 5000, 10000, 15000) // ms: 0s, 5s, 10s, 15s
-
-            for (attempt in 1..maxAttempts) {
-                Log.d(TAG, "🔄 Auto-reconnect attempt $attempt/$maxAttempts")
-
-                // Wait before retry (except first attempt)
-                if (delays[attempt - 1] > 0) {
-                    Log.d(TAG, "   ⏳ Waiting ${delays[attempt - 1] / 1000}s before retry...")
-                    Thread.sleep(delays[attempt - 1].toLong())
-                }
-
-                try {
-                    // Step 1: Check subscription status
-                    Log.d(TAG, "   🔍 Checking subscription status...")
-                    val subscriptionStatus = runBlocking {
-                        checkSubscriptionStatus()
-                    }
-
-                    if (subscriptionStatus == "expired") {
-                        Log.d(TAG, "   🔴 Subscription expired - stopping auto-reconnect")
-
-                        // Update stored event to show subscription expired
-                        val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-                        prefs.edit().apply {
-                            putString("death_reason", "subscription_expired")
-                            putString("death_message", "Your VPN subscription has expired")
-                            apply()
-                        }
-
-                        // Show notification
-                        showReconnectNotification(
-                            "Subscription Expired",
-                            "Your VPN subscription has expired. Tap to renew."
-                        )
-                        return@Thread
-                    }
-
-                    if (subscriptionStatus != "active") {
-                        Log.d(TAG, "   ⚠️ Unknown subscription status: $subscriptionStatus")
-                        continue // Retry
-                    }
-
-                    Log.d(TAG, "   ✅ Subscription active, attempting reconnect...")
-
-                    // Step 2: Get VPN config from secure storage
-                    val masterKey = MasterKey.Builder(applicationContext)
-                        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                        .build()
-
-                    val encryptedPrefs = EncryptedSharedPreferences.create(
-                        applicationContext,
-                        "FlutterSecureStorage",
-                        masterKey,
-                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                    )
-
-                    val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
-                    val vpnConfig = encryptedPrefs.getString("${prefix}_vpn_config", null)
-
-                    if (vpnConfig == null) {
-                        Log.e(TAG, "   ❌ No VPN config found")
-                        continue
-                    }
-
-                    // Step 3: Start VPN service
-                    Handler(Looper.getMainLooper()).post {
-                        try {
-                            val intent = Intent(this, MyVpnService::class.java).apply {
-                                putExtra("VPN_CONFIG", vpnConfig)
-                            }
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                startForegroundService(intent)
-                            } else {
-                                startService(intent)
-                            }
-
-                            Log.d(TAG, "   🚀 VPN service start requested")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "   ❌ Error starting VPN: ${e.message}", e)
-                        }
-                    }
-
-                    // Wait for VPN to start
-                    Thread.sleep(2000)
-
-                    // Step 4: Verify VPN started
-                    val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                    val activeNetwork = connectivityManager.activeNetwork
-                    val caps = activeNetwork?.let {
-                        connectivityManager.getNetworkCapabilities(it)
-                    }
-                    val isVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-
-                    if (isVpn) {
-                        Log.d(TAG, "   ✅ Auto-reconnect SUCCESS on attempt $attempt")
-
-                        // Clear death event
-                        val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-                        prefs.edit().apply {
-                            putBoolean("has_unread_death", false)
-                            apply()
-                        }
-
-                        // Cancel any notifications
-                        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        notificationManager.cancel(1001)
-
-                        // Notify Flutter if running
-                        if (statusSink != null) {
-                            Handler(Looper.getMainLooper()).post {
-                                statusSink?.success(mapOf(
-                                    "event" to "auto_reconnect_success",
-                                    "attempt" to attempt
-                                ))
-                            }
-                        }
-
-                        return@Thread // Success!
-                    } else {
-                        Log.d(TAG, "   ❌ VPN not active after attempt $attempt")
-                        continue
-                    }
-
-                } catch (e: Exception) {
-                    Log.e(TAG, "   ❌ Auto-reconnect attempt $attempt failed: ${e.message}", e)
-                    continue
-                }
-            }
-
-            // ❌ All attempts failed
-            Log.d(TAG, "🔴 Auto-reconnect FAILED after $maxAttempts attempts")
-
-            // Show notification
-            showReconnectNotification(
-                when (reason) {
-                    "service_killed" -> "VPN Service Stopped"
-                    "process_crashed" -> "VPN Crashed"
-                    "vpn_broken" -> "VPN Connection Lost"
-                    else -> "VPN Disconnected"
-                },
-                "Could not reconnect automatically. Tap to try again."
-            )
-
-        }.start()
-    }
-
-    // ✅ NEW: Show notification helper
-    private fun showReconnectNotification(title: String, message: String) {
-        try {
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-            // Create notification channel (Android O+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = android.app.NotificationChannel(
-                    "vpn_status",
-                    "VPN Status",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "VPN connection status notifications"
-                    enableVibration(true)
-                }
-                notificationManager.createNotificationChannel(channel)
-            }
-
-            // Build notification
-            val intent = Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = android.app.PendingIntent.getActivity(
-                this,
-                0,
-                intent,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-            )
-
-            val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                android.app.Notification.Builder(this, "vpn_status")
-            } else {
-                @Suppress("DEPRECATION")
-                android.app.Notification.Builder(this)
-            }
-                .setContentTitle(title)
-                .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentIntent(pendingIntent)
-                .setAutoCancel(true)
-                .build()
-
-            notificationManager.notify(1001, notification)
-            Log.d(TAG, "📬 Notification shown: $title")
-
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Error showing notification: ${e.message}", e)
-        }
-    }
-
-    // ✅ NEW: Handle opening from notification
+    // ✅ Handle opening from notification
     private fun handleNotificationIntent(intent: Intent?) {
-        // If user tapped notification, check for death events after Flutter initializes
         if (intent?.action == Intent.ACTION_MAIN) {
             Log.d(TAG, "📱 App opened from notification - will check for death events")
 
-            // Give Flutter time to initialize, then check for death events
             Handler(Looper.getMainLooper()).postDelayed({
                 try {
                     val channel = flutterEngine?.dartExecutor?.binaryMessenger
@@ -352,14 +70,13 @@ class MainActivity : FlutterActivity() {
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ Error checking death events from notification: $e")
                 }
-            }, 500) // 500ms delay to ensure Flutter is ready
+            }, 500)
         }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // MethodChannel
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             CONTROL_CHANNEL
@@ -411,7 +128,6 @@ class MainActivity : FlutterActivity() {
                     val startTime = prefs.getLong("start_time", 0)
                     result.success(if (startTime > 0) startTime else null)
                 }
-                // ✅ PRIORITY 1: New method to verify VPN is actually active
                 "isVpnActive" -> {
                     try {
                         val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -432,7 +148,6 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
-                // ✅ PRIORITY 1: Clear stale VPN state
                 "clearVpnState" -> {
                     try {
                         val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
@@ -481,8 +196,6 @@ class MainActivity : FlutterActivity() {
                         result.error("CHECK_FAILED", e.message, null)
                     }
                 }
-
-                // ✅ PRIORITY 3: Check subscription status
                 "checkSubscription" -> {
                     Thread {
                         try {
@@ -500,12 +213,34 @@ class MainActivity : FlutterActivity() {
                         }
                     }.start()
                 }
+                "updateDeathReason" -> {
+                    try {
+                        val reason = call.argument<String>("reason")
+                        val message = call.argument<String>("message")
+
+                        if (reason != null && message != null) {
+                            val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                            prefs.edit().apply {
+                                putString("death_reason", reason)
+                                putString("death_message", message)
+                                putBoolean("has_unread_death", true)
+                                apply()
+                            }
+                            Log.d(TAG, "✅ Updated death event to: $reason")
+                            result.success(true)
+                        } else {
+                            result.error("INVALID_ARGS", "Missing reason or message", null)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Error updating death reason: ${e.message}", e)
+                        result.error("UPDATE_FAILED", e.message, null)
+                    }
+                }
 
                 else -> result.notImplemented()
             }
         }
 
-        // EventChannel
         EventChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             STATUS_CHANNEL
@@ -521,7 +256,6 @@ class MainActivity : FlutterActivity() {
         })
     }
 
-    // ✅ PRIORITY 3: Check subscription status
     private suspend fun checkSubscriptionStatus(): String {
         return withContext(Dispatchers.IO) {
             var socket: java.net.Socket? = null
@@ -530,7 +264,6 @@ class MainActivity : FlutterActivity() {
             try {
                 Log.d(TAG, "🔍 Checking subscription status...")
 
-                // Get credentials from flutter_secure_storage
                 val masterKey = MasterKey.Builder(applicationContext)
                     .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                     .build()
@@ -553,7 +286,6 @@ class MainActivity : FlutterActivity() {
 
                 Log.d(TAG, "✅ Access token found")
 
-                // Resolve DNS (VPN is stopped, so DNS works!)
                 val addresses = java.net.InetAddress.getAllByName("api.vulcainvpn.com")
                 if (addresses.isEmpty()) {
                     Log.e(TAG, "❌ Could not resolve api.vulcainvpn.com")
@@ -562,18 +294,15 @@ class MainActivity : FlutterActivity() {
 
                 Log.d(TAG, "✅ DNS resolved to ${addresses[0].hostAddress}")
 
-                // Create socket and connect
                 socket = java.net.Socket()
                 socket.connect(java.net.InetSocketAddress(addresses[0], 443), 5000)
                 Log.d(TAG, "✅ Connected to server")
 
-                // Wrap with SSL
                 val sslFactory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
                 sslSocket = sslFactory.createSocket(socket, "api.vulcainvpn.com", 443, true) as javax.net.ssl.SSLSocket
                 sslSocket.startHandshake()
                 Log.d(TAG, "✅ SSL handshake OK")
 
-                // Send HTTP request
                 val writer = java.io.PrintWriter(java.io.OutputStreamWriter(sslSocket.outputStream))
                 writer.print("GET /api/subscription HTTP/1.1\r\n")
                 writer.print("Host: api.vulcainvpn.com\r\n")
@@ -582,7 +311,6 @@ class MainActivity : FlutterActivity() {
                 writer.print("\r\n")
                 writer.flush()
 
-                // Read response
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(sslSocket.inputStream))
                 var statusLine = ""
                 var line: String?
@@ -680,10 +408,9 @@ class MainActivity : FlutterActivity() {
                 startService(intent)
             }
 
-            // ✅ FIX: Add verification after starting
             Handler(mainLooper).postDelayed({
                 verifyVpnStarted(result)
-            }, 800) // Wait 800ms for VPN to initialize
+            }, 800)
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error starting VPN: ${e.message}", e)
@@ -692,7 +419,6 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun verifyVpnStarted(result: MethodChannel.Result) {
-        // ✅ IMPROVED: Check actual VPN state instead of SharedPreferences
         try {
             val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val activeNetwork = connectivityManager.activeNetwork
@@ -708,7 +434,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-            // VPN not active yet, retry once
             Log.w(TAG, "⚠️ VPN not active yet, retrying in 1.5 seconds...")
 
             Handler(mainLooper).postDelayed({
@@ -741,7 +466,7 @@ class MainActivity : FlutterActivity() {
                     Log.e(TAG, "❌ Error in retry check: ${e.message}", e)
                     result.error("VPN_VERIFY_ERROR", e.message, null)
                 }
-            }, 1500) // Wait 1.5 seconds before retry
+            }, 1500)
 
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error verifying VPN: ${e.message}", e)
@@ -757,7 +482,6 @@ class MainActivity : FlutterActivity() {
             }
             startService(intent)
 
-            // Verify stopped
             Handler(mainLooper).postDelayed({
                 val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                 val isRunning = prefs.getBoolean("is_running", false)
@@ -784,12 +508,11 @@ class MainActivity : FlutterActivity() {
                 if (resultCode == Activity.RESULT_OK) {
                     Log.d(TAG, "✅ VPN permission granted by user")
 
-                    // ✅ FIX: Add delay after permission grant
                     Handler(mainLooper).postDelayed({
                         startVpnInternal(result)
                         pendingResult = null
                         pendingConfig = null
-                    }, 400) // 400ms delay
+                    }, 400)
 
                 } else {
                     Log.w(TAG, "❌ User denied VPN permission")
@@ -827,16 +550,6 @@ class MainActivity : FlutterActivity() {
                 pendingResult = null
                 pendingConfig = null
             }
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        try {
-            vpnDeathReceiver?.let { unregisterReceiver(it) }
-            Log.d(TAG, "✅ Unregistered VPN death broadcast receiver")
-        } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering receiver", e)
         }
     }
 }
