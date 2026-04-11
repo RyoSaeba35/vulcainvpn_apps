@@ -242,6 +242,18 @@ class AndroidVpnService extends VpnService {
     }
   }
 
+  // ✅ NEW: Direct network check - bypasses SharedPreferences
+  Future<bool> isVpnActive() async {
+    try {
+      final isActive = await _platform.invokeMethod('isVpnActive') as bool;
+      print('🔍 VPN network check: $isActive');
+      return isActive;
+    } catch (e) {
+      print('❌ Failed to check VPN active state: $e');
+      return false;
+    }
+  }
+
   Future<int?> getConnectionStartTimeMs() async {
     try {
       return await _platform.invokeMethod('getStartTime');

@@ -17,6 +17,9 @@ class VpnApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        VpnLogger.init(this)
+        VpnLogger.log("VpnApplication", "App started")
+
         // Initialize gomobile (moved from MainActivity)
         Seq.setContext(this)
         Log.d(TAG, "Gomobile initialized")

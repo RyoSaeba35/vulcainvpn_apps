@@ -6,10 +6,7 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import io.nekohasekai.libbox.InterfaceUpdateListener
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import java.net.NetworkInterface
+import kotlinx.coroutines.*  // 🔧 FIX #3: For proper coroutine usage
 
 object DefaultNetworkMonitor {
 
@@ -22,9 +19,15 @@ object DefaultNetworkMonitor {
     // Callback to pre-cache interfaces before updating sing-box
     var onInterfaceCacheRequest: ((Network?) -> Unit)? = null
 
+    // 🔧 FIX #3: Use supervised scope instead of GlobalScope
+    private var monitorScope: CoroutineScope? = null
+
     suspend fun start(cm: ConnectivityManager) {
         Log.d(TAG, "🔍 Starting DefaultNetworkMonitor")
         connectivityManager = cm
+
+        // 🔧 FIX #3: Create supervised scope for network monitoring
+        monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
         // Set CM for DefaultNetworkListener
         DefaultNetworkListener.setConnectivityManager(cm)
@@ -47,6 +50,15 @@ object DefaultNetworkMonitor {
 
     suspend fun stop() {
         Log.d(TAG, "🔍 Stopping DefaultNetworkMonitor")
+
+        // 🔧 FIX #3: Cancel scope before stopping listener
+        try {
+            monitorScope?.cancel()
+            monitorScope = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cancelling monitor scope: ${e.message}")
+        }
+
         DefaultNetworkListener.stop(this)
         connectivityManager = null
         listener = null
@@ -87,7 +99,7 @@ object DefaultNetworkMonitor {
             var interfaceIndex = -1
             for (attempt in 0 until 10) {
                 try {
-                    interfaceIndex = NetworkInterface.getByName(interfaceName)?.index ?: -1
+                    interfaceIndex = java.net.NetworkInterface.getByName(interfaceName)?.index ?: -1
                     if (interfaceIndex != -1) break
                 } catch (e: Exception) {
                     if (attempt < 9) {
@@ -107,21 +119,29 @@ object DefaultNetworkMonitor {
 
             Log.d(TAG, "✅ Preparing to update interface: name=$interfaceName, index=$interfaceIndex")
 
-            // CRITICAL FIX: Pre-cache the interfaces BEFORE notifying sing-box
-            // This ensures getInterfaces() will return cached data and won't cause stack overflow
-            GlobalScope.launch(Dispatchers.IO) {
+            // 🔧 FIX #3: Use monitor scope instead of GlobalScope
+            // This ensures cleanup when monitor is stopped
+            val scope = monitorScope ?: run {
+                Log.w(TAG, "⚠️ Monitor scope is null, cannot update interface")
+                return
+            }
+
+            scope.launch(Dispatchers.IO) {
                 try {
                     // Step 1: Request the service to build and cache interfaces
                     Log.d(TAG, "📦 Requesting interface cache build...")
                     onInterfaceCacheRequest?.invoke(newNetwork)
 
                     // Step 2: Small delay to ensure cache is built
-                    Thread.sleep(100)
+                    delay(100)
 
                     // Step 3: Now safely notify sing-box
                     Log.d(TAG, "📡 Notifying sing-box: $interfaceName (index=$interfaceIndex)")
                     listener.updateDefaultInterface(interfaceName, interfaceIndex, isExpensive, isConstrained)
                     Log.d(TAG, "✅ Interface update completed")
+                } catch (e: CancellationException) {
+                    // 🔧 FIX #3: Handle cancellation gracefully
+                    Log.d(TAG, "Interface update cancelled (normal shutdown)")
                 } catch (e: Exception) {
                     Log.e(TAG, "❌ Failed to update interface", e)
                 }

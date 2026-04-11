@@ -35,6 +35,7 @@ import android.content.SharedPreferences
 import kotlinx.coroutines.*
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MyVpnService : VpnService(), PlatformInterface {
 
@@ -43,37 +44,35 @@ class MyVpnService : VpnService(), PlatformInterface {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "vpn_channel"
 
-        // SharedPreferences keys
         private const val PREFS_NAME = "vpn_state"
         private const val KEY_IS_RUNNING = "is_running"
         private const val KEY_START_TIME = "start_time"
+        private const val KEY_LAST_SEEN_AT = "last_seen_at"
 
-        // ✅ PRIORITY 2: Heartbeat constants
-        private const val HEARTBEAT_INTERVAL_MS = 10000L // 10 seconds
-        private const val HEARTBEAT_TIMEOUT_MS = 3000 // 3 seconds per ping
-        private const val MAX_CONSECUTIVE_FAILURES = 3 // 30 seconds total before alert
+        private const val HEARTBEAT_INTERVAL_MS = 10000L
+        private const val HEARTBEAT_TIMEOUT_MS = 3000
+        private const val MAX_CONSECUTIVE_FAILURES = 3
     }
 
     private var boxService: LibboxService? = null
     private var fileDescriptor: ParcelFileDescriptor? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    // Cache for interface list to prevent recursive calls
     private var cachedInterfaces: List<LibboxNetworkInterface>? = null
     private var cachedConfig: String? = null
 
-    // ✅ PRIORITY 1: Track if this is a normal stop or unexpected death
     private var isNormalStop = false
+    private var deathEventSent = false
 
-    // ✅ PRIORITY 2: Heartbeat monitoring
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var heartbeatJob: Job? = null
+
     private var consecutiveFailures = 0
     private var lastSuccessfulPing: Long = 0
 
-    // ✅ NEW: Network recovery tracking for airplane mode fix
-    private var wasNetworkLost = false
-    private var networkLostTimestamp: Long = 0
+    private val isServiceAlive = AtomicBoolean(true)
 
+    private val prefsLock = Any()
     private val prefs: SharedPreferences by lazy {
         getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -81,6 +80,8 @@ class MyVpnService : VpnService(), PlatformInterface {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
+        isServiceAlive.set(true)
+        deathEventSent = false
         createNotificationChannel()
     }
 
@@ -92,6 +93,16 @@ class MyVpnService : VpnService(), PlatformInterface {
                 return START_NOT_STICKY
             }
             else -> {
+                if (!areNotificationsEnabled()) {
+                    Log.e(TAG, "Notifications are disabled!")
+                    stopSelf()
+                    return START_NOT_STICKY
+                }
+
+                val notification = createNotification("Vulcain VPN", "Connecting...")
+                startForeground(NOTIFICATION_ID, notification)
+                Log.d(TAG, "✅ Started foreground immediately")
+
                 intent?.getStringExtra("VPN_CONFIG")?.let { config ->
                     cachedConfig = config
                 }
@@ -102,50 +113,150 @@ class MyVpnService : VpnService(), PlatformInterface {
     }
 
     private fun startVpnService() {
+        VpnLogger.log(TAG, "🟢 Starting VPN service")
+        VpnLogger.markCrashScenario("VPN_START")
         Log.d(TAG, "Starting VPN service")
 
         isNormalStop = false
+        deathEventSent = false
         consecutiveFailures = 0
         lastSuccessfulPing = System.currentTimeMillis()
-        wasNetworkLost = false  // ✅ NEW: Reset network loss flag
 
-        if (!areNotificationsEnabled()) {
-            Log.e(TAG, "Notifications are disabled!")
-            stopSelf()
-            return
+        synchronized(prefsLock) {
+            prefs.edit().putLong(KEY_LAST_SEEN_AT, System.currentTimeMillis()).apply()
         }
-
-        val notification = createNotification("Vulcain VPN", "Connected")
-        startForeground(NOTIFICATION_ID, notification)
 
         Thread {
             try {
+                VpnLogger.log(TAG, "🔐 Checking subscription status...")
+                val subscriptionStatus = runBlocking {
+                    checkSubscription()
+                }
+                VpnLogger.log(TAG, "Subscription status: $subscriptionStatus")
+
+                if (subscriptionStatus == "expired" || subscriptionStatus == "canceled") {
+                    VpnLogger.log(TAG, "❌ Subscription not active ($subscriptionStatus)")
+                    VpnLogger.log(TAG, "Stopping VPN start - sending subscription_expired death event")
+
+                    setVpnState(false)
+                    notifyFlutterVpnDeath("subscription_expired", "Your VPN subscription has expired")
+
+                    mainHandler.post {
+                        stopSelf()
+                    }
+                    return@Thread
+                }
+
+                if (subscriptionStatus != "active") {
+                    VpnLogger.log(TAG, "⚠️ Subscription status unknown - proceeding with caution")
+                } else {
+                    VpnLogger.log(TAG, "✅ Subscription is active - proceeding with VPN start")
+                }
+
+                VpnLogger.log(TAG, "📥 Getting VPN config...")
                 val config = getConfig()
+                VpnLogger.log(TAG, "✅ Config loaded (${config.length} chars)")
+
                 val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
 
+                VpnLogger.log(TAG, "🌐 Starting network monitor...")
                 runBlocking {
                     DefaultNetworkMonitor.start(connectivityManager)
                 }
+                VpnLogger.log(TAG, "✅ Network monitor started")
 
+                VpnLogger.log(TAG, "🚀 Creating libbox service...")
                 Libbox.setMemoryLimit(true)
                 val service = Libbox.newService(config, this)
+                VpnLogger.log(TAG, "✅ Libbox service created, starting...")
+
                 service.start()
                 boxService = service
+                VpnLogger.log(TAG, "✅ Libbox service started successfully")
 
                 setVpnState(true)
-                prefs.edit().putLong(KEY_START_TIME, System.currentTimeMillis()).apply()
+                VpnLogger.log(TAG, "✅ VPN state set to running")
+
+                synchronized(prefsLock) {
+                    prefs.edit().putLong(KEY_START_TIME, System.currentTimeMillis()).apply()
+                }
+
+                val connectedNotification = createNotification("Vulcain VPN", "Connected")
+                val notificationManager = getSystemService(NotificationManager::class.java)
+                notificationManager.notify(NOTIFICATION_ID, connectedNotification)
 
                 notifyFlutterVpnState("connected", "VPN connected successfully")
                 Log.d(TAG, "✅ VPN started successfully")
+                VpnLogger.log(TAG, "✅ VPN FULLY CONNECTED")
 
                 startHeartbeatMonitoring()
 
             } catch (e: Exception) {
+                VpnLogger.error(TAG, "❌ VPN START FAILED", e)
                 Log.e(TAG, "❌ Failed to start VPN", e)
+                setVpnState(false)
                 notifyFlutterVpnState("error", "Failed to start: ${e.message}")
                 stopSelf()
             }
         }.start()
+    }
+
+    private suspend fun checkSubscription(): String {
+        return withContext(Dispatchers.IO) {
+            try {
+                val accessToken = getSecureValue("access_token")
+                if (accessToken == null) {
+                    VpnLogger.log(TAG, "⚠️ No access token found")
+                    return@withContext "unknown"
+                }
+
+                VpnLogger.log(TAG, "Making API request to check subscription...")
+                val url = java.net.URL("https://api.vulcainvpn.com/api/subscription")
+                val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
+
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Authorization", "Bearer $accessToken")
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.connectTimeout = 10000
+                connection.readTimeout = 10000
+
+                val responseCode = connection.responseCode
+                VpnLogger.log(TAG, "Subscription API response code: $responseCode")
+
+                when (responseCode) {
+                    200 -> {
+                        val response = connection.inputStream.bufferedReader().use { it.readText() }
+                        VpnLogger.log(TAG, "API response body: ${response.take(200)}...")
+
+                        // ✅ NEW: Detect HTML response BEFORE trying to parse as JSON
+                        if (response.trimStart().startsWith("<!DOCTYPE", ignoreCase = true) ||
+                            response.trimStart().startsWith("<html", ignoreCase = true)) {
+                            VpnLogger.log(TAG, "⚠️ API returned HTML instead of JSON - subscription expired")
+                            return@withContext "expired"
+                        }
+
+                        // Only parse as JSON if it's NOT HTML
+                        val json = org.json.JSONObject(response)
+                        val subscription = json.getJSONObject("subscription")
+                        val status = subscription.getString("status")
+
+                        VpnLogger.log(TAG, "✅ Subscription status from API: $status")
+                        return@withContext status
+                    }
+                    401, 403 -> {
+                        VpnLogger.log(TAG, "⚠️ Subscription check: unauthorized ($responseCode)")
+                        return@withContext "expired"
+                    }
+                    else -> {
+                        VpnLogger.log(TAG, "⚠️ Unexpected response code: $responseCode")
+                        return@withContext "unknown"
+                    }
+                }
+            } catch (e: Exception) {
+                VpnLogger.error(TAG, "Subscription check failed", e)
+                return@withContext "unknown"
+            }
+        }
     }
 
     private fun getConfig(): String {
@@ -158,14 +269,18 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    // ✅ PRIORITY 2: Start heartbeat monitoring
     private fun startHeartbeatMonitoring() {
         stopHeartbeatMonitoring()
         Log.d(TAG, "💓 Starting heartbeat monitoring (every ${HEARTBEAT_INTERVAL_MS/1000}s)")
 
-        heartbeatJob = CoroutineScope(Dispatchers.IO).launch {
-            while (isActive && getVpnState()) {
+        heartbeatJob = serviceScope.launch(Dispatchers.IO) {
+            while (isActive && getVpnState() && isServiceAlive.get()) {
                 delay(HEARTBEAT_INTERVAL_MS)
+
+                if (!isServiceAlive.get()) {
+                    Log.d(TAG, "💓 Heartbeat stopped - service destroyed")
+                    break
+                }
 
                 try {
                     val isReachable = performHeartbeatCheck()
@@ -176,6 +291,10 @@ class MyVpnService : VpnService(), PlatformInterface {
                         }
                         consecutiveFailures = 0
                         lastSuccessfulPing = System.currentTimeMillis()
+
+                        synchronized(prefsLock) {
+                            prefs.edit().putLong(KEY_LAST_SEEN_AT, System.currentTimeMillis()).apply()
+                        }
                     } else {
                         consecutiveFailures++
                         val timeSinceLastSuccess = (System.currentTimeMillis() - lastSuccessfulPing) / 1000
@@ -194,271 +313,132 @@ class MyVpnService : VpnService(), PlatformInterface {
     }
 
     private fun stopHeartbeatMonitoring() {
-        heartbeatJob?.cancel()
+        heartbeatJob?.let { job ->
+            if (job.isActive) {
+                job.cancel()
+                Log.d(TAG, "💓 Heartbeat job cancelled")
+            }
+        }
         heartbeatJob = null
         consecutiveFailures = 0
     }
 
-    // ✅ UPDATED: Enhanced heartbeat check with network recovery detection
     private suspend fun performHeartbeatCheck(): Boolean {
+        if (!isServiceAlive.get()) {
+            Log.w(TAG, "performHeartbeatCheck called on destroyed service")
+            return false
+        }
+
         return withContext(Dispatchers.IO) {
             var socket: java.net.Socket? = null
             try {
+                val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+
+                val underlyingNetwork = connectivityManager.allNetworks.firstOrNull { network ->
+                    val caps = connectivityManager.getNetworkCapabilities(network)
+                    caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
+                    (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                    caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+                }
+
+                if (underlyingNetwork == null) {
+                    return@withContext false
+                }
+
                 socket = java.net.Socket()
+                protect(socket)
+
+                try {
+                    underlyingNetwork.bindSocket(socket)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to bind socket: ${e.message}")
+                }
+
                 socket.connect(
                     java.net.InetSocketAddress("api.vulcainvpn.com", 443),
                     HEARTBEAT_TIMEOUT_MS
                 )
 
-                // ✅ NEW: Check if network just recovered
-                if (wasNetworkLost) {
-                    val downtime = System.currentTimeMillis() - networkLostTimestamp
-                    Log.d(TAG, "🔄 NETWORK RECOVERED after ${downtime / 1000}s!")
-                    Log.d(TAG, "   Attempting to restart VPN tunnel...")
-
-                    // Trigger VPN restart on main thread
-                    mainHandler.post {
-                        handleNetworkRecovery()
-                    }
-
-                    wasNetworkLost = false
-                }
-
                 true
             } catch (e: Exception) {
                 false
             } finally {
-                socket?.close()
+                try {
+                    socket?.close()
+                } catch (e: Exception) {
+                    // Ignore close errors
+                }
             }
         }
     }
 
-    // ✅ UPDATED: Enhanced heartbeat failure handler with network loss tracking
     private suspend fun handleHeartbeatFailure() {
+        VpnLogger.critical(TAG, "🚨 HEARTBEAT FAILURE DETECTED")
+        VpnLogger.markCrashScenario("HEARTBEAT_FAILURE")
+
+        if (!isServiceAlive.get()) {
+            Log.w(TAG, "handleHeartbeatFailure called on destroyed service")
+            return
+        }
+
         withContext(Dispatchers.Main) {
             Log.e(TAG, "🚨 HEARTBEAT FAILURE DETECTED!")
-            Log.e(TAG, "   VPN is connected but no internet access through VPN")
-            Log.e(TAG, "   3 consecutive ping failures detected")
 
-            // ✅ Check if device has ANY network at all
+            // ✅ SIMPLIFIED: Check if network exists (for logging/reason only)
             val hasAnyNetwork = withContext(Dispatchers.IO) {
                 try {
+                    if (!isServiceAlive.get()) return@withContext false
+
                     val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
                     val activeNetwork = connectivityManager.activeNetwork ?: return@withContext false
-
                     val caps = connectivityManager.getNetworkCapabilities(activeNetwork)
                     val hasWifi = caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
                     val hasCellular = caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
                     val hasEthernet = caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true
-
-                    Log.d(TAG, "   Network check: WiFi=$hasWifi, Cellular=$hasCellular, Ethernet=$hasEthernet")
                     hasWifi || hasCellular || hasEthernet
                 } catch (e: Exception) {
-                    Log.e(TAG, "   Error checking network: ${e.message}")
                     false
                 }
             }
 
             if (!hasAnyNetwork) {
-                // ✅ SCENARIO: NO NETWORK (airplane mode, out of range, etc.)
-                Log.w(TAG, "📶 NO UNDERLYING NETWORK DETECTED")
-                Log.w(TAG, "   Keeping VPN connected - will resume when network returns")
-
-                // ✅ NEW: Track that network was lost
-                if (!wasNetworkLost) {
-                    wasNetworkLost = true
-                    networkLostTimestamp = System.currentTimeMillis()
-                    Log.d(TAG, "   📍 Marking network as lost at ${networkLostTimestamp}")
-                }
-
-                consecutiveFailures = 0  // Reset counter
-                return@withContext
+                Log.w(TAG, "📶 NO UNDERLYING NETWORK DETECTED (airplane mode?)")
+                VpnLogger.log(TAG, "⏳ No network - broadcasting 'network_lost'")
+            } else {
+                Log.e(TAG, "🔴 VPN IS BROKEN (network exists but heartbeat fails)")
+                VpnLogger.log(TAG, "🔴 Network exists - broadcasting 'vpn_broken'")
             }
 
-            // ✅ SCENARIO: VPN BROKEN (server down, credentials expired, etc.)
-            Log.e(TAG, "🔴 VPN IS BROKEN")
-            Log.e(TAG, "   ✅ Device has active network")
-            Log.e(TAG, "   ❌ VPN tunnel is not working")
-            Log.e(TAG, "   → Stopping VPN and notifying user")
+            // ✅ CRITICAL CHANGE: ALWAYS broadcast immediately (Option 1)
+            // Let AutoReconnectService decide what to do based on network state
+            if (!isServiceAlive.get()) return@withContext
 
-            // Reset network lost flag
-            wasNetworkLost = false
+            VpnLogger.log(TAG, "🔴 Stopping service and triggering auto-reconnect")
 
-            isNormalStop = true
-            notifyFlutterVpnDeath("vpn_broken", "VPN connection lost. Please reconnect.")
-            stopVpnService()
-            consecutiveFailures = 0
-        }
-    }
+            isNormalStop = false
+            deathEventSent = true
 
-    // ✅ NEW: Handle network recovery by restarting VPN tunnel
-    private fun handleNetworkRecovery() {
-        Log.d(TAG, "🔄 Starting VPN recovery process...")
+            stopHeartbeatMonitoring()
 
-        Thread {
             try {
-                // Step 1: Stop current VPN instance cleanly
-                Log.d(TAG, "   Step 1: Stopping current VPN instance...")
-                isNormalStop = true  // Prevent death broadcast
-
-                // Close sing-box service
                 boxService?.close()
                 boxService = null
-
-                // Close TUN interface
                 fileDescriptor?.close()
                 fileDescriptor = null
-
-                // Step 2: Small delay to ensure cleanup
-                Log.d(TAG, "   Step 2: Waiting for cleanup...")
-                Thread.sleep(1000)
-
-                // Step 3: Get config
-                Log.d(TAG, "   Step 3: Loading config...")
-                val config = getConfig()
-                if (config.isEmpty()) {
-                    throw Exception("No config available for recovery")
-                }
-
-                // Step 4: Restart VPN with existing config
-                Log.d(TAG, "   Step 4: Restarting VPN service...")
-                isNormalStop = false
-                consecutiveFailures = 0
-                lastSuccessfulPing = System.currentTimeMillis()
-
-                val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-
-                runBlocking {
-                    DefaultNetworkMonitor.start(connectivityManager)
-                }
-
-                Libbox.setMemoryLimit(true)
-                val service = Libbox.newService(config, this)
-                service.start()
-                boxService = service
-
-                Log.d(TAG, "✅ VPN successfully restarted after network recovery")
-
-                // Notify Flutter
-                notifyFlutterVpnState("connected", "VPN reconnected after network recovery")
-
             } catch (e: Exception) {
-                Log.e(TAG, "❌ Failed to restart VPN after network recovery", e)
-
-                // If restart fails, send death event
-                isNormalStop = false
-                wasNetworkLost = false
-
-                notifyFlutterVpnDeath(
-                    "vpn_broken",
-                    "Failed to recover VPN after network change: ${e.message}"
-                )
-
-                // Stop service
-                mainHandler.post {
-                    stopSelf()
-                }
+                Log.e(TAG, "Error closing VPN: ${e.message}")
             }
-        }.start()
-    }
 
-    // ✅ FOR FUTURE USE: Check subscription before reconnect (Priority 3)
-    // This method is ready but NOT called during VPN death (DNS doesn't work)
-    // Call this from Flutter BEFORE reconnecting in Priority 3
-    suspend fun checkSubscriptionWithProtectedSocket(): String {
-        return withContext(Dispatchers.IO) {
-            var socket: java.net.Socket? = null
-            var sslSocket: javax.net.ssl.SSLSocket? = null
+            setVpnState(false)
 
-            try {
-                val accessToken = getSecureValue("access_token") ?: return@withContext "unknown"
+            // Send broadcast with appropriate reason
+            val reason = if (hasAnyNetwork) "vpn_broken" else "network_lost"
+            notifyFlutterVpnDeath(reason, "VPN connection lost. Please reconnect.")
 
-                val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                val underlyingNetwork = connectivityManager.allNetworks.firstOrNull { network ->
-                    val caps = connectivityManager.getNetworkCapabilities(network)
-                    caps != null && !caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) &&
-                    (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                    caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR))
-                } ?: return@withContext "unknown"
-
-                val ipAddress = try {
-                    val originalNetwork = connectivityManager.boundNetworkForProcess
-                    try {
-                        connectivityManager.bindProcessToNetwork(underlyingNetwork)
-                        val addresses = java.net.InetAddress.getAllByName("api.vulcainvpn.com")
-                        if (addresses.isEmpty()) throw Exception("No addresses resolved")
-                        addresses[0]
-                    } finally {
-                        connectivityManager.bindProcessToNetwork(originalNetwork)
-                    }
-                } catch (e: Exception) {
-                    return@withContext "unknown"
-                }
-
-                socket = java.net.Socket()
-                val protected = protect(socket)
-
-                if (!protected) {
-                    try {
-                        underlyingNetwork.bindSocket(socket)
-                    } catch (e: Exception) {
-                        // Continue anyway
-                    }
-                }
-
-                socket.connect(java.net.InetSocketAddress(ipAddress, 443), 5000)
-
-                val sslFactory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
-                sslSocket = sslFactory.createSocket(socket, "api.vulcainvpn.com", 443, true) as javax.net.ssl.SSLSocket
-                sslSocket.startHandshake()
-
-                val writer = java.io.PrintWriter(java.io.OutputStreamWriter(sslSocket.outputStream))
-                writer.print("GET /api/subscription HTTP/1.1\r\n")
-                writer.print("Host: api.vulcainvpn.com\r\n")
-                writer.print("Authorization: Bearer $accessToken\r\n")
-                writer.print("Connection: close\r\n")
-                writer.print("\r\n")
-                writer.flush()
-
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(sslSocket.inputStream))
-                var statusLine = ""
-                var line: String?
-                val body = StringBuilder()
-                var readingBody = false
-
-                while (reader.readLine().also { line = it } != null) {
-                    if (statusLine.isEmpty()) statusLine = line!!
-                    if (readingBody && line!!.isNotEmpty()) body.append(line)
-                    if (line!!.isEmpty()) readingBody = true
-                }
-
-                val statusCode = try {
-                    statusLine.split(" ")[1].toInt()
-                } catch (e: Exception) {
-                    0
-                }
-
-                return@withContext when {
-                    statusCode == 200 -> {
-                        try {
-                            val json = org.json.JSONObject(body.toString())
-                            val sub = json.getJSONObject("subscription")
-                            val status = sub.getString("status")
-                            if (status != "active") "expired" else "active"
-                        } catch (e: Exception) {
-                            "unknown"
-                        }
-                    }
-                    statusCode == 401 || statusCode == 403 -> "expired"
-                    else -> "unknown"
-                }
-
-            } catch (e: Exception) {
-                return@withContext "unknown"
-            } finally {
-                try { sslSocket?.close() } catch (e: Exception) {}
-                try { socket?.close() } catch (e: Exception) {}
-            }
+            Thread.sleep(300)
+            stopSelf()
+            consecutiveFailures = 0
         }
     }
 
@@ -473,8 +453,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                 "FlutterSecureStorage",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
 
             val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
             val fullKey = "${prefix}_${key}"
@@ -491,7 +470,11 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         try {
             runBlocking {
-                DefaultNetworkMonitor.stop()
+                try {
+                    DefaultNetworkMonitor.stop()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping network monitor: ${e.message}")
+                }
             }
             cachedConfig = null
             cachedInterfaces = null
@@ -501,7 +484,10 @@ class MyVpnService : VpnService(), PlatformInterface {
             boxService = null
 
             setVpnState(false)
-            prefs.edit().remove(KEY_START_TIME).apply()
+
+            synchronized(prefsLock) {
+                prefs.edit().remove(KEY_START_TIME).apply()
+            }
 
             if (isNormalStop) {
                 notifyFlutterVpnState("disconnected", "VPN disconnected by user")
@@ -516,42 +502,75 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    // ✅ PRIORITY 1: Enhanced onDestroy - detects unexpected deaths
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "🔴 Service destroyed (normal stop: $isNormalStop)")
 
-        stopHeartbeatMonitoring()
-        setVpnState(false)
-        prefs.edit().remove(KEY_START_TIME).apply()
+        isServiceAlive.set(false)
 
-        if (!isNormalStop) {
+        try {
+            stopHeartbeatMonitoring()
+            serviceScope.cancel()
+            Log.d(TAG, "✅ Service scope cancelled")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cancelling service scope: ${e.message}")
+        }
+
+        setVpnState(false)
+
+        synchronized(prefsLock) {
+            prefs.edit().remove(KEY_START_TIME).apply()
+        }
+
+        if (!isNormalStop && !deathEventSent) {
             Log.e(TAG, "⚠️ VPN SERVICE KILLED UNEXPECTEDLY BY ANDROID!")
             notifyFlutterVpnDeath("service_killed", "Android killed VPN service (low memory or system cleanup)")
         }
+
+        try {
+            runBlocking {
+                DefaultNetworkMonitor.stop()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping network monitor in onDestroy: ${e.message}")
+        }
     }
 
-    // ✅ PRIORITY 1: Enhanced onRevoke - permission was revoked
     override fun onRevoke() {
         super.onRevoke()
         Log.e(TAG, "🔴 VPN PERMISSION REVOKED!")
 
         isNormalStop = false
+        setVpnState(false)
         notifyFlutterVpnDeath("permission_revoked", "VPN permission was revoked")
         stopVpnService()
     }
 
-    // ✅ PRIORITY 1: Notify Flutter of VPN death
     private fun notifyFlutterVpnDeath(reason: String, message: String) {
+        VpnLogger.critical(TAG, "💀 VPN DIED: reason=$reason, message=$message")
         Log.e(TAG, "💀 VPN DIED: reason=$reason, message=$message")
 
-        mainHandler.post {
-            MainActivity.statusSink?.success(mapOf(
-                "event" to "vpn_died",
-                "reason" to reason,
-                "message" to message,
-                "timestamp" to System.currentTimeMillis()
-            ))
+        try {
+            mainHandler.post {
+                try {
+                    val sink = MainActivity.statusSink
+                    if (sink != null) {
+                        VpnLogger.log(TAG, "Notifying Flutter via statusSink")
+                        sink.success(mapOf(
+                            "event" to "vpn_died",
+                            "reason" to reason,
+                            "message" to message,
+                            "timestamp" to System.currentTimeMillis()
+                        ))
+                    } else {
+                        VpnLogger.log(TAG, "⚠️ StatusSink is null, cannot notify Flutter")
+                    }
+                } catch (e: Exception) {
+                    VpnLogger.error(TAG, "Error notifying Flutter via statusSink", e)
+                }
+            }
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Error posting to main handler", e)
         }
 
         try {
@@ -562,35 +581,32 @@ class MyVpnService : VpnService(), PlatformInterface {
                 setPackage(packageName)
             }
             sendBroadcast(intent)
+            VpnLogger.log(TAG, "Broadcast sent successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send broadcast", e)
+            VpnLogger.error(TAG, "Failed to send broadcast", e)
         }
     }
 
     private fun notifyFlutterVpnState(event: String, message: String) {
         mainHandler.post {
-            MainActivity.statusSink?.success(mapOf(
-                "event" to event,
-                "message" to message,
-                "timestamp" to System.currentTimeMillis()
-            ))
+            try {
+                MainActivity.statusSink?.success(mapOf(
+                    "event" to event,
+                    "message" to message,
+                    "timestamp" to System.currentTimeMillis()
+                ))
+            } catch (e: Exception) {
+                Log.e(TAG, "Error notifying Flutter: ${e.message}")
+            }
         }
     }
 
     override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
-
-    // =============================
-    // PlatformInterface Implementation
-    // =============================
-
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
-
     override fun autoDetectInterfaceControl(fd: Int) {
         try {
             protect(fd)
-        } catch (e: Exception) {
-            // Silent - happens frequently during normal operation
-        }
+        } catch (e: Exception) {}
     }
 
     override fun openTun(options: TunOptions): Int {
@@ -638,9 +654,7 @@ class MyVpnService : VpnService(), PlatformInterface {
     }
 
     override fun localDNSTransport(): io.nekohasekai.libbox.LocalDNSTransport? = null
-
     override fun writeLog(message: String) {
-        // Filter out noisy libbox errors
         if (!message.contains("http2: client connection force closed") &&
             !message.contains("operation was canceled")) {
             Log.d(TAG, "libbox: $message")
@@ -669,7 +683,14 @@ class MyVpnService : VpnService(), PlatformInterface {
     private fun buildInterfaceCacheForNetwork(network: android.net.Network?) {
         try {
             val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-            val networkInterfaces = NetworkInterface.getNetworkInterfaces().toList()
+
+            val networkInterfaces = try {
+                NetworkInterface.getNetworkInterfaces().toList().toMutableList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting network interfaces: ${e.message}")
+                emptyList()
+            }
+
             val interfaces = mutableListOf<LibboxNetworkInterface>()
 
             if (network != null) {
@@ -692,16 +713,21 @@ class MyVpnService : VpnService(), PlatformInterface {
 
             if (interfaces.isEmpty()) {
                 for (n in connectivityManager.allNetworks) {
-                    val linkProperties = connectivityManager.getLinkProperties(n) ?: continue
-                    val networkCapabilities = connectivityManager.getNetworkCapabilities(n) ?: continue
-                    val interfaceName = linkProperties.interfaceName ?: continue
+                    try {
+                        val linkProperties = connectivityManager.getLinkProperties(n) ?: continue
+                        val networkCapabilities = connectivityManager.getNetworkCapabilities(n) ?: continue
+                        val interfaceName = linkProperties.interfaceName ?: continue
 
-                    if (interfaceName.startsWith("tun") || interfaceName.startsWith("ppp")) continue
+                        if (interfaceName.startsWith("tun") || interfaceName.startsWith("ppp")) continue
 
-                    val networkInterface = networkInterfaces.find { it.name == interfaceName } ?: continue
-                    val boxInterface = buildInterfaceInfo(interfaceName, networkInterface, networkCapabilities, linkProperties)
-                    interfaces.add(boxInterface)
-                    break
+                        val networkInterface = networkInterfaces.find { it.name == interfaceName } ?: continue
+                        val boxInterface = buildInterfaceInfo(interfaceName, networkInterface, networkCapabilities, linkProperties)
+                        interfaces.add(boxInterface)
+                        break
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error processing network: ${e.message}")
+                        continue
+                    }
                 }
             }
 
@@ -725,7 +751,14 @@ class MyVpnService : VpnService(), PlatformInterface {
         val interfaceList = try {
             val connectivityManager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
             val networks = connectivityManager.allNetworks
-            val networkInterfaces = NetworkInterface.getNetworkInterfaces().toList()
+
+            val networkInterfaces = try {
+                NetworkInterface.getNetworkInterfaces().toList().toMutableList()
+            } catch (e: Exception) {
+                Log.e(TAG, "Error getting network interfaces in getInterfaces: ${e.message}")
+                emptyList()
+            }
+
             val interfaces = mutableListOf<LibboxNetworkInterface>()
 
             for (network in networks) {
@@ -746,6 +779,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                     interfaces.add(boxInterface)
                     break
                 } catch (e: Exception) {
+                    Log.e(TAG, "Error in interface loop: ${e.message}")
                     continue
                 }
             }
@@ -766,6 +800,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                             break
                         }
                     } catch (e: Exception) {
+                        Log.e(TAG, "Error in cellular fallback: ${e.message}")
                         continue
                     }
                 }
@@ -866,16 +901,17 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     override fun sendNotification(notification: io.nekohasekai.libbox.Notification) {}
 
-    // =============================
-    // STATE PERSISTENCE
-    // =============================
-
     private fun setVpnState(running: Boolean) {
-        prefs.edit().putBoolean(KEY_IS_RUNNING, running).apply()
+        synchronized(prefsLock) {
+            prefs.edit().putBoolean(KEY_IS_RUNNING, running).apply()
+        }
+        Log.d(TAG, "✅ VPN state set to: $running")
     }
 
     fun getVpnState(): Boolean {
-        return prefs.getBoolean(KEY_IS_RUNNING, false)
+        synchronized(prefsLock) {
+            return prefs.getBoolean(KEY_IS_RUNNING, false)
+        }
     }
 
     private fun createNotificationChannel() {

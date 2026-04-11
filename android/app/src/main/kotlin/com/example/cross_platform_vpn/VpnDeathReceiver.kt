@@ -1,41 +1,53 @@
 package com.example.cross_platform_vpn
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.app.NotificationManager
-import kotlinx.coroutines.*
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 
+/**
+ * 🔧 FIXED: Debounce + Subscription check + Service running check + network_lost reconnectable
+ */
 class VpnDeathReceiver : BroadcastReceiver() {
 
-    private val TAG = "VpnDeathReceiver"
-
     companion object {
-        // ✅ Use 4 minutes (240s) to avoid race condition with backend's 5-minute grace period
-        // This gives 60-second safety margin for backend processing
-        private const val MAX_AUTO_RECONNECT_DURATION_SECONDS = 240  // 4 minutes
+        private const val TAG = "VpnDeathReceiver"
+
+        // 🔧 Debounce to prevent duplicate service starts
+        private var lastReconnectAttempt = 0L
+        private const val RECONNECT_DEBOUNCE_MS = 2000L  // 2 seconds
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != "com.vulcain.vpn.VPN_DIED") return
+        VpnLogger.markCrashScenario("VPN_DEATH_BROADCAST_RECEIVED")
+        VpnLogger.log(TAG, "📻 VPN_DIED broadcast received")
+
+        if (intent.action != "com.vulcain.vpn.VPN_DIED") {
+            VpnLogger.log(TAG, "Ignoring - wrong action: ${intent.action}")
+            return
+        }
 
         val reason = intent.getStringExtra("reason") ?: "unknown"
         val message = intent.getStringExtra("message") ?: "VPN died"
         val timestamp = intent.getLongExtra("timestamp", 0)
 
-        Log.d(TAG, "📻 Received VPN_DIED broadcast: $reason (app in background)")
+        VpnLogger.log(TAG, "Death reason: $reason")
+        VpnLogger.log(TAG, "Death message: $message")
 
-        // Store death event
+        // ✅ NEW: Check if death reason is already subscription_expired
+        val prefs = context.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+        val storedReason = prefs.getString("death_reason", "")
+
+        if (storedReason == "subscription_expired") {
+            VpnLogger.log(TAG, "⛔ Death reason is already subscription_expired - NOT starting auto-reconnect")
+            VpnLogger.log(TAG, "This prevents infinite loop when subscription is expired")
+            return
+        }
+
+        // Store event for Flutter
         try {
-            val prefs = context.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
             prefs.edit().apply {
                 putString("death_reason", reason)
                 putString("death_message", message)
@@ -43,272 +55,142 @@ class VpnDeathReceiver : BroadcastReceiver() {
                 putBoolean("has_unread_death", true)
                 apply()
             }
-            Log.d(TAG, "   ✅ Stored death event in SharedPreferences")
+            VpnLogger.log(TAG, "✅ Death event stored in SharedPreferences")
         } catch (e: Exception) {
-            Log.e(TAG, "   ❌ Failed to store death event", e)
+            VpnLogger.error(TAG, "Failed to store event", e)
         }
 
-        // Try to send via EventSink (if Flutter is running)
-        if (MainActivity.statusSink != null) {
-            MainActivity.statusSink?.success(mapOf(
-                "event" to "vpn_died",
-                "reason" to reason,
-                "message" to message,
-                "timestamp" to timestamp
-            ))
-            Log.d(TAG, "   ✅ Sent to Flutter via EventSink")
-        } else {
-            Log.d(TAG, "   ⚠️ Flutter not running, stored for later")
+        // Notify Flutter - safe call ensures no crash if statusSink is null
+        try {
+            val sink = MainActivity.statusSink
+            if (sink != null) {
+                VpnLogger.log(TAG, "Notifying Flutter via statusSink")
+                sink.success(mapOf(
+                    "event" to "vpn_died",
+                    "reason" to reason,
+                    "message" to message,
+                    "timestamp" to timestamp
+                ))
+                VpnLogger.log(TAG, "✅ Flutter notified successfully")
+            } else {
+                VpnLogger.log(TAG, "⚠️ statusSink is null, Flutter not notified")
+            }
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Error notifying Flutter", e)
         }
 
         // Check if auto-reconnect is enabled
         val settingsPrefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-        val autoReconnectKey = "flutter.auto_reconnect_enabled"
-        val autoReconnectEnabled = settingsPrefs.getBoolean(autoReconnectKey, true)
+        val autoReconnectEnabled = settingsPrefs.getBoolean("flutter.auto_reconnect_enabled", true)
 
-        Log.d(TAG, "   🔄 Auto-reconnect enabled: $autoReconnectEnabled")
-
-        // Check if reason is reconnectable
+        // Check if this reason is reconnectable
         val isReconnectable = when (reason) {
             "service_killed" -> true
             "process_crashed" -> true
             "vpn_broken" -> true
-            "subscription_expired" -> false  // Don't auto-reconnect for expired subscriptions
+            "network_lost" -> true  // ✅ FIXED: network_lost should trigger auto-reconnect!
             "permission_revoked" -> false
+            "subscription_expired" -> false
             else -> false
         }
 
-        Log.d(TAG, "   🔄 Reason reconnectable: $isReconnectable")
+        VpnLogger.log(TAG, "Auto-reconnect enabled: $autoReconnectEnabled")
+        VpnLogger.log(TAG, "Is reconnectable: $isReconnectable")
 
-        if (!autoReconnectEnabled || !isReconnectable) {
-            Log.d(TAG, "   ⏸️ Skipping auto-reconnect (disabled or not reconnectable)")
+        val shouldAttemptReconnect = autoReconnectEnabled && isReconnectable
 
-            // Just show notification
-            showReconnectNotification(
-                context,
-                when (reason) {
-                    "permission_revoked" -> "VPN Permission Revoked"
-                    "service_killed" -> "VPN Service Stopped"
-                    "process_crashed" -> "VPN Crashed"
-                    "vpn_broken" -> "VPN Connection Lost"
-                    "subscription_expired" -> "Subscription Expired"
-                    else -> "VPN Disconnected"
-                },
-                when (reason) {
-                    "permission_revoked" -> "Please re-enable VPN permission"
-                    "subscription_expired" -> "Your VPN subscription has expired. Tap to renew."
-                    else -> "Tap to reconnect"
-                }
-            )
-            return
-        }
-
-        // ✅ NEW: Check disconnection duration to avoid race condition
-        val statePrefs = context.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-        val lastSeenAt = statePrefs.getLong("last_seen_at", System.currentTimeMillis())
-        val now = System.currentTimeMillis()
-        val disconnectedSeconds = (now - lastSeenAt) / 1000
-
-        Log.d(TAG, "   ⏱️ Disconnected for ${disconnectedSeconds}s (threshold: ${MAX_AUTO_RECONNECT_DURATION_SECONDS}s)")
-
-        // ✅ Decision: Auto-reconnect vs Manual reconnect
-        if (disconnectedSeconds < MAX_AUTO_RECONNECT_DURATION_SECONDS) {
-            // SHORT disconnection - safe to auto-reconnect with cached config
-            Log.d(TAG, "   ✅ Short disconnection - starting auto-reconnect with cached config")
-            startBackgroundAutoReconnect(context, reason, message)
-        } else {
-            // LONG disconnection - credentials might be freed on backend
-            // Show notification and require user to tap (triggers fresh API call via Flutter)
-            val minutes = disconnectedSeconds / 60
-            Log.d(TAG, "   ⚠️ Long disconnection (${minutes} min) - showing notification for manual reconnect")
-
-            showReconnectNotification(
-                context,
-                "VPN Disconnected",
-                if (minutes > 0) {
-                    "You were offline for $minutes minute${if (minutes > 1) "s" else ""}. Tap to reconnect."
-                } else {
-                    "Tap to reconnect with fresh credentials."
-                }
-            )
-        }
-    }
-
-    private fun startBackgroundAutoReconnect(context: Context, reason: String, message: String) {
-        // Use goAsync() to keep receiver alive during async work
-        val pendingResult = goAsync()
-
-        Thread {
-            try {
-                val maxAttempts = 4
-                val delays = listOf(0, 5000, 10000, 15000) // ms: 0s, 5s, 10s, 15s
-
-                for (attempt in 1..maxAttempts) {
-                    Log.d(TAG, "🔄 Auto-reconnect attempt $attempt/$maxAttempts")
-
-                    // Wait before retry (except first attempt)
-                    if (delays[attempt - 1] > 0) {
-                        Log.d(TAG, "   ⏳ Waiting ${delays[attempt - 1] / 1000}s before retry...")
-                        Thread.sleep(delays[attempt - 1].toLong())
-                    }
-
-                    try {
-                        // Step 1: Check subscription status
-                        Log.d(TAG, "   🔍 Checking subscription status...")
-                        val subscriptionStatus = runBlocking {
-                            checkSubscriptionStatus(context)
-                        }
-
-                        if (subscriptionStatus == "expired") {
-                            Log.d(TAG, "   🔴 Subscription expired - stopping auto-reconnect")
-
-                            // Update stored event
-                            val prefs = context.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-                            prefs.edit().apply {
-                                putString("death_reason", "subscription_expired")
-                                putString("death_message", "Your VPN subscription has expired")
-                                putBoolean("has_unread_death", true)
-                                apply()
-                            }
-
-                            // Show notification
-                            showReconnectNotification(
-                                context,
-                                "Subscription Expired",
-                                "Your VPN subscription has expired. Tap to renew."
-                            )
-                            return@Thread
-                        }
-
-                        if (subscriptionStatus != "active") {
-                            Log.d(TAG, "   ⚠️ Unknown subscription status: $subscriptionStatus")
-                            continue // Retry
-                        }
-
-                        Log.d(TAG, "   ✅ Subscription active, attempting reconnect...")
-
-                        // Step 2: Get VPN config
-                        val masterKey = MasterKey.Builder(context)
-                            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                            .build()
-
-                        val encryptedPrefs = EncryptedSharedPreferences.create(
-                            context,
-                            "FlutterSecureStorage",
-                            masterKey,
-                            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                        )
-
-                        val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
-                        val vpnConfig = encryptedPrefs.getString("${prefix}_vpn_config", null)
-
-                        if (vpnConfig == null) {
-                            Log.e(TAG, "   ❌ No VPN config found")
-                            continue
-                        }
-
-                        // Step 3: Start VPN service
-                        val vpnIntent = Intent(context, MyVpnService::class.java).apply {
-                            putExtra("VPN_CONFIG", vpnConfig)
-                        }
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            context.startForegroundService(vpnIntent)
-                        } else {
-                            context.startService(vpnIntent)
-                        }
-
-                        Log.d(TAG, "   🚀 VPN service start requested")
-
-                        // Wait for VPN to start
-                        Thread.sleep(2000)
-
-                        // Step 4: Verify VPN started
-                        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                        val activeNetwork = connectivityManager.activeNetwork
-                        val caps = activeNetwork?.let {
-                            connectivityManager.getNetworkCapabilities(it)
-                        }
-                        val isVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-
-                        if (isVpn) {
-                            Log.d(TAG, "   ✅ Auto-reconnect SUCCESS on attempt $attempt")
-
-                            // Clear death event
-                            val prefs = context.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-                            prefs.edit().apply {
-                                putBoolean("has_unread_death", false)
-                                apply()
-                            }
-
-                            // Cancel notifications
-                            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                            notificationManager.cancel(1001)
-
-                            // Notify Flutter if running
-                            if (MainActivity.statusSink != null) {
-                                Handler(Looper.getMainLooper()).post {
-                                    MainActivity.statusSink?.success(mapOf(
-                                        "event" to "auto_reconnect_success",
-                                        "attempt" to attempt
-                                    ))
-                                }
-                            }
-
-                            return@Thread // Success!
-                        } else {
-                            Log.d(TAG, "   ❌ VPN not active after attempt $attempt")
-                            continue
-                        }
-
-                    } catch (e: Exception) {
-                        Log.e(TAG, "   ❌ Auto-reconnect attempt $attempt failed: ${e.message}", e)
-                        continue
-                    }
-                }
-
-                // All attempts failed
-                Log.d(TAG, "🔴 Auto-reconnect FAILED after $maxAttempts attempts")
-
-                showReconnectNotification(
-                    context,
-                    when (reason) {
-                        "service_killed" -> "VPN Service Stopped"
-                        "process_crashed" -> "VPN Crashed"
-                        "vpn_broken" -> "VPN Connection Lost"
-                        else -> "VPN Disconnected"
-                    },
-                    "Could not reconnect automatically. Tap to try again."
-                )
-
-            } finally {
-                pendingResult.finish()
+        if (shouldAttemptReconnect) {
+            // 🔧 Debounce check
+            val now = System.currentTimeMillis()
+            if (now - lastReconnectAttempt < RECONNECT_DEBOUNCE_MS) {
+                VpnLogger.log(TAG, "⏭️ Skipping reconnect - too soon since last attempt (${now - lastReconnectAttempt}ms ago)")
+                return
             }
-        }.start()
+
+            // ✅ NEW: Check if AutoReconnectService is already running
+            if (isAutoReconnectServiceRunning(context)) {
+                VpnLogger.log(TAG, "⚠️ AutoReconnectService is already running - skipping start")
+                return
+            }
+
+            lastReconnectAttempt = now
+
+            VpnLogger.log(TAG, "🚀 Starting AutoReconnectService")
+
+            try {
+                val reconnectIntent = Intent(context, AutoReconnectService::class.java).apply {
+                    putExtra("reason", reason)
+                    putExtra("message", message)
+                    putExtra("timestamp", timestamp)
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(reconnectIntent)
+                } else {
+                    context.startService(reconnectIntent)
+                }
+
+                VpnLogger.log(TAG, "✅ AutoReconnectService started successfully")
+            } catch (e: Exception) {
+                VpnLogger.error(TAG, "Failed to start AutoReconnectService", e)
+                try {
+                    VpnLogger.log(TAG, "Falling back to notification")
+                    showNotification(context, reason)
+                } catch (e2: Exception) {
+                    VpnLogger.error(TAG, "Failed to show fallback notification", e2)
+                }
+            }
+
+        } else {
+            VpnLogger.log(TAG, "📬 Showing notification (auto-reconnect disabled or not applicable)")
+            try {
+                showNotification(context, reason)
+                VpnLogger.log(TAG, "✅ Notification shown")
+            } catch (e: Exception) {
+                VpnLogger.error(TAG, "Failed to show notification", e)
+            }
+        }
     }
 
-    private fun showReconnectNotification(context: Context, title: String, message: String) {
-        try {
-            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    /**
+     * ✅ NEW: Check if AutoReconnectService is already running
+     * Prevents multiple service instances from running simultaneously
+     */
+    private fun isAutoReconnectServiceRunning(context: Context): Boolean {
+        return try {
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            @Suppress("DEPRECATION")
+            for (service in manager.getRunningServices(Int.MAX_VALUE)) {
+                if (AutoReconnectService::class.java.name == service.service.className) {
+                    VpnLogger.log(TAG, "Found running AutoReconnectService")
+                    return true
+                }
+            }
+            false
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Error checking if service is running", e)
+            false
+        }
+    }
 
-            // Create notification channel
+    private fun showNotification(context: Context, reason: String) {
+        VpnLogger.log(TAG, "Creating notification for reason: $reason")
+
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = android.app.NotificationChannel(
                     "vpn_status",
                     "VPN Status",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "VPN connection status notifications"
-                    enableVibration(true)
-                }
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                )
                 notificationManager.createNotificationChannel(channel)
+                VpnLogger.log(TAG, "Notification channel created")
             }
 
-            // Build notification with intent flag for auto-reconnect
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("auto_reconnect_needed", true)  // ✅ Flutter will see this and trigger API call
             }
             val pendingIntent = android.app.PendingIntent.getActivity(
                 context,
@@ -317,6 +199,16 @@ class VpnDeathReceiver : BroadcastReceiver() {
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
             )
 
+            val title = when (reason) {
+                "subscription_expired" -> "Subscription Expired"
+                "service_killed" -> "VPN Stopped"
+                "vpn_broken" -> "VPN Disconnected"
+                "network_lost" -> "VPN Disconnected"  // ✅ FIXED: Better title for network_lost
+                else -> "VPN Disconnected"
+            }
+
+            VpnLogger.log(TAG, "Building notification with title: $title")
+
             val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 android.app.Notification.Builder(context, "vpn_status")
             } else {
@@ -324,109 +216,17 @@ class VpnDeathReceiver : BroadcastReceiver() {
                 android.app.Notification.Builder(context)
             }
                 .setContentTitle(title)
-                .setContentText(message)
+                .setContentText("Tap to reconnect")
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .build()
 
             notificationManager.notify(1001, notification)
-            Log.d(TAG, "📬 Notification shown: $title")
+            VpnLogger.log(TAG, "✅ Notification 1001 posted successfully")
 
         } catch (e: Exception) {
-            Log.e(TAG, "❌ Error showing notification: ${e.message}", e)
-        }
-    }
-
-    private suspend fun checkSubscriptionStatus(context: Context): String {
-        return withContext(Dispatchers.IO) {
-            var socket: java.net.Socket? = null
-            var sslSocket: javax.net.ssl.SSLSocket? = null
-
-            try {
-                Log.d(TAG, "🔍 Checking subscription status...")
-
-                val masterKey = MasterKey.Builder(context)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-
-                val encryptedPrefs = EncryptedSharedPreferences.create(
-                    context,
-                    "FlutterSecureStorage",
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                )
-
-                val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
-                val accessToken = encryptedPrefs.getString("${prefix}_access_token", null)
-
-                if (accessToken == null) {
-                    Log.e(TAG, "❌ No access token found")
-                    return@withContext "unknown"
-                }
-
-                val addresses = java.net.InetAddress.getAllByName("api.vulcainvpn.com")
-                if (addresses.isEmpty()) {
-                    Log.e(TAG, "❌ Could not resolve api.vulcainvpn.com")
-                    return@withContext "unknown"
-                }
-
-                socket = java.net.Socket()
-                socket.connect(java.net.InetSocketAddress(addresses[0], 443), 5000)
-
-                val sslFactory = javax.net.ssl.SSLSocketFactory.getDefault() as javax.net.ssl.SSLSocketFactory
-                sslSocket = sslFactory.createSocket(socket, "api.vulcainvpn.com", 443, true) as javax.net.ssl.SSLSocket
-                sslSocket.startHandshake()
-
-                val writer = java.io.PrintWriter(java.io.OutputStreamWriter(sslSocket.outputStream))
-                writer.print("GET /api/subscription HTTP/1.1\r\n")
-                writer.print("Host: api.vulcainvpn.com\r\n")
-                writer.print("Authorization: Bearer $accessToken\r\n")
-                writer.print("Connection: close\r\n")
-                writer.print("\r\n")
-                writer.flush()
-
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(sslSocket.inputStream))
-                var statusLine = ""
-                var line: String?
-                val body = StringBuilder()
-                var readingBody = false
-
-                while (reader.readLine().also { line = it } != null) {
-                    if (statusLine.isEmpty()) statusLine = line!!
-                    if (readingBody && line!!.isNotEmpty()) body.append(line)
-                    if (line!!.isEmpty()) readingBody = true
-                }
-
-                val statusCode = try {
-                    statusLine.split(" ")[1].toInt()
-                } catch (e: Exception) {
-                    0
-                }
-
-                return@withContext when {
-                    statusCode == 200 -> {
-                        try {
-                            val json = org.json.JSONObject(body.toString())
-                            val sub = json.getJSONObject("subscription")
-                            val status = sub.getString("status")
-                            if (status != "active") "expired" else "active"
-                        } catch (e: Exception) {
-                            "unknown"
-                        }
-                    }
-                    statusCode == 401 || statusCode == 403 -> "expired"
-                    else -> "unknown"
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "❌ Subscription check error: ${e.message}")
-                return@withContext "unknown"
-            } finally {
-                try { sslSocket?.close() } catch (e: Exception) {}
-                try { socket?.close() } catch (e: Exception) {}
-            }
+            VpnLogger.error(TAG, "Failed to show notification", e)
         }
     }
 }
