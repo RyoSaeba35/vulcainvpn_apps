@@ -108,17 +108,31 @@ class WindowsVpnService extends VpnService {
       message: 'Your VPN subscription has expired',
     ));
 
-    // Kill sing-box process
+    // ✅ FIXED: Force kill process FIRST
+    await _log('🔪 Force killing sing-box process...');
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+      await _log('   taskkill completed');
+    } catch (e) {
+      await _log('   taskkill error: $e');
+    }
+
+    // Wait for process to fully terminate
+    await Future.delayed(Duration(milliseconds: 500));
+
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
-    // Clean up configs
+    // Clean up configs (should work now that process is dead)
     try {
       if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
         await SecureConfigService.secureDelete(_plaintextPath!);
+        await _log('   Plaintext config deleted');
       }
       if (_configPath != null && await File(_configPath!).exists()) {
         await SecureConfigService.secureDelete(_configPath!);
+        await _log('   Encrypted config deleted');
       }
       _plaintextPath = null;
       _configPath = null;
@@ -342,6 +356,17 @@ class WindowsVpnService extends VpnService {
       await _log('Failed to notify backend: $e');
     }
 
+    // ✅ FIXED: Force kill FIRST, then cleanup
+    await _log('🔪 Force killing sing-box process...');
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+    } catch (e) {
+      await _log('taskkill error: $e');
+    }
+
+    await Future.delayed(Duration(milliseconds: 500));
+
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
@@ -356,13 +381,6 @@ class WindowsVpnService extends VpnService {
       _configPath = null;
     } catch (e) {
       await _log('Config cleanup error: $e');
-    }
-
-    try {
-      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
-      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
-    } catch (e) {
-      await _log('taskkill error: $e');
     }
 
     _isConnected = false;
@@ -392,6 +410,17 @@ class WindowsVpnService extends VpnService {
         await _log('   ⚠️ Long disconnection (${minutes} min) - sending death event for manual reconnect');
 
         _isNormalStop = true;
+
+        // ✅ FIXED: Force kill first
+        try {
+          await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+          await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+        } catch (e) {
+          await _log('taskkill error: $e');
+        }
+
+        await Future.delayed(Duration(milliseconds: 500));
+
         _singBoxProcess?.kill();
         _singBoxProcess = null;
 
@@ -418,6 +447,14 @@ class WindowsVpnService extends VpnService {
 
       await _log('   Step 1: Stopping current VPN instance...');
       _isNormalStop = true;
+
+      // ✅ FIXED: Force kill first
+      try {
+        await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+        await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+      } catch (e) {
+        await _log('taskkill error: $e');
+      }
 
       _singBoxProcess?.kill();
       _singBoxProcess = null;
@@ -451,9 +488,22 @@ class WindowsVpnService extends VpnService {
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box: $data'));
 
+      // ✅ Monitor stderr for 403 errors during recovery too
       _singBoxProcess!.stderr
           .transform(SystemEncoding().decoder)
-          .listen((data) => _log('sing-box ERR: $data'));
+          .listen((data) async {
+            await _log('sing-box ERR: $data');
+
+            if (data.contains('authentication failed, status code: 403')) {
+              _auth403Count++;
+              _reset403Counter();
+
+              if (_auth403Count >= 5) {
+                await _log('🚨 SUBSCRIPTION EXPIRED DETECTED during recovery');
+                await _handleSubscriptionExpired();
+              }
+            }
+          });
 
       await _log('   Step 5: Verifying VPN started...');
       await Future.delayed(Duration(seconds: 3));
@@ -626,7 +676,7 @@ class WindowsVpnService extends VpnService {
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box: $data'));
 
-      // ✅ UPDATED: Monitor stderr for 403 errors
+      // ✅ CRITICAL FIX: Monitor stderr for 403 errors
       _singBoxProcess!.stderr
           .transform(SystemEncoding().decoder)
           .listen((data) async {
@@ -707,6 +757,7 @@ class WindowsVpnService extends VpnService {
     _stopProcessChecker();
     _stopHeartbeatMonitoring();
 
+    // Notify backend of disconnection
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -722,9 +773,23 @@ class WindowsVpnService extends VpnService {
       await _log('Failed to notify backend: $e');
     }
 
+    // ✅ CRITICAL FIX: Force kill FIRST, THEN cleanup configs
+    await _log('🔪 Force killing sing-box process...');
+    try {
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
+      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
+      await _log('   taskkill completed');
+    } catch (e) {
+      await _log('   taskkill error: $e');
+    }
+
+    // Wait for process to fully terminate
+    await Future.delayed(Duration(milliseconds: 500));
+
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
+    // Clean up config files (should work now that process is dead)
     try {
       if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
         await SecureConfigService.secureDelete(_plaintextPath!);
@@ -738,13 +803,6 @@ class WindowsVpnService extends VpnService {
       _configPath = null;
     } catch (e) {
       await _log('Config cleanup error: $e');
-    }
-
-    try {
-      await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
-      await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
-    } catch (e) {
-      await _log('taskkill error: $e');
     }
 
     _isConnected = false;
