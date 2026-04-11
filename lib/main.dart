@@ -9,6 +9,7 @@ import 'screens/auth_gate.dart';
 import 'services/security_checker.dart';
 import 'services/vpn_service_android.dart';
 import 'services/notification_service.dart'; // ✅ NEW: Add this import
+import 'services/windows_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,8 +41,8 @@ void main() async {
 
   // Window manager setup (Windows only)
   if (Platform.isWindows) {
-    await WindowsNotificationService.initialize();
     await windowManager.ensureInitialized();
+    await WindowsNotificationService.initialize();
     const windowOptions = WindowOptions(
       skipTaskbar: false,
       title: 'Vulcain VPN',
