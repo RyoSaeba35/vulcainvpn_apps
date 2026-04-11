@@ -60,6 +60,7 @@ class MyVpnService : VpnService(), PlatformInterface {
 
     private var cachedInterfaces: List<LibboxNetworkInterface>? = null
     private var cachedConfig: String? = null
+    private var cachedAccessToken: String? = null  // ← NEW!
 
     private var isNormalStop = false
     private var deathEventSent = false
@@ -106,6 +107,12 @@ class MyVpnService : VpnService(), PlatformInterface {
                 intent?.getStringExtra("VPN_CONFIG")?.let { config ->
                     cachedConfig = config
                 }
+
+                // ✅ NEW: Get access token from intent
+                intent?.getStringExtra("ACCESS_TOKEN")?.let { token ->
+                    cachedAccessToken = token
+                }
+
                 if (!getVpnState()) startVpnService()
                 return START_STICKY
             }
@@ -129,28 +136,49 @@ class MyVpnService : VpnService(), PlatformInterface {
         Thread {
             try {
                 VpnLogger.log(TAG, "🔐 Checking subscription status...")
-                val subscriptionStatus = runBlocking {
-                    checkSubscription()
-                }
-                VpnLogger.log(TAG, "Subscription status: $subscriptionStatus")
 
-                if (subscriptionStatus == "expired" || subscriptionStatus == "canceled") {
-                    VpnLogger.log(TAG, "❌ Subscription not active ($subscriptionStatus)")
-                    VpnLogger.log(TAG, "Stopping VPN start - sending subscription_expired death event")
+                // ✅ CRITICAL FIX: Use passed token, not storage
+                val token = cachedAccessToken ?: getSecureValue("access_token")
 
-                    setVpnState(false)
-                    notifyFlutterVpnDeath("subscription_expired", "Your VPN subscription has expired")
-
-                    mainHandler.post {
-                        stopSelf()
-                    }
+                if (token == null) {
+                    VpnLogger.log(TAG, "❌ No access token available")
+                    notifyFlutterVpnDeath("auth_required", "Authentication required")
+                    mainHandler.post { stopSelf() }
                     return@Thread
                 }
 
-                if (subscriptionStatus != "active") {
-                    VpnLogger.log(TAG, "⚠️ Subscription status unknown - proceeding with caution")
-                } else {
-                    VpnLogger.log(TAG, "✅ Subscription is active - proceeding with VPN start")
+                val subscriptionStatus = runBlocking {
+                    checkSubscription(token)  // ← Pass token explicitly
+                }
+                VpnLogger.log(TAG, "Subscription status: $subscriptionStatus")
+
+                when (subscriptionStatus) {
+                    "expired", "canceled" -> {
+                        VpnLogger.log(TAG, "❌ Subscription not active ($subscriptionStatus)")
+                        VpnLogger.log(TAG, "Stopping VPN start - sending subscription_expired death event")
+
+                        setVpnState(false)
+                        notifyFlutterVpnDeath("subscription_expired", "Your VPN subscription has expired")
+
+                        mainHandler.post {
+                            stopSelf()
+                        }
+                        return@Thread
+                    }
+                    "auth_failed" -> {
+                        // ✅ NEW: Token is invalid - tell Flutter
+                        VpnLogger.log(TAG, "❌ Authentication failed - token invalid")
+                        setVpnState(false)
+                        notifyFlutterVpnDeath("auth_required", "Session expired - please login again")
+                        mainHandler.post { stopSelf() }
+                        return@Thread
+                    }
+                    "active" -> {
+                        VpnLogger.log(TAG, "✅ Subscription is active - proceeding with VPN start")
+                    }
+                    else -> {
+                        VpnLogger.log(TAG, "⚠️ Subscription status unknown - proceeding with caution")
+                    }
                 }
 
                 VpnLogger.log(TAG, "📥 Getting VPN config...")
@@ -201,15 +229,10 @@ class MyVpnService : VpnService(), PlatformInterface {
         }.start()
     }
 
-    private suspend fun checkSubscription(): String {
+    // ✅ UPDATED: Accept token parameter
+    private suspend fun checkSubscription(accessToken: String): String {
         return withContext(Dispatchers.IO) {
             try {
-                val accessToken = getSecureValue("access_token")
-                if (accessToken == null) {
-                    VpnLogger.log(TAG, "⚠️ No access token found")
-                    return@withContext "unknown"
-                }
-
                 VpnLogger.log(TAG, "Making API request to check subscription...")
                 val url = java.net.URL("https://api.vulcainvpn.com/api/subscription")
                 val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
@@ -228,14 +251,13 @@ class MyVpnService : VpnService(), PlatformInterface {
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
                         VpnLogger.log(TAG, "API response body: ${response.take(200)}...")
 
-                        // ✅ NEW: Detect HTML response BEFORE trying to parse as JSON
+                        // Detect HTML response
                         if (response.trimStart().startsWith("<!DOCTYPE", ignoreCase = true) ||
                             response.trimStart().startsWith("<html", ignoreCase = true)) {
-                            VpnLogger.log(TAG, "⚠️ API returned HTML instead of JSON - subscription expired")
-                            return@withContext "expired"
+                            VpnLogger.log(TAG, "⚠️ API returned HTML - authentication failed")
+                            return@withContext "auth_failed"
                         }
 
-                        // Only parse as JSON if it's NOT HTML
                         val json = org.json.JSONObject(response)
                         val subscription = json.getJSONObject("subscription")
                         val status = subscription.getString("status")
@@ -244,8 +266,8 @@ class MyVpnService : VpnService(), PlatformInterface {
                         return@withContext status
                     }
                     401, 403 -> {
-                        VpnLogger.log(TAG, "⚠️ Subscription check: unauthorized ($responseCode)")
-                        return@withContext "expired"
+                        VpnLogger.log(TAG, "⚠️ Authentication failed ($responseCode) - token invalid")
+                        return@withContext "auth_failed"  // ← CHANGED from "expired"
                     }
                     else -> {
                         VpnLogger.log(TAG, "⚠️ Unexpected response code: $responseCode")

@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
 
     private var pendingResult: MethodChannel.Result? = null
     private var pendingConfig: String? = null
+    private var pendingAccessToken: String? = null  // ← NEW!
 
     companion object {
         @Volatile
@@ -126,6 +127,7 @@ class MainActivity : FlutterActivity() {
                     "startVpn" -> {
                         VpnLogger.log(TAG, "🚀 StartVPN called")
                         val configJson = call.argument<String>("config")
+                        val accessToken = call.argument<String>("access_token")  // ← NEW!
 
                         if (configJson == null) {
                             VpnLogger.error(TAG, "No config provided")
@@ -133,10 +135,17 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
 
+                        if (accessToken == null) {
+                            VpnLogger.error(TAG, "No access token provided")
+                            result.error("NO_TOKEN", "Access token required", null)
+                            return@setMethodCallHandler
+                        }
+
                         pendingResult = result
                         pendingConfig = configJson
+                        pendingAccessToken = accessToken  // ← NEW!
 
-                        // Save config to encrypted storage for AutoReconnectService
+                        // Save config and token to encrypted storage for AutoReconnectService
                         try {
                             val masterKey = MasterKey.Builder(this)
                                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -149,10 +158,14 @@ class MainActivity : FlutterActivity() {
                                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                             )
                             val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
-                            prefs.edit().putString("${prefix}_vpn_config", configJson).apply()
-                            VpnLogger.log(TAG, "✅ Config saved to encrypted storage")
+                            prefs.edit().apply {
+                                putString("${prefix}_vpn_config", configJson)
+                                putString("${prefix}_access_token", accessToken)  // ← NEW!
+                                apply()
+                            }
+                            VpnLogger.log(TAG, "✅ Config and token saved to encrypted storage")
                         } catch (e: Exception) {
-                            VpnLogger.error(TAG, "Failed to save config", e)
+                            VpnLogger.error(TAG, "Failed to save config/token", e)
                         }
 
                         // ✅ CRITICAL FIX: Clear old death events in main process BEFORE starting VPN
@@ -463,6 +476,7 @@ class MainActivity : FlutterActivity() {
                 startVpnInternal(it)
                 pendingResult = null
                 pendingConfig = null
+                pendingAccessToken = null  // ← NEW!
             }
         }
     }
@@ -471,8 +485,10 @@ class MainActivity : FlutterActivity() {
         try {
             VpnLogger.log(TAG, "🚀 Starting VPN service...")
 
+            // ✅ Pass both config and token to VpnService
             val intent = Intent(this, MyVpnService::class.java).apply {
                 putExtra("VPN_CONFIG", pendingConfig)
+                putExtra("ACCESS_TOKEN", pendingAccessToken)  // ← NEW!
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -573,6 +589,7 @@ class MainActivity : FlutterActivity() {
                         startVpnInternal(result)
                         pendingResult = null
                         pendingConfig = null
+                        pendingAccessToken = null  // ← NEW!
                     }, 400)
 
                 } else {
@@ -584,6 +601,7 @@ class MainActivity : FlutterActivity() {
                     )
                     pendingResult = null
                     pendingConfig = null
+                    pendingAccessToken = null  // ← NEW!
                 }
             }
         }
@@ -610,6 +628,7 @@ class MainActivity : FlutterActivity() {
                 )
                 pendingResult = null
                 pendingConfig = null
+                pendingAccessToken = null  // ← NEW!
             }
         }
     }

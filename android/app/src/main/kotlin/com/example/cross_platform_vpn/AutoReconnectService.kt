@@ -20,7 +20,7 @@ import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.*
 
 /**
- * ✅ FIXED: "Broadcast First, Think Later" + Automatic Network Recovery
+ * ✅ FIXED: "Broadcast First, Think Later" + Automatic Network Recovery + Token Management
  *
  * Key behavior: Service STAYS ALIVE when network is down, waiting for NetworkCallback.
  * When network recovers, automatically reconnects WITHOUT user intervention.
@@ -38,7 +38,7 @@ class AutoReconnectService : Service() {
     private var reconnectJob: Job? = null
 
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
-    private var waitingForNetwork = false  // ✅ NEW: Track if we're waiting for network
+    private var waitingForNetwork = false
 
     override fun onCreate() {
         super.onCreate()
@@ -67,8 +67,8 @@ class AutoReconnectService : Service() {
 
         val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
         val storedReason = prefs.getString("death_reason", "")
-        if (storedReason == "subscription_expired") {
-            VpnLogger.log(TAG, "⛔ Subscription already expired - stopping service immediately")
+        if (storedReason == "subscription_expired" || storedReason == "auth_required") {
+            VpnLogger.log(TAG, "⛔ Subscription expired or auth required - stopping service immediately")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -109,15 +109,12 @@ class AutoReconnectService : Service() {
                 override fun onAvailable(network: Network) {
                     super.onAvailable(network)
 
-                    // ✅ FIXED: Only restart if we're waiting for network
                     if (waitingForNetwork) {
                         VpnLogger.log(TAG, "🔄 Network recovered! Restarting reconnection...")
                         Log.d(TAG, "🔄 Network available - restarting reconnection")
 
-                        // Clear waiting flag
                         waitingForNetwork = false
 
-                        // Restart reconnection immediately
                         reconnectJob?.cancel()
                         reconnectJob = serviceScope.launch(Dispatchers.IO) {
                             try {
@@ -174,14 +171,11 @@ class AutoReconnectService : Service() {
             if (!waitForNetwork()) {
                 VpnLogger.log(TAG, "❌ No network available")
 
-                // ✅ CRITICAL FIX: Don't stop the service! Keep it alive waiting for network
                 waitingForNetwork = true
                 VpnLogger.log(TAG, "🔔 Keeping service alive - NetworkCallback will restart when network recovers")
 
-                // Update notification to show we're waiting
                 updateNotification("Waiting for network", "VPN will reconnect when internet is available")
 
-                // ✅ DON'T call fail() or stopSelf() - just return and keep service alive
                 return
             }
             VpnLogger.log(TAG, "✅ Network available")
@@ -191,62 +185,94 @@ class AutoReconnectService : Service() {
             val subStatus = checkSubscription()
             VpnLogger.log(TAG, "Subscription status: $subStatus")
 
-            if (subStatus == "expired" || subStatus == "canceled") {
-                VpnLogger.log(TAG, "❌ Subscription not active ($subStatus)")
-                VpnLogger.log(TAG, "📝 Updating death reason to subscription_expired to prevent loops")
+            when (subStatus) {
+                "expired", "canceled" -> {
+                    VpnLogger.log(TAG, "❌ Subscription not active ($subStatus)")
+                    VpnLogger.log(TAG, "📝 Updating death reason to subscription_expired to prevent loops")
 
-                updateDeathReason("subscription_expired", "Your VPN subscription has expired")
+                    updateDeathReason("subscription_expired", "Your VPN subscription has expired")
 
-                val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                val appProcesses = activityManager.runningAppProcesses
-                var isForeground = false
+                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    val appProcesses = activityManager.runningAppProcesses
+                    var isForeground = false
 
-                appProcesses?.forEach { processInfo ->
-                    if (processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND &&
-                        processInfo.processName == packageName) {
-                        isForeground = true
-                    }
-                }
-
-                if (!isForeground) {
-                    VpnLogger.log(TAG, "📱 App is in background - showing subscription notification")
-                    try {
-                        val intent = Intent(this, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    appProcesses?.forEach { processInfo ->
+                        if (processInfo.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND &&
+                            processInfo.processName == packageName) {
+                            isForeground = true
                         }
-                        val pendingIntent = PendingIntent.getActivity(
-                            this, 0, intent,
-                            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                        )
-
-                        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                            .setContentTitle("Subscription Expired")
-                            .setContentText("Your VPN subscription has expired. Tap to renew.")
-                            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                            .setContentIntent(pendingIntent)
-                            .setAutoCancel(true)
-                            .setPriority(NotificationCompat.PRIORITY_HIGH)
-                            .build()
-
-                        val nm = getSystemService(NotificationManager::class.java)
-                        nm.notify(1002, notification)
-                        VpnLogger.log(TAG, "✅ Subscription expired notification shown")
-                    } catch (e: Exception) {
-                        VpnLogger.error(TAG, "Failed to show subscription notification", e)
                     }
-                } else {
-                    VpnLogger.log(TAG, "📱 App is in foreground - Flutter will show dialog, skipping notification")
+
+                    if (!isForeground) {
+                        VpnLogger.log(TAG, "📱 App is in background - showing subscription notification")
+                        try {
+                            val intent = Intent(this, MainActivity::class.java).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            }
+                            val pendingIntent = PendingIntent.getActivity(
+                                this, 0, intent,
+                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                            )
+
+                            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                                .setContentTitle("Subscription Expired")
+                                .setContentText("Your VPN subscription has expired. Tap to renew.")
+                                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                                .setContentIntent(pendingIntent)
+                                .setAutoCancel(true)
+                                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                                .build()
+
+                            val nm = getSystemService(NotificationManager::class.java)
+                            nm.notify(1002, notification)
+                            VpnLogger.log(TAG, "✅ Subscription expired notification shown")
+                        } catch (e: Exception) {
+                            VpnLogger.error(TAG, "Failed to show subscription notification", e)
+                        }
+                    } else {
+                        VpnLogger.log(TAG, "📱 App is in foreground - Flutter will show dialog, skipping notification")
+                    }
+
+                    VpnLogger.log(TAG, "🛑 Stopping AutoReconnectService (subscription expired)")
+                    stopSelf()
+                    return
                 }
+                "auth_failed" -> {
+                    // ✅ NEW: Token invalid - tell user to re-login
+                    VpnLogger.log(TAG, "❌ Authentication failed - token invalid")
+                    updateDeathReason("auth_required", "Session expired - please login again")
 
-                VpnLogger.log(TAG, "🛑 Stopping AutoReconnectService (subscription expired)")
-                stopSelf()
-                return
-            }
+                    // Show notification
+                    val intent = Intent(this, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    }
+                    val pendingIntent = PendingIntent.getActivity(
+                        this, 0, intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
 
-            if (subStatus != "active") {
-                VpnLogger.log(TAG, "⚠️ Subscription status unknown - proceeding with caution")
-            } else {
-                VpnLogger.log(TAG, "✅ Subscription is active")
+                    val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                        .setContentTitle("Session Expired")
+                        .setContentText("Please login again to continue.")
+                        .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                        .setContentIntent(pendingIntent)
+                        .setAutoCancel(true)
+                        .setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .build()
+
+                    val nm = getSystemService(NotificationManager::class.java)
+                    nm.notify(1003, notification)
+
+                    VpnLogger.log(TAG, "🛑 Stopping AutoReconnectService (auth required)")
+                    stopSelf()
+                    return
+                }
+                "active" -> {
+                    VpnLogger.log(TAG, "✅ Subscription is active")
+                }
+                else -> {
+                    VpnLogger.log(TAG, "⚠️ Subscription status unknown - proceeding with caution")
+                }
             }
 
             // STEP 4: Get config
@@ -276,7 +302,6 @@ class AutoReconnectService : Service() {
                 if (!isNetworkAvailable()) {
                     VpnLogger.log(TAG, "⚠️ Network lost during reconnection")
 
-                    // ✅ FIXED: Keep service alive, wait for NetworkCallback
                     waitingForNetwork = true
                     VpnLogger.log(TAG, "🔔 Network lost - keeping service alive, waiting for recovery")
                     updateNotification("Waiting for network", "VPN will reconnect when internet is available")
@@ -378,11 +403,11 @@ class AutoReconnectService : Service() {
                         val response = connection.inputStream.bufferedReader().use { it.readText() }
                         VpnLogger.log(TAG, "API response body: ${response.take(200)}...")
 
-                        // ✅ ADD THIS: Detect HTML response
+                        // Detect HTML response
                         if (response.trimStart().startsWith("<!DOCTYPE", ignoreCase = true) ||
                             response.trimStart().startsWith("<html", ignoreCase = true)) {
-                            VpnLogger.log(TAG, "⚠️ API returned HTML - subscription expired")
-                            return@withContext "expired"
+                            VpnLogger.log(TAG, "⚠️ API returned HTML - auth failed")
+                            return@withContext "auth_failed"
                         }
 
                         val json = org.json.JSONObject(response)
@@ -393,8 +418,8 @@ class AutoReconnectService : Service() {
                         return@withContext status
                     }
                     401, 403 -> {
-                        VpnLogger.log(TAG, "⚠️ Subscription check: unauthorized ($responseCode)")
-                        return@withContext "expired"
+                        VpnLogger.log(TAG, "⚠️ Authentication failed ($responseCode)")
+                        return@withContext "auth_failed"  // ← CHANGED from "expired"
                     }
                     else -> {
                         VpnLogger.log(TAG, "⚠️ Unexpected response code: $responseCode")

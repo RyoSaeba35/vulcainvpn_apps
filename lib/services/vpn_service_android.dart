@@ -158,9 +158,20 @@ class AndroidVpnService extends VpnService {
       final configJson = VpnConfigService.toJsonString(config);
       print('✅ Config built (${configJson.length} chars)');
 
-      // Start VPN with config
+      // ✅ CRITICAL FIX: Get fresh token before starting VPN
+      final accessToken = await AuthService.getValidAccessToken();
+
+      if (accessToken == null) {
+        print('❌ No valid access token');
+        throw Exception('Authentication required - please login again');
+      }
+
+      print('✅ Fresh access token obtained (${accessToken.length} chars)');
+
+      // ✅ Pass BOTH config and token to Android
       final result = await _platform.invokeMethod('startVpn', {
         'config': configJson,
+        'access_token': accessToken,  // ← NEW!
       });
 
       print('✅ VPN started successfully');

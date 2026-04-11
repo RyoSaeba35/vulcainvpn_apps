@@ -9,6 +9,7 @@ import 'vpn_config_service.dart';
 import 'auth_service.dart';
 import 'secure_config_service.dart';
 import 'vpn_service_android.dart'; // For VpnEvent types
+import 'windows_notification_service.dart';
 
 class WindowsVpnService extends VpnService {
   static Process? _singBoxProcess;
@@ -111,6 +112,12 @@ class WindowsVpnService extends VpnService {
     _auth403Count = 0;
     _auth403Timer?.cancel();
 
+    // ✅ NEW: Show critical notification (toast + window focus)
+    await WindowsNotificationService.showCriticalAlert(
+      title: 'VPN Disconnected',
+      message: 'Your subscription has expired. Please renew to continue.',
+    );
+
     // Send death event FIRST (before stopping process)
     _eventController.add(VpnEvent(
       type: VpnEventType.died,
@@ -177,6 +184,12 @@ class WindowsVpnService extends VpnService {
 
           _isConnected = false;
           _statusController.add(false);
+
+          // ✅ NEW: Show critical notification (toast + window focus)
+          await WindowsNotificationService.showCriticalAlert(
+            title: 'VPN Crashed',
+            message: 'VPN process stopped unexpectedly. Please restart.',
+          );
 
           _eventController.add(VpnEvent(
             type: VpnEventType.died,
@@ -322,6 +335,12 @@ class WindowsVpnService extends VpnService {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('last_seen_at', _networkLostTimestamp!.millisecondsSinceEpoch);
 
+        // ✅ NEW: Show toast notification (non-critical)
+        await WindowsNotificationService.showToast(
+          title: 'Network Lost',
+          message: 'VPN will reconnect when network returns',
+        );
+
         await _log('   📡 Sending network_lost event to Flutter');
         _eventController.add(VpnEvent(
           type: VpnEventType.died,
@@ -345,6 +364,13 @@ class WindowsVpnService extends VpnService {
     _wasNetworkLost = false;
 
     await _log('🛑 STOPPING BROKEN VPN...');
+
+    // ✅ NEW: Show toast notification (important but not critical)
+    await WindowsNotificationService.showToast(
+      title: 'VPN Connection Lost',
+      message: 'Please reconnect to restore protection',
+      isError: true,
+    );
 
     _eventController.add(VpnEvent(
       type: VpnEventType.died,
@@ -440,6 +466,15 @@ class WindowsVpnService extends VpnService {
         _isConnected = false;
         _statusController.add(false);
 
+        // ✅ NEW: Show toast for long disconnection
+        await WindowsNotificationService.showToast(
+          title: 'VPN Disconnected',
+          message: minutes > 0
+              ? 'You were offline for $minutes minute${minutes > 1 ? 's' : ''}. Tap to reconnect.'
+              : 'Network recovered. Tap to reconnect.',
+          isError: true,
+        );
+
         _eventController.add(VpnEvent(
           type: VpnEventType.died,
           reason: 'vpn_broken',
@@ -531,6 +566,12 @@ class WindowsVpnService extends VpnService {
 
       await _log('✅ VPN successfully restarted after network recovery');
 
+      // ✅ NEW: Show success notification
+      await WindowsNotificationService.showToast(
+        title: 'VPN Reconnected',
+        message: 'Your VPN connection has been restored',
+      );
+
       _eventController.add(VpnEvent(
         type: VpnEventType.connected,
         message: 'VPN reconnected after network recovery',
@@ -544,6 +585,13 @@ class WindowsVpnService extends VpnService {
 
       _isNormalStop = false;
       _wasNetworkLost = false;
+
+      // ✅ NEW: Show failure notification
+      await WindowsNotificationService.showToast(
+        title: 'VPN Recovery Failed',
+        message: 'Failed to reconnect. Please connect manually.',
+        isError: true,
+      );
 
       _eventController.add(VpnEvent(
         type: VpnEventType.died,
@@ -730,6 +778,13 @@ class WindowsVpnService extends VpnService {
           _statusController.add(false);
 
           if (!_isNormalStop && code != 0) {
+            // ✅ NEW: Show notification for abnormal exit
+            await WindowsNotificationService.showToast(
+              title: 'VPN Process Exited',
+              message: 'VPN stopped with exit code $code',
+              isError: true,
+            );
+
             _eventController.add(VpnEvent(
               type: VpnEventType.died,
               reason: 'process_exited',

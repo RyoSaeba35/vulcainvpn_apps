@@ -40,6 +40,7 @@ void main() async {
 
   // Window manager setup (Windows only)
   if (Platform.isWindows) {
+    await WindowsNotificationService.initialize();
     await windowManager.ensureInitialized();
     const windowOptions = WindowOptions(
       skipTaskbar: false,
