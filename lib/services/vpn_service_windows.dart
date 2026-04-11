@@ -14,7 +14,7 @@ class WindowsVpnService extends VpnService {
   static Process? _singBoxProcess;
   static final _statusController = StreamController<bool>.broadcast();
   static bool _isConnected = false;
-  static bool _isNormalStop = false; // ✅ Track if disconnect was intentional
+  static bool _isNormalStop = false;
 
   static String? _configPath;
   static String? _plaintextPath;
@@ -28,16 +28,19 @@ class WindowsVpnService extends VpnService {
   static int _consecutiveFailures = 0;
   static DateTime? _lastSuccessfulPing;
   static const int _heartbeatIntervalSeconds = 10;
-  static const int _maxConsecutiveFailures = 3; // 30 seconds total
-  static const String _pingHost = 'api.vulcainvpn.com'; // ✅ FIXED: Changed from 1.1.1.1 to match Android
+  static const int _maxConsecutiveFailures = 3;
+  static const String _pingHost = 'api.vulcainvpn.com';
 
-  // ✅ NEW: Network recovery tracking for airplane mode fix
+  // ✅ NEW: Network recovery tracking
   static bool _wasNetworkLost = false;
   static DateTime? _networkLostTimestamp;
 
-  // ✅ NEW: Race condition fix - Use 4 minutes to avoid race with backend's 5-minute grace period
-  // This gives 60-second safety margin for backend processing
-  static const int maxAutoReconnectDurationSeconds = 240; // 4 minutes
+  // ✅ NEW: Race condition fix - 4 minutes threshold
+  static const int maxAutoReconnectDurationSeconds = 240;
+
+  // ✅ NEW: 403 error tracking for subscription expiry detection
+  static int _auth403Count = 0;
+  static Timer? _auth403Timer;
 
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
@@ -64,13 +67,72 @@ class WindowsVpnService extends VpnService {
     return '$_exeDir\\$binary';
   }
 
-  // ✅ PRIORITY 1: Expose event stream
   static Stream<VpnEvent> get eventStream => _eventController.stream;
 
   @override
   Stream<bool> get statusStream => _statusController.stream;
 
-  // ✅ PRIORITY 1: Start process checker (checks if sing-box is running)
+  // ✅ NEW: Reset 403 counter periodically
+  static void _reset403Counter() {
+    _auth403Timer?.cancel();
+    _auth403Timer = Timer(Duration(seconds: 30), () {
+      _auth403Count = 0;
+    });
+  }
+
+  // ✅ NEW: Handle subscription expiry detected from 403 errors
+  static Future<void> _handleSubscriptionExpired() async {
+    await _log('🔴 STOPPING VPN - Subscription expired');
+
+    // Prevent duplicate death events
+    if (!_isConnected) {
+      await _log('⚠️ Already disconnected, ignoring');
+      return;
+    }
+
+    // Mark as normal stop to prevent process death event
+    _isNormalStop = true;
+
+    // Stop monitoring
+    _stopProcessChecker();
+    _stopHeartbeatMonitoring();
+
+    // Reset counters
+    _auth403Count = 0;
+    _auth403Timer?.cancel();
+
+    // Send death event FIRST (before stopping process)
+    _eventController.add(VpnEvent(
+      type: VpnEventType.died,
+      reason: 'subscription_expired',
+      message: 'Your VPN subscription has expired',
+    ));
+
+    // Kill sing-box process
+    _singBoxProcess?.kill();
+    _singBoxProcess = null;
+
+    // Clean up configs
+    try {
+      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
+        await SecureConfigService.secureDelete(_plaintextPath!);
+      }
+      if (_configPath != null && await File(_configPath!).exists()) {
+        await SecureConfigService.secureDelete(_configPath!);
+      }
+      _plaintextPath = null;
+      _configPath = null;
+    } catch (e) {
+      await _log('Config cleanup error: $e');
+    }
+
+    // Update state
+    _isConnected = false;
+    _statusController.add(false);
+
+    await _log('✅ VPN stopped due to subscription expiry');
+  }
+
   static void _startProcessChecker() {
     _processChecker?.cancel();
 
@@ -83,14 +145,12 @@ class WindowsVpnService extends VpnService {
       final isRunning = await _isSingBoxRunning();
 
       if (!isRunning && _isConnected) {
-        // ✅ Only send death event if NOT a normal stop
         if (!_isNormalStop) {
           await _log('⚠️ sing-box process died unexpectedly!');
 
           _isConnected = false;
           _statusController.add(false);
 
-          // Send death event
           _eventController.add(VpnEvent(
             type: VpnEventType.died,
             reason: 'process_crashed',
@@ -103,16 +163,13 @@ class WindowsVpnService extends VpnService {
     });
   }
 
-  // ✅ PRIORITY 1: Stop process checker
   static void _stopProcessChecker() {
     _processChecker?.cancel();
     _processChecker = null;
   }
 
-  // ✅ PRIORITY 1: Check if sing-box process is running
   static Future<bool> _isSingBoxRunning() async {
     try {
-      // Check for amd64 version
       final result1 = await Process.run(
         'tasklist',
         ['/FI', 'IMAGENAME eq sing-box-amd64.exe', '/NH'],
@@ -122,7 +179,6 @@ class WindowsVpnService extends VpnService {
         return true;
       }
 
-      // Check for arm64 version
       final result2 = await Process.run(
         'tasklist',
         ['/FI', 'IMAGENAME eq sing-box-arm64.exe', '/NH'],
@@ -139,9 +195,8 @@ class WindowsVpnService extends VpnService {
     }
   }
 
-  // ✅ PRIORITY 2: Start heartbeat monitoring
   static void _startHeartbeatMonitoring() {
-    _stopHeartbeatMonitoring(); // Cancel any existing timer
+    _stopHeartbeatMonitoring();
 
     _log('💓 Starting heartbeat monitoring (every ${_heartbeatIntervalSeconds}s)');
     _consecutiveFailures = 0;
@@ -159,21 +214,18 @@ class WindowsVpnService extends VpnService {
           final isReachable = await _performHeartbeatCheck();
 
           if (isReachable) {
-            // ✅ Ping successful
             if (_consecutiveFailures > 0) {
               await _log('💚 Heartbeat recovered after $_consecutiveFailures failures');
             }
             _consecutiveFailures = 0;
             _lastSuccessfulPing = DateTime.now();
           } else {
-            // ❌ Ping failed
             _consecutiveFailures++;
             final timeSinceLastSuccess = DateTime.now().difference(_lastSuccessfulPing!).inSeconds;
 
             await _log('💔 Heartbeat failed ($_consecutiveFailures/$_maxConsecutiveFailures) - Last success: ${timeSinceLastSuccess}s ago');
 
             if (_consecutiveFailures >= _maxConsecutiveFailures) {
-              // Multiple failures detected
               await _handleHeartbeatFailure();
             }
           }
@@ -184,7 +236,6 @@ class WindowsVpnService extends VpnService {
     );
   }
 
-  // ✅ PRIORITY 2: Stop heartbeat monitoring
   static void _stopHeartbeatMonitoring() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
@@ -192,13 +243,11 @@ class WindowsVpnService extends VpnService {
     _log('💓 Stopped heartbeat monitoring');
   }
 
-  // ✅ UPDATED: Enhanced heartbeat check with network recovery detection
   static Future<bool> _performHeartbeatCheck() async {
     try {
-      // ✅ FIXED: Ping VPN API instead of generic internet (matches Android behavior)
       final result = await Process.run(
         'ping',
-        ['-n', '1', '-w', '3000', _pingHost], // 1 ping, 3 second timeout
+        ['-n', '1', '-w', '3000', _pingHost],
       );
 
       final success = result.exitCode == 0;
@@ -206,13 +255,11 @@ class WindowsVpnService extends VpnService {
       if (success) {
         await _log('💚 Ping OK: $_pingHost');
 
-        // ✅ NEW: Check if network just recovered
         if (_wasNetworkLost) {
           final downtime = DateTime.now().difference(_networkLostTimestamp!).inSeconds;
           await _log('🔄 NETWORK RECOVERED after ${downtime}s!');
           await _log('   Attempting to restart VPN tunnel...');
 
-          // Trigger VPN restart with race condition check
           await _handleNetworkRecovery();
 
           _wasNetworkLost = false;
@@ -228,32 +275,26 @@ class WindowsVpnService extends VpnService {
     }
   }
 
-  // ✅ UPDATED: Enhanced heartbeat failure handler with network loss tracking
   static Future<void> _handleHeartbeatFailure() async {
     await _log('🚨 HEARTBEAT FAILURE DETECTED!');
     await _log('   VPN is connected but no internet access through VPN');
     await _log('   3 consecutive ping failures detected');
 
-    // ✅ SMART: Check if device has ANY network at all
     final hasAnyNetwork = await _checkForAnyNetwork();
 
     if (!hasAnyNetwork) {
-      // ✅ SCENARIO: NO NETWORK (airplane mode, disconnected, etc.)
       await _log('📶 NO NETWORK DETECTED');
       await _log('   User may be in tunnel, airplane mode, or network is down');
       await _log('   Keeping VPN connected - will resume when network returns');
 
-      // ✅ NEW: Track that network was lost
       if (!_wasNetworkLost) {
         _wasNetworkLost = true;
         _networkLostTimestamp = DateTime.now();
         await _log('   📍 Marking network as lost at ${_networkLostTimestamp}');
 
-        // ✅ NEW: Store timestamp in SharedPreferences for duration check
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('last_seen_at', _networkLostTimestamp!.millisecondsSinceEpoch);
 
-        // ✅ CRITICAL FIX: Notify Flutter that network is lost
         await _log('   📡 Sending network_lost event to Flutter');
         _eventController.add(VpnEvent(
           type: VpnEventType.died,
@@ -262,11 +303,10 @@ class WindowsVpnService extends VpnService {
         ));
       }
 
-      _consecutiveFailures = 0; // Reset counter
+      _consecutiveFailures = 0;
       return;
     }
 
-    // ✅ SCENARIO: VPN BROKEN (server down, credentials expired, etc.)
     await _log('🔴 VPN IS BROKEN!');
     await _log('   ✅ Device has active network adapters');
     await _log('   ❌ VPN pings are failing');
@@ -275,25 +315,20 @@ class WindowsVpnService extends VpnService {
     final reason = 'vpn_broken';
     final message = 'VPN connection lost. Please reconnect.';
 
-    // Reset network lost flag
     _wasNetworkLost = false;
 
-    // ✅ Actually STOP the VPN!
     await _log('🛑 STOPPING BROKEN VPN...');
 
-    // Send death event FIRST
     _eventController.add(VpnEvent(
       type: VpnEventType.died,
       reason: reason,
       message: message,
     ));
 
-    // ✅ Inline stop logic (can't call instance method from static)
-    _isNormalStop = true; // Mark as normal to prevent duplicate death event
+    _isNormalStop = true;
     _stopProcessChecker();
     _stopHeartbeatMonitoring();
 
-    // Notify backend
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -307,11 +342,9 @@ class WindowsVpnService extends VpnService {
       await _log('Failed to notify backend: $e');
     }
 
-    // Kill process
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
-    // Clean up config files
     try {
       if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
         await SecureConfigService.secureDelete(_plaintextPath!);
@@ -325,7 +358,6 @@ class WindowsVpnService extends VpnService {
       await _log('Config cleanup error: $e');
     }
 
-    // Kill by name
     try {
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
@@ -336,18 +368,15 @@ class WindowsVpnService extends VpnService {
     _isConnected = false;
     _statusController.add(false);
 
-    // Reset counter
     _consecutiveFailures = 0;
 
     await _log('✅ VPN stopped due to broken connection');
   }
 
-  // ✅ UPDATED: Handle network recovery with race condition check
   static Future<void> _handleNetworkRecovery() async {
     try {
       await _log('🔄 Network recovered - checking disconnection duration...');
 
-      // ✅ NEW: Check disconnection duration to avoid race condition
       final prefs = await SharedPreferences.getInstance();
       final lastSeenAt = prefs.getInt('last_seen_at') ?? DateTime.now().millisecondsSinceEpoch;
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -355,18 +384,13 @@ class WindowsVpnService extends VpnService {
 
       await _log('   ⏱️ Disconnected for ${disconnectedSeconds}s (threshold: ${maxAutoReconnectDurationSeconds}s)');
 
-      // ✅ Decision: Auto-reconnect vs Manual reconnect
       if (disconnectedSeconds < maxAutoReconnectDurationSeconds) {
-        // SHORT disconnection - safe to auto-reconnect with cached config
         await _log('   ✅ Short disconnection - restarting VPN with cached config');
         await _restartVpnWithCachedConfig();
       } else {
-        // LONG disconnection - credentials might be freed on backend
-        // Send death event, let Flutter handle reconnect with fresh API call
         final minutes = disconnectedSeconds ~/ 60;
         await _log('   ⚠️ Long disconnection (${minutes} min) - sending death event for manual reconnect');
 
-        // Stop current VPN process
         _isNormalStop = true;
         _singBoxProcess?.kill();
         _singBoxProcess = null;
@@ -374,7 +398,6 @@ class WindowsVpnService extends VpnService {
         _isConnected = false;
         _statusController.add(false);
 
-        // Send death event to Flutter (triggers API call for fresh credentials)
         _eventController.add(VpnEvent(
           type: VpnEventType.died,
           reason: 'vpn_broken',
@@ -389,30 +412,24 @@ class WindowsVpnService extends VpnService {
     }
   }
 
-  // ✅ NEW: Restart VPN with cached config (for short disconnections < 4 min)
   static Future<void> _restartVpnWithCachedConfig() async {
     try {
       await _log('   Starting VPN recovery process with cached config...');
 
-      // Step 1: Stop current VPN instance cleanly
       await _log('   Step 1: Stopping current VPN instance...');
-      _isNormalStop = true; // Prevent death broadcast
+      _isNormalStop = true;
 
-      // Kill current process
       _singBoxProcess?.kill();
       _singBoxProcess = null;
 
-      // Step 2: Small delay to ensure cleanup
       await _log('   Step 2: Waiting for cleanup...');
       await Future.delayed(Duration(seconds: 1));
 
-      // Step 3: Verify we have config
       await _log('   Step 3: Checking config availability...');
       if (_plaintextPath == null || !await File(_plaintextPath!).exists()) {
         throw Exception('No config available for recovery');
       }
 
-      // Step 4: Restart sing-box process
       await _log('   Step 4: Restarting sing-box process...');
       _isNormalStop = false;
       _consecutiveFailures = 0;
@@ -430,7 +447,6 @@ class WindowsVpnService extends VpnService {
         workingDirectory: _exeDir,
       );
 
-      // Monitor process output
       _singBoxProcess!.stdout
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box: $data'));
@@ -439,7 +455,6 @@ class WindowsVpnService extends VpnService {
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box ERR: $data'));
 
-      // Step 5: Verify VPN started
       await _log('   Step 5: Verifying VPN started...');
       await Future.delayed(Duration(seconds: 3));
 
@@ -453,20 +468,17 @@ class WindowsVpnService extends VpnService {
 
       await _log('✅ VPN successfully restarted after network recovery');
 
-      // Send success event to Flutter
       _eventController.add(VpnEvent(
         type: VpnEventType.connected,
         message: 'VPN reconnected after network recovery',
       ));
 
-      // Restart monitoring
       _startProcessChecker();
       _startHeartbeatMonitoring();
 
     } catch (e) {
       await _log('❌ Failed to restart VPN after network recovery: $e');
 
-      // If restart fails, send death event
       _isNormalStop = false;
       _wasNetworkLost = false;
 
@@ -481,19 +493,14 @@ class WindowsVpnService extends VpnService {
     }
   }
 
-  // ✅ PRIORITY 2: Check if device has any active network
   static Future<bool> _checkForAnyNetwork() async {
     try {
-      // Check for active network adapters (excluding VPN)
       final result = await Process.run(
         'netsh',
         ['interface', 'show', 'interface'],
       );
 
       final output = result.stdout.toString();
-
-      // Look for "Connected" status on WiFi, Ethernet, or Cellular interfaces
-      // Exclude VPN adapters (usually named "sing-box" or similar)
       final lines = output.split('\n');
 
       for (final line in lines) {
@@ -501,7 +508,6 @@ class WindowsVpnService extends VpnService {
             !line.toLowerCase().contains('vpn') &&
             !line.toLowerCase().contains('sing-box') &&
             !line.toLowerCase().contains('wintun')) {
-          // Found active non-VPN network adapter
           await _log('   Found active network: ${line.trim()}');
           return true;
         }
@@ -511,7 +517,6 @@ class WindowsVpnService extends VpnService {
       return false;
     } catch (e) {
       await _log('   Error checking network adapters: $e');
-      // On error, assume we have network (safer to stop VPN than leave broken)
       return true;
     }
   }
@@ -521,21 +526,18 @@ class WindowsVpnService extends VpnService {
     try {
       await _log('startVpn called');
 
-      // ✅ Reset normal stop flag
       _isNormalStop = false;
-
-      // ✅ PRIORITY 2: Reset heartbeat counters
       _consecutiveFailures = 0;
       _lastSuccessfulPing = DateTime.now();
-
-      // ✅ NEW: Reset network loss flag
       _wasNetworkLost = false;
 
-      // ✅ NEW: Update last_seen_at timestamp
+      // ✅ NEW: Reset 403 counter
+      _auth403Count = 0;
+      _auth403Timer?.cancel();
+
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('last_seen_at', DateTime.now().millisecondsSinceEpoch);
 
-      // Step 1: Get device credentials
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
 
@@ -546,13 +548,11 @@ class WindowsVpnService extends VpnService {
 
       await _log('Fetching credentials for device: $deviceId');
 
-      // Step 2: Call /api/connect to get credentials
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
         headers: {'X-Api-Key': apiKey},
       );
 
-      // ✅ NEW: Handle different status codes
       if (response.statusCode == 401) {
         await _log('Unauthorized (401)');
         final errorData = json.decode(response.body);
@@ -594,18 +594,15 @@ class WindowsVpnService extends VpnService {
 
       await _log('Credentials received');
 
-      // Step 3: Build dynamic config
       final config = VpnConfigService.buildConfig(
         wireguard: credentials['wireguard'],
         hysteria2: credentials['hysteria2'],
         shadowsocks: credentials['shadowsocks'],
       );
 
-      // Step 4: Convert to JSON string
       final configJson = VpnConfigService.toJsonString(config);
       await _log('Config built successfully');
 
-      // Step 5: Write encrypted config to temp file
       await _log('exe dir: $_exeDir');
       await _log('sing-box path: $_singBoxPath');
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
@@ -617,10 +614,8 @@ class WindowsVpnService extends VpnService {
       await SecureConfigService.writeEncryptedConfig(_configPath!, configJson);
       await _log('encrypted config written to: $_configPath');
 
-      // For sing-box, write plaintext temporarily
       await File(_plaintextPath!).writeAsString(configJson);
 
-      // Step 6: Start sing-box process
       _singBoxProcess = await Process.start(
         _singBoxPath,
         ['run', '-c', _plaintextPath!],
@@ -630,14 +625,32 @@ class WindowsVpnService extends VpnService {
       _singBoxProcess!.stdout
           .transform(SystemEncoding().decoder)
           .listen((data) => _log('sing-box: $data'));
+
+      // ✅ UPDATED: Monitor stderr for 403 errors
       _singBoxProcess!.stderr
           .transform(SystemEncoding().decoder)
-          .listen((data) => _log('sing-box ERR: $data'));
+          .listen((data) async {
+            await _log('sing-box ERR: $data');
+
+            // ✅ NEW: Detect subscription expiry from 403 errors
+            if (data.contains('authentication failed, status code: 403')) {
+              _auth403Count++;
+              _reset403Counter();
+
+              // If we see 5+ auth failures in 30 seconds, subscription likely expired
+              if (_auth403Count >= 5) {
+                await _log('🚨 SUBSCRIPTION EXPIRED DETECTED (403 errors from sing-box)');
+                await _log('   Detected $_auth403Count authentication failures');
+
+                // Stop VPN immediately
+                await _handleSubscriptionExpired();
+              }
+            }
+          });
 
       _singBoxProcess!.exitCode.then((code) async {
         _log('sing-box exited with code: $code');
 
-        // Clean up config files on exit
         if (_plaintextPath != null) {
           await SecureConfigService.secureDelete(_plaintextPath!);
         }
@@ -652,7 +665,6 @@ class WindowsVpnService extends VpnService {
           _isConnected = false;
           _statusController.add(false);
 
-          // ✅ PRIORITY 1: Only send death event if NOT a normal stop and exit code != 0
           if (!_isNormalStop && code != 0) {
             _eventController.add(VpnEvent(
               type: VpnEventType.died,
@@ -667,13 +679,9 @@ class WindowsVpnService extends VpnService {
       _isConnected = true;
       _statusController.add(true);
 
-      // ✅ PRIORITY 1: Start process checker
       _startProcessChecker();
-
-      // ✅ PRIORITY 2: Start heartbeat monitoring
       _startHeartbeatMonitoring();
 
-      // ✅ PRIORITY 1: Send connected event
       _eventController.add(VpnEvent(
         type: VpnEventType.connected,
         message: 'VPN connected successfully',
@@ -682,7 +690,7 @@ class WindowsVpnService extends VpnService {
       return true;
     } catch (e) {
       await _log('Windows VPN error: $e');
-      rethrow;  // ✅ CHANGED: Rethrow instead of returning false
+      rethrow;
     }
   }
 
@@ -690,16 +698,15 @@ class WindowsVpnService extends VpnService {
   Future<void> stopVpn() async {
     await _log('stopVpn called');
 
-    // ✅ Set flag BEFORE stopping (prevents false "died" event)
     _isNormalStop = true;
 
-    // ✅ PRIORITY 1: Stop process checker
-    _stopProcessChecker();
+    // ✅ NEW: Reset 403 counter
+    _auth403Count = 0;
+    _auth403Timer?.cancel();
 
-    // ✅ PRIORITY 2: Stop heartbeat monitoring
+    _stopProcessChecker();
     _stopHeartbeatMonitoring();
 
-    // Notify backend of disconnection
     try {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -715,11 +722,9 @@ class WindowsVpnService extends VpnService {
       await _log('Failed to notify backend: $e');
     }
 
-    // Kill process
     _singBoxProcess?.kill();
     _singBoxProcess = null;
 
-    // Clean up config files
     try {
       if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
         await SecureConfigService.secureDelete(_plaintextPath!);
@@ -735,7 +740,6 @@ class WindowsVpnService extends VpnService {
       await _log('Config cleanup error: $e');
     }
 
-    // Kill by name in case process was started in a previous session
     try {
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-amd64.exe']);
       await Process.run('taskkill', ['/F', '/IM', 'sing-box-arm64.exe']);
@@ -746,7 +750,6 @@ class WindowsVpnService extends VpnService {
     _isConnected = false;
     _statusController.add(false);
 
-    // ✅ PRIORITY 1: Send disconnected event
     _eventController.add(VpnEvent(
       type: VpnEventType.disconnected,
       message: 'VPN disconnected by user',
@@ -756,21 +759,16 @@ class WindowsVpnService extends VpnService {
   @override
   Future<bool> checkNotificationPermission() async => true;
 
-  // ✅ PRIORITY 3: Check for death events (Windows doesn't store them)
   @override
   Future<VpnEvent?> checkForDeathEvents() async {
-    // Windows doesn't have SharedPreferences like Android
-    // Events are sent via eventStream in real-time
     return null;
   }
 
-  // ✅ PRIORITY 3: Check subscription status
   @override
   Future<String> checkSubscription() async {
     try {
       await _log('🔍 Checking subscription status...');
 
-      // Get credentials
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
 
@@ -779,7 +777,6 @@ class WindowsVpnService extends VpnService {
         return 'unknown';
       }
 
-      // Make HTTP request to subscription endpoint
       final response = await http.get(
         Uri.parse('https://api.vulcainvpn.com/api/subscription'),
         headers: {'X-Api-Key': apiKey},
@@ -813,13 +810,11 @@ class WindowsVpnService extends VpnService {
     }
   }
 
-  // ✅ PRIORITY 3: Reconnect with subscription check
   @override
   Future<void> reconnectVpn() async {
     try {
       await _log('🔄 Attempting to reconnect...');
 
-      // CRITICAL: Check subscription FIRST
       await _log('🔍 Checking subscription before reconnect...');
       final subscriptionStatus = await checkSubscription();
 
@@ -834,7 +829,6 @@ class WindowsVpnService extends VpnService {
         await _log('⚠️ Could not verify subscription - allowing reconnect attempt');
       }
 
-      // Subscription is OK - proceed with normal connection
       await startVpn();
 
     } catch (e) {
