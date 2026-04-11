@@ -252,6 +252,14 @@ class WindowsVpnService extends VpnService {
         // ✅ NEW: Store timestamp in SharedPreferences for duration check
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('last_seen_at', _networkLostTimestamp!.millisecondsSinceEpoch);
+
+        // ✅ CRITICAL FIX: Notify Flutter that network is lost
+        await _log('   📡 Sending network_lost event to Flutter');
+        _eventController.add(VpnEvent(
+          type: VpnEventType.died,
+          reason: 'network_lost',
+          message: 'Network connection lost. VPN will reconnect automatically when network returns.',
+        ));
       }
 
       _consecutiveFailures = 0; // Reset counter
