@@ -41,6 +41,7 @@ class WindowsVpnService extends VpnService {
   // ✅ NEW: 403 error tracking for subscription expiry detection
   static int _auth403Count = 0;
   static Timer? _auth403Timer;
+  static bool _isHandlingSubscriptionExpiry = false;
 
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
@@ -82,11 +83,20 @@ class WindowsVpnService extends VpnService {
 
   // ✅ NEW: Handle subscription expiry detected from 403 errors
   static Future<void> _handleSubscriptionExpired() async {
+    // ✅ CRITICAL: Prevent multiple simultaneous calls (race condition fix)
+    if (_isHandlingSubscriptionExpiry) {
+      await _log('⚠️ Already handling subscription expiry, ignoring duplicate call');
+      return;
+    }
+
+    _isHandlingSubscriptionExpiry = true;
+
     await _log('🔴 STOPPING VPN - Subscription expired');
 
     // Prevent duplicate death events
     if (!_isConnected) {
       await _log('⚠️ Already disconnected, ignoring');
+      _isHandlingSubscriptionExpiry = false;
       return;
     }
 
@@ -145,6 +155,9 @@ class WindowsVpnService extends VpnService {
     _statusController.add(false);
 
     await _log('✅ VPN stopped due to subscription expiry');
+
+    // ✅ Reset guard at the very end
+    _isHandlingSubscriptionExpiry = false;
   }
 
   static void _startProcessChecker() {
@@ -581,9 +594,10 @@ class WindowsVpnService extends VpnService {
       _lastSuccessfulPing = DateTime.now();
       _wasNetworkLost = false;
 
-      // ✅ NEW: Reset 403 counter
+      // ✅ NEW: Reset 403 counter and guard flag
       _auth403Count = 0;
       _auth403Timer?.cancel();
+      _isHandlingSubscriptionExpiry = false;
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('last_seen_at', DateTime.now().millisecondsSinceEpoch);
@@ -750,9 +764,10 @@ class WindowsVpnService extends VpnService {
 
     _isNormalStop = true;
 
-    // ✅ NEW: Reset 403 counter
+    // ✅ NEW: Reset 403 counter and guard flag
     _auth403Count = 0;
     _auth403Timer?.cancel();
+    _isHandlingSubscriptionExpiry = false;
 
     _stopProcessChecker();
     _stopHeartbeatMonitoring();
