@@ -26,6 +26,7 @@ class AppLocalizations {
       // Home tab
       'location': 'Location',
       'ip': 'IP',
+      "country": "Country",
       'duration': 'Duration',
       'secure_connection': '🔒 Your connection is secure',
       'disconnect': 'Disconnect',
@@ -95,6 +96,26 @@ class AppLocalizations {
       'english': 'English',
       'french': 'French',
 
+      // Settings - Connection Mode
+      'connection_mode': 'Connection Mode',
+      'mode_standard': 'Standard',
+      'mode_standard_desc': 'Maximum speed',
+      'mode_standard_full': 'Standard (fastest)',
+      'mode_stealth': 'Stealth',
+      'mode_stealth_desc': 'For restrictive networks',
+      'mode_stealth_full': 'Stealth (restrictive networks)',
+      'mode_balanced': 'Balanced',
+      'mode_balanced_desc': 'Smart selection for any network',
+      'mode_balanced_full': 'Balanced (recommended)',
+      'mode_changed': 'Connection mode: {mode}',
+      'mode_reconnect_hint': 'Reconnect VPN to apply changes',
+
+      // Settings - Auto Reconnect
+      'auto_reconnect': 'Auto-Reconnect',
+      'auto_reconnect_desc': 'Automatically reconnect if VPN connection is lost',
+      'auto_reconnect_enabled': 'Auto-reconnect enabled',
+      'auto_reconnect_disabled': 'Auto-reconnect disabled',
+
       // Debug
       'debug': 'Debug',
       'debug_info': 'Debug Info',
@@ -128,6 +149,7 @@ class AppLocalizations {
       // Home tab
       'location': 'Localisation',
       'ip': 'IP',
+      'country': 'Pays',
       'duration': 'Durée',
       'secure_connection': '🔒 Votre connexion est sécurisée',
       'disconnect': 'Déconnecter',
@@ -197,6 +219,26 @@ class AppLocalizations {
       'english': 'Anglais',
       'french': 'Français',
 
+      // Settings - Connection Mode
+      'connection_mode': 'Mode de Connexion',
+      'mode_standard': 'Standard',
+      'mode_standard_desc': 'Vitesse maximale',
+      'mode_standard_full': 'Standard (le plus rapide)',
+      'mode_stealth': 'Furtif',
+      'mode_stealth_desc': 'Pour réseaux restrictifs',
+      'mode_stealth_full': 'Furtif (réseaux restrictifs)',
+      'mode_balanced': 'Équilibré',
+      'mode_balanced_desc': 'Sélection intelligente pour tout réseau',
+      'mode_balanced_full': 'Équilibré (recommandé)',
+      'mode_changed': 'Mode de connexion : {mode}',
+      'mode_reconnect_hint': 'Reconnectez le VPN pour appliquer les changements',
+
+      // Settings - Auto Reconnect
+      'auto_reconnect': 'Reconnexion Automatique',
+      'auto_reconnect_desc': 'Se reconnecter automatiquement si la connexion VPN est perdue',
+      'auto_reconnect_enabled': 'Reconnexion automatique activée',
+      'auto_reconnect_disabled': 'Reconnexion automatique désactivée',
+
       // Debug
       'debug': 'Débogage',
       'debug_info': 'Infos de Débogage',
@@ -235,6 +277,7 @@ class AppLocalizations {
   // Home tab
   String get location => translate('location');
   String get ip => translate('ip');
+  String get country => translate('country');
   String get duration => translate('duration');
   String get secureConnection => translate('secure_connection');
   String get disconnect => translate('disconnect');
@@ -303,6 +346,25 @@ class AppLocalizations {
   String get language => translate('language');
   String get english => translate('english');
   String get french => translate('french');
+
+  // Settings - Connection Mode
+  String get connectionMode => translate('connection_mode');
+  String get modeStandard => translate('mode_standard');
+  String get modeStandardDesc => translate('mode_standard_desc');
+  String get modeStandardFull => translate('mode_standard_full');
+  String get modeStealth => translate('mode_stealth');
+  String get modeStealthDesc => translate('mode_stealth_desc');
+  String get modeStealthFull => translate('mode_stealth_full');
+  String get modeBalanced => translate('mode_balanced');
+  String get modeBalancedDesc => translate('mode_balanced_desc');
+  String get modeBalancedFull => translate('mode_balanced_full');
+  String get modeReconnectHint => translate('mode_reconnect_hint');
+
+  // Settings - Auto Reconnect
+  String get autoReconnect => translate('auto_reconnect');
+  String get autoReconnectDesc => translate('auto_reconnect_desc');
+  String get autoReconnectEnabled => translate('auto_reconnect_enabled');
+  String get autoReconnectDisabled => translate('auto_reconnect_disabled');
 
   // Debug
   String get debug => translate('debug');

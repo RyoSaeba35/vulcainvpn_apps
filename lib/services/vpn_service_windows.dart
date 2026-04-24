@@ -706,7 +706,7 @@ class WindowsVpnService extends VpnService {
 
       await _log('Credentials received');
 
-      final config = VpnConfigService.buildConfig(
+      final config = await VpnConfigService.buildConfig(
         wireguard: credentials['wireguard'],
         hysteria2: credentials['hysteria2'],
         shadowsocks: credentials['shadowsocks'],

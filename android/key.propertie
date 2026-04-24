@@ -1,0 +1,4 @@
+storePassword=/4Kf01emhPgaxlXuslM5Q+SWRfFv3aAM
+keyPassword=/4Kf01emhPgaxlXuslM5Q+SWRfFv3aAM
+keyAlias=vulcainvpn
+storeFile=../keystore.jks

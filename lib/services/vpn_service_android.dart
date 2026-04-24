@@ -149,7 +149,7 @@ class AndroidVpnService extends VpnService {
       print('✅ Credentials received');
 
       // Build config
-      final config = VpnConfigService.buildConfig(
+      final config = await VpnConfigService.buildConfig(
         wireguard: credentials['wireguard'],
         hysteria2: credentials['hysteria2'],
         shadowsocks: credentials['shadowsocks'],

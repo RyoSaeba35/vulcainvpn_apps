@@ -16,6 +16,7 @@ import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'dart:math';
 
 class VpnHomePage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -35,10 +36,11 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   Timer? _displayTimer;
 
   Timer? _ipCheckTimer;
-  String _currentIp = '';
-  String _currentCountry = '';
-  String _currentCountryCode = '';
-  bool _isLoadingIp = true;
+  bool _isProtected = false;
+  String _displayIp = '';
+  String _displayCountry = '';
+  String _displayCountryCode = '';
+  bool _isAnimatingIp = false;
   StreamSubscription<bool>? _vpnSubscription;
   StreamSubscription<VpnEvent>? _eventSubscription;
 
@@ -141,7 +143,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         });
 
         _trayService?.updateState(false);
-        _fetchCurrentIpAndLocationWithRetry();
+        _showDisconnectedIp();
         _handleVpnDeath(event);
         break;
 
@@ -905,8 +907,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       await _restoreVpnState();
     }
 
-    await Future.delayed(const Duration(seconds: 3));
-    _fetchCurrentIpAndLocation();
+    _showDisconnectedIp();
 
     _vpnSubscription = _vpnService.statusStream.listen((isConnected) async {
       if (!mounted) return;
@@ -926,9 +927,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       await _trayService?.updateState(isConnected);
 
       if (isConnected) {
-        _fetchUntilIpChanges(_currentIp);
+        _showProtectedIp();
       } else {
-        _fetchCurrentIpAndLocationWithRetry();
+        _showDisconnectedIp();
       }
     });
   }
@@ -982,99 +983,94 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _fetchCurrentIpAndLocation() async {
-    setState(() => _isLoadingIp = true);
-    for (int i = 0; i < 8; i++) {
-      try {
-        final result = await IpService.getPublicIpAndLocation();
-        if (result['ip'] != 'Unknown') {
-          setState(() {
-            _currentIp = result['ip'];
-            _currentCountry = result['country'];
-            _currentCountryCode = result['countryCode'];
-            _isLoadingIp = false;
-          });
-          return;
-        }
-      } catch (e) {
-        print('Attempt $i failed: $e');
-      }
-      await Future.delayed(const Duration(seconds: 3));
-    }
+  Future<void> _showProtectedIp() async {
+    // Animation already happened during 'connecting' phase
+    // Show asterisks matching the length of the last IP shown
     setState(() {
-      _currentIp = 'Unknown';
-      _currentCountry = '';
-      _currentCountryCode = '';
-      _isLoadingIp = false;
+      // Parse the last IP shown and replace each octet with asterisks
+      if (_displayIp.isNotEmpty && _displayIp.contains('.')) {
+        try {
+          List<String> octets = _displayIp.split('.');
+          List<String> maskedOctets = octets.map((octet) {
+            // Replace each digit with an asterisk
+            return '*' * octet.length;
+          }).toList();
+          _displayIp = maskedOctets.join('.');  // e.g., "***.***.*.**"
+        } catch (e) {
+          // Fallback if parsing fails
+          _displayIp = '**************';
+        }
+      } else {
+        // Fallback for invalid IP
+        _displayIp = '**************';
+      }
+      _displayCountry = 'Protected';
+      _displayCountryCode = '';
+      _isAnimatingIp = false;
+      _isProtected = true;
     });
   }
 
-  Future<void> _fetchCurrentIpAndLocationWithRetry() async {
-    setState(() => _isLoadingIp = true);
-    await Future.delayed(const Duration(seconds: 4));
-    for (int attempt = 0; attempt < 8; attempt++) {
-      try {
-        final result = await IpService.getPublicIpAndLocation();
-        if (result['ip'] != 'Unknown') {
-          setState(() {
-            _currentIp = result['ip'];
-            _currentCountry = result['country'];
-            _currentCountryCode = result['countryCode'];
-            _isLoadingIp = false;
-          });
-          return;
-        }
-      } catch (e) {
-        print('Attempt ${attempt + 1} failed: $e');
-      }
-      await Future.delayed(const Duration(seconds: 3));
-    }
+  Future<void> _showDisconnectedIp() async {
+    // When disconnected, fetch real IP to show user their unprotected state
     setState(() {
-      _currentIp = 'Unknown';
-      _currentCountry = '';
-      _currentCountryCode = '';
-      _isLoadingIp = false;
+      _isProtected = false;
+      _isAnimatingIp = true;
+      _displayIp = 'Loading...';
+      _displayCountry = '';
+      _displayCountryCode = '';
     });
+
+    try {
+      final result = await IpService.getPublicIpAndLocation();
+      if (mounted) {
+        setState(() {
+          _displayIp = result['ip'] ?? 'Unknown';
+          _displayCountry = result['country'] ?? '';
+          _displayCountryCode = result['countryCode'] ?? '';
+          _isAnimatingIp = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _displayIp = 'Unknown';
+          _displayCountry = '';
+          _displayCountryCode = '';
+          _isAnimatingIp = false;
+        });
+      }
+    }
   }
 
-  Future<void> _fetchUntilIpChanges(String previousIp) async {
-    setState(() => _isLoadingIp = true);
+  Future<void> _startConnectingAnimation() async {
+    setState(() {
+      _isAnimatingIp = true;
+      _displayCountry = '';
+      _displayCountryCode = '';
+    });
 
-    const maxWait = Duration(seconds: 20);
-    final deadline = DateTime.now().add(maxWait);
+    // Keep animating while connecting
+    _animateIpContinuously();
+  }
 
-    for (int i = 0; i < 10; i++) {
+  Future<void> _animateIpContinuously() async {
+    final random = Random();
+
+    // Keep cycling numbers until state changes to 'connected' or back to 'disconnected'
+    while (_connectionState == 'connecting' && mounted) {
+      await Future.delayed(Duration(milliseconds: 50));
       if (!mounted) return;
-      if (DateTime.now().isAfter(deadline)) break;
 
-      await Future.delayed(const Duration(seconds: 3));
-
-      try {
-        final result = await IpService.getPublicIpAndLocation();
-        final ip = result['ip'];
-
-        if (ip != null && ip != 'Unknown' && ip != previousIp) {
-          if (!mounted) return;
-          setState(() {
-            _currentIp = ip;
-            _currentCountry = result['country'] ?? '';
-            _currentCountryCode = result['countryCode'] ?? '';
-            _isLoadingIp = false;
-          });
-          return;
-        }
-      } catch (e) {
-        print('_fetchUntilIpChanges attempt $i failed: $e');
-      }
+      setState(() {
+        int a = random.nextInt(256);
+        int b = random.nextInt(256);
+        int c = random.nextInt(256);
+        int d = random.nextInt(256);
+        String newIp = '$a.$b.$c.$d';
+        _displayIp = newIp;
+      });
     }
-
-    if (!mounted) return;
-    setState(() {
-      _currentIp = 'Unknown';
-      _currentCountry = '';
-      _currentCountryCode = '';
-      _isLoadingIp = false;
-    });
   }
 
   void _toggleConnection() async {
@@ -1092,8 +1088,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         _connectionState = 'connecting';
       });
 
-
-      final ipBeforeConnect = _currentIp;
+      _startConnectingAnimation();
 
       try {
         final success = await _vpnService.startVpn();
@@ -1103,7 +1098,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             _vpnStartTime = DateTime.now();
           });
           _startDisplayTimer();
-          _fetchUntilIpChanges(ipBeforeConnect);
+          _showProtectedIp();
         } else {
           setState(() => _connectionState = 'disconnected');
           _showGenericError(loc);
@@ -1146,6 +1141,10 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             _showPermissionDialog(loc, loc.vpnPermissionMessage);
             return;
           }
+          if (e.code == 'BATTERY_OPTIMIZATION_DENIED') {
+            _showBatteryOptimizationRequiredDialog(loc);
+            return;
+          }
         }
 
         _showGenericError(loc, errorString);
@@ -1168,7 +1167,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         _connectionState = 'disconnected';
       });
 
-      _fetchCurrentIpAndLocationWithRetry();
+      _showDisconnectedIp();
     }
   }
 
@@ -1305,6 +1304,77 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
+  void _showBatteryOptimizationRequiredDialog(AppLocalizations loc) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.battery_alert, color: Colors.red, size: 28),
+            SizedBox(width: 12),
+            Expanded(child: Text('Battery Optimization Required')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Battery optimization exemption is required for the VPN to work properly in the background.',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning, color: Colors.orange, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Without this, Android may kill your VPN connection.',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              // Try connecting again (will show battery optimization dialog)
+              _toggleConnection();
+            },
+            icon: Icon(Icons.refresh),
+            label: Text('Try Again'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
@@ -1313,10 +1383,10 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       HomeTab(
         connectionState: _connectionState,
         connectionSeconds: _connectionSeconds,
-        currentIp: _currentIp,
-        currentCountry: _currentCountry,
-        currentCountryCode: _currentCountryCode,
-        isLoadingIp: _isLoadingIp,
+        currentIp: _displayIp,
+        currentCountry: _displayCountry,
+        currentCountryCode: _displayCountryCode,
+        isLoadingIp: _isAnimatingIp,
         onToggleConnection: _toggleConnection,
         loc: loc,
       ),
@@ -1393,7 +1463,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
         _startDisplayTimer();
         await _trayService?.updateState(true);
-        _fetchUntilIpChanges(_currentIp);
+        _showProtectedIp();
       } else {
         print('🔄 VPN not running');
         setState(() => _connectionState = 'disconnected');

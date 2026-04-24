@@ -89,17 +89,16 @@ class HomeTab extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 15),
+
+                  // ✅ IP Line
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Flexible(
-                        child: Text(
-                          '${loc.ip}: $currentCountry${Platform.isWindows ? '' : ' ${_getFlag(currentCountryCode)}'} ',
-                          style: TextStyle(fontSize: 18, color: Colors.grey[700]),
-                          textAlign: TextAlign.center,
-                        ),
+                      Text(
+                        '${loc.ip}: ',
+                        style: TextStyle(fontSize: 18, color: Colors.grey[700]),
                       ),
-                      if (isLoadingIp)
+                      if (isLoadingIp && connectionState == 'disconnected')
                         const SizedBox(
                           width: 12,
                           height: 12,
@@ -108,24 +107,51 @@ class HomeTab extends StatelessWidget {
                       else
                         Flexible(
                           child: Text(
-                            '($currentIp)',
+                            currentIp,
                             style: TextStyle(
                               fontSize: 18,
                               color: Colors.grey[700],
                               fontWeight: FontWeight.bold,
                             ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                     ],
                   ),
+
+                  const SizedBox(height: 10),
+
+                  // ✅ Second Line: Country (when disconnected) OR Duration (when connected)
                   if (connectionState == 'connected')
-                    Padding(
-                      padding: const EdgeInsets.only(top: 15),
-                      child: Text(
-                        '${loc.duration}: ${_formatTime(connectionSeconds)}',
-                        style: TextStyle(fontSize: 18, color: Colors.grey[700]),
-                      ),
+                    // Show Duration when connected
+                    Text(
+                      '${loc.duration}: ${_formatTime(connectionSeconds)}',
+                      style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                    )
+                  else
+                    // Show Country when disconnected
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '${loc.country}: ',
+                          style: TextStyle(fontSize: 18, color: Colors.grey[700]),
+                        ),
+                        if (!isLoadingIp && currentCountry.isNotEmpty)
+                          Flexible(
+                            child: Text(
+                              '$currentCountry${Platform.isWindows ? '' : ' ${_getFlag(currentCountryCode)}'}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                color: Colors.grey[700],
+                                fontWeight: FontWeight.bold,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                      ],
                     ),
+
                   if (connectionState == 'connected')
                     Padding(
                       padding: const EdgeInsets.only(top: 10),

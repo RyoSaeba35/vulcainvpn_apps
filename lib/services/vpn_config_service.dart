@@ -1,24 +1,26 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';  // ✅ FIX #5: For kDebugMode
+import 'package:flutter/foundation.dart';
+import 'settings_service.dart';
 
 class VpnConfigService {
   static String lastDebugInfo = '';
   static String lastFullConfig = '';
 
-  // Build sing-box config dynamically from credentials
-  static Map<String, dynamic> buildConfig({
+  // ✅ FIXED: Make async to get connection mode
+  static Future<Map<String, dynamic>> buildConfig({
     required Map<String, dynamic> wireguard,
     required Map<String, dynamic>? hysteria2,
     required Map<String, dynamic>? shadowsocks,
-  }) {
-    // ✅ FIX #5: Only populate debug info in debug builds (not in production)
+  }) async {
+    // ✅ Get connection mode from settings
+    final mode = await SettingsService.getConnectionMode();
+
     if (kDebugMode) {
-      // ✅ FIX #4: Build debug string WITHOUT credential values
       StringBuffer debug = StringBuffer();
+      debug.writeln('🔧 Building config with mode: ${mode.name}');
       debug.writeln('📦 WireGuard:');
       wireguard.forEach((key, value) {
-        // ✅ Only log field names, NOT values (prevents credential leaks)
         debug.writeln('  $key: [REDACTED]');
       });
       debug.writeln('\n📦 Shadowsocks: ${shadowsocks != null ? "YES" : "NO"}');
@@ -30,15 +32,12 @@ class VpnConfigService {
       print(lastDebugInfo);
     }
 
-    // ⭐ Build the config with REAL credentials
+    // ✅ Pass mode to config builders
     final config = Platform.isWindows || Platform.isMacOS || Platform.isLinux
-        ? _buildDesktopConfig(wireguard, hysteria2, shadowsocks)
-        : _buildMobileConfig(wireguard, hysteria2, shadowsocks);
+        ? _buildDesktopConfig(wireguard, hysteria2, shadowsocks, mode)
+        : _buildMobileConfig(wireguard, hysteria2, shadowsocks, mode);
 
-    // ✅ FIX #5: Only store redacted config in debug builds
     if (kDebugMode) {
-      // ✅ FIX #4: Store redacted JSON string for logging (doesn't modify original)
-      // Uses string replacement on JSON - original config object stays intact
       try {
         final configJson = toJsonString(config);
         lastFullConfig = _redactCredentialsFromJson(configJson);
@@ -47,13 +46,10 @@ class VpnConfigService {
       }
     }
 
-    // ✅ CRITICAL: Return ORIGINAL config with REAL credentials for VPN!
     return config;
   }
 
-  // ✅ FIX #4: Redact credentials from JSON string (string-based, doesn't touch config object)
   static String _redactCredentialsFromJson(String jsonString) {
-    // Pattern matches: "field_name": "base64_or_sensitive_value"
     final sensitiveFields = [
       'private_key',
       'public_key',
@@ -64,7 +60,6 @@ class VpnConfigService {
 
     String redacted = jsonString;
     for (var field in sensitiveFields) {
-      // Replace: "private_key": "actual_value" → "private_key": "[REDACTED]"
       final regex = RegExp('"$field"\\s*:\\s*"[^"]*"');
       redacted = redacted.replaceAll(regex, '"$field": "[REDACTED]"');
     }
@@ -72,14 +67,15 @@ class VpnConfigService {
     return redacted;
   }
 
-  // DESKTOP (Windows/macOS/Linux) - Uses "endpoints" array
+  // ✅ UPDATED: Add mode parameter
   static Map<String, dynamic> _buildDesktopConfig(
     Map<String, dynamic> wg,
     Map<String, dynamic>? hy2,
     Map<String, dynamic>? ss,
+    ConnectionMode mode,
   ) {
     return {
-      "log": {"level": "error", "timestamp": true},  // ✅ FIX #5: Error-only logging
+      "log": {"level": "error", "timestamp": true},
       "dns": {
         "servers": [
           {"type": "udp", "tag": "dns-direct", "server": "223.5.5.5"},
@@ -126,7 +122,7 @@ class VpnConfigService {
             {
               "address": wg['server_ip'],
               "port": int.parse(wg['server_port'].toString()),
-              "public_key": wg['client_public_key'],
+              "public_key": wg['server_public_key'],
               "pre_shared_key": wg['client_preshared_key'],
               "allowed_ips": ["0.0.0.0/0", "::/0"]
             }
@@ -137,13 +133,13 @@ class VpnConfigService {
         {
           "type": "selector",
           "tag": "proxy",
-          "outbounds": _buildSelectorOutbounds(hy2),
+          "outbounds": _buildSelectorOutbounds(hy2, ss, mode), // ✅ Pass mode
           "default": "auto"
         },
         {
           "type": "urltest",
           "tag": "auto",
-          "outbounds": _buildAutoOutbounds(hy2),
+          "outbounds": _buildAutoOutbounds(hy2, ss, mode), // ✅ Pass mode
           "url": "https://www.gstatic.com/generate_204",
           "interval": "10m",
           "tolerance": 50
@@ -211,14 +207,15 @@ class VpnConfigService {
     };
   }
 
-  // MOBILE (Android/iOS) - Uses "outbounds" array
+  // ✅ UPDATED: Add mode parameter
   static Map<String, dynamic> _buildMobileConfig(
     Map<String, dynamic> wg,
     Map<String, dynamic>? hy2,
     Map<String, dynamic>? ss,
+    ConnectionMode mode,
   ) {
     return {
-      "log": {"level": "error", "timestamp": true},  // ✅ FIX #5: Error-only logging
+      "log": {"level": "error", "timestamp": true},
       "dns": {
         "servers": [
           {"tag": "dns-direct", "address": "223.5.5.5", "detour": "direct"},
@@ -254,13 +251,13 @@ class VpnConfigService {
         {
           "type": "selector",
           "tag": "proxy",
-          "outbounds": _buildSelectorOutbounds(hy2),
+          "outbounds": _buildSelectorOutbounds(hy2, ss, mode), // ✅ Pass mode
           "default": "auto"
         },
         {
           "type": "urltest",
           "tag": "auto",
-          "outbounds": _buildAutoOutbounds(hy2),
+          "outbounds": _buildAutoOutbounds(hy2, ss, mode), // ✅ Pass mode
           "url": "https://www.gstatic.com/generate_204",
           "interval": "10m",
           "tolerance": 50
@@ -274,10 +271,9 @@ class VpnConfigService {
           "interface_name": "wg0",
           "local_address": ["${wg['client_ip']}/32"],
           "private_key": wg['client_private_key'].toString(),
-          "peer_public_key": wg['client_public_key'].toString(),
+          "peer_public_key": wg['server_public_key'].toString(),
           "pre_shared_key": wg['client_preshared_key'].toString(),
           "mtu": 1420,
-          if (ss != null) "detour": "ss-out"
         },
         if (ss != null) {
           "type": "shadowsocks",
@@ -341,22 +337,83 @@ class VpnConfigService {
     };
   }
 
-  // ⭐ FIXED: Only add hysteria2 if server exists and is not empty
-  static List<String> _buildSelectorOutbounds(Map<String, dynamic>? hy2) {
+  // ✅ UPDATED: Add ss and mode parameters
+  static List<String> _buildSelectorOutbounds(
+    Map<String, dynamic>? hy2,
+    Map<String, dynamic>? ss,
+    ConnectionMode mode,
+  ) {
     final outbounds = ["auto"];
-    if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
-      outbounds.add("hysteria2");
+
+    // Add individual protocols for manual selection based on mode
+    switch (mode) {
+      case ConnectionMode.stealth:
+        // Stealth mode: SS and Hysteria2 only
+        if (ss != null) outbounds.add("ss-out");
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+          outbounds.add("hysteria2");
+        }
+        // NO WireGuard in stealth mode
+        break;
+
+      case ConnectionMode.standard:
+      case ConnectionMode.balanced:
+        // Standard/Balanced: All protocols available
+        if (ss != null) outbounds.add("ss-out");
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+          outbounds.add("hysteria2");
+        }
+        outbounds.add("wireguard_1");
+        break;
     }
+
     outbounds.add("direct");
     return outbounds;
   }
 
-  // ⭐ FIXED: Only add hysteria2 if server exists and is not empty
-  static List<String> _buildAutoOutbounds(Map<String, dynamic>? hy2) {
-    final outbounds = ["wireguard_1"];
-    if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
-      outbounds.add("hysteria2");
+  // ✅ UPDATED: Mode-based protocol ordering
+  static List<String> _buildAutoOutbounds(
+    Map<String, dynamic>? hy2,
+    Map<String, dynamic>? ss,
+    ConnectionMode mode,
+  ) {
+    final outbounds = <String>[];
+
+    switch (mode) {
+      case ConnectionMode.stealth:
+        // China/restrictive - SS first (port 443), no WireGuard
+        if (ss != null) {
+          outbounds.add("ss-out");
+        }
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+          outbounds.add("hysteria2");
+        }
+        // NO WireGuard - will be blocked
+        break;
+
+      case ConnectionMode.standard:
+        // Speed priority - WireGuard first
+        outbounds.add("wireguard_1");
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+          outbounds.add("hysteria2");
+        }
+        if (ss != null) {
+          outbounds.add("ss-out");
+        }
+        break;
+
+      case ConnectionMode.balanced:
+        // Firewall-friendly first - SS → Hysteria2 → WireGuard
+        if (ss != null) {
+          outbounds.add("ss-out");
+        }
+        if (hy2 != null && hy2['server']?.toString().isNotEmpty == true) {
+          outbounds.add("hysteria2");
+        }
+        outbounds.add("wireguard_1");
+        break;
     }
+
     return outbounds;
   }
 

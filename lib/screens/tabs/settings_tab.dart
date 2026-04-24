@@ -4,7 +4,7 @@ import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
 import '../../services/vpn_service.dart';
-import '../../services/settings_service.dart'; // ✅ NEW
+import '../../services/settings_service.dart';
 import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
 
@@ -27,8 +27,8 @@ class SettingsTab extends StatefulWidget {
 }
 
 class _SettingsTabState extends State<SettingsTab> {
-  // ✅ NEW: Auto-reconnect state
   bool _autoReconnectEnabled = true;
+  ConnectionMode _connectionMode = ConnectionMode.balanced;
   bool _isLoadingSettings = true;
 
   @override
@@ -37,12 +37,13 @@ class _SettingsTabState extends State<SettingsTab> {
     _loadSettings();
   }
 
-  // ✅ NEW: Load settings from storage
   Future<void> _loadSettings() async {
     final autoReconnect = await SettingsService.getAutoReconnect();
+    final connectionMode = await SettingsService.getConnectionMode();
     if (mounted) {
       setState(() {
         _autoReconnectEnabled = autoReconnect;
+        _connectionMode = connectionMode;
         _isLoadingSettings = false;
       });
     }
@@ -79,6 +80,141 @@ class _SettingsTabState extends State<SettingsTab> {
         );
       },
     );
+  }
+
+  void _showConnectionModeDialog(BuildContext context) {
+    final loc = AppLocalizations.of(context)!; // ✅ Add this
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(loc.connectionMode),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildModeOption(
+                mode: ConnectionMode.standard,
+                title: loc.modeStandard,
+                subtitle: loc.modeStandardDesc,
+                emoji: '⚡',
+              ),
+              const Divider(height: 20),
+              _buildModeOption(
+                mode: ConnectionMode.stealth,
+                title: loc.modeStealth,
+                subtitle: loc.modeStealthDesc,
+                emoji: '🕵️',
+              ),
+              const Divider(height: 20),
+              _buildModeOption(
+                mode: ConnectionMode.balanced,
+                title: loc.modeBalanced,
+                subtitle: loc.modeBalancedDesc,
+                emoji: '⚖️',
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ✅ NEW: Build mode option widget
+  Widget _buildModeOption({
+    required ConnectionMode mode,
+    required String title,
+    required String subtitle,
+    required String emoji,
+  }) {
+    final isSelected = _connectionMode == mode;
+    final loc = AppLocalizations.of(context)!; // ✅ Add this
+
+    return InkWell(
+      onTap: () async {
+        setState(() => _connectionMode = mode);
+        await SettingsService.setConnectionMode(mode);
+        Navigator.pop(context);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  Text(emoji, style: const TextStyle(fontSize: 20)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${loc.connectionMode}: $title'),
+                        const SizedBox(height: 2),
+                        Text(
+                          loc.modeReconnectHint,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: MyColors.myOrange,
+              duration: const Duration(seconds: 3),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        child: Row(
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 32)),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle, color: MyColors.myOrange, size: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ✅ NEW: Get readable mode name
+  String _getModeName(ConnectionMode mode) {
+    final loc = widget.loc; // ✅ Use widget.loc since we have it
+
+    switch (mode) {
+      case ConnectionMode.standard:
+        return loc.modeStandardFull;
+      case ConnectionMode.stealth:
+        return loc.modeStealthFull;
+      case ConnectionMode.balanced:
+        return loc.modeBalancedFull;
+    }
   }
 
   void _showLogoutDialog(BuildContext context) {
@@ -174,7 +310,49 @@ class _SettingsTabState extends State<SettingsTab> {
 
             const Divider(height: 24),
 
-            // ✅ NEW: Auto-reconnect toggle
+            // ✅ NEW: Connection Mode selector
+            InkWell(
+              onTap: _isLoadingSettings ? null : () => _showConnectionModeDialog(context),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.swap_horiz, size: 20, color: Colors.grey[700]),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              loc.connectionMode, // ✅ Changed
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              _getModeName(_connectionMode),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    Icon(Icons.chevron_right, color: Colors.grey[400]),
+                  ],
+                ),
+              ),
+            ),
+            const Divider(height: 24),
+
+            // Auto-reconnect toggle
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: Row(
@@ -186,7 +364,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'Auto-Reconnect',
+                    loc.autoReconnect, // ✅ Changed
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
@@ -198,7 +376,7 @@ class _SettingsTabState extends State<SettingsTab> {
               subtitle: Padding(
                 padding: const EdgeInsets.only(left: 32, top: 4),
                 child: Text(
-                  'Automatically reconnect if VPN connection is lost',
+                  loc.autoReconnectDesc, // ✅ Changed
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey[600],
@@ -208,7 +386,7 @@ class _SettingsTabState extends State<SettingsTab> {
               value: _autoReconnectEnabled,
               activeColor: MyColors.myOrange,
               onChanged: _isLoadingSettings
-                  ? null // Disable while loading
+                  ? null
                   : (bool value) async {
                       setState(() => _autoReconnectEnabled = value);
                       await SettingsService.setAutoReconnect(value);
@@ -226,8 +404,8 @@ class _SettingsTabState extends State<SettingsTab> {
                                 const SizedBox(width: 12),
                                 Text(
                                   value
-                                      ? 'Auto-reconnect enabled'
-                                      : 'Auto-reconnect disabled',
+                                      ? loc.autoReconnectEnabled // ✅ Changed
+                                      : loc.autoReconnectDisabled, // ✅ Changed
                                 ),
                               ],
                             ),

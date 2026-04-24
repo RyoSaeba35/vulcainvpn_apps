@@ -21,6 +21,10 @@ import android.net.NetworkCapabilities
 import kotlinx.coroutines.*
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+// ✅ Battery optimization imports
+import android.os.PowerManager
+import android.net.Uri
+import android.provider.Settings
 
 class MainActivity : FlutterActivity() {
 
@@ -29,11 +33,12 @@ class MainActivity : FlutterActivity() {
 
     private val VPN_REQUEST_CODE = 1001
     private val NOTIFICATION_REQUEST_CODE = 1002
+    private val BATTERY_OPTIMIZATION_REQUEST_CODE = 1003
     private val TAG = "MainActivity"
 
     private var pendingResult: MethodChannel.Result? = null
     private var pendingConfig: String? = null
-    private var pendingAccessToken: String? = null  // ← NEW!
+    private var pendingAccessToken: String? = null
 
     companion object {
         @Volatile
@@ -123,11 +128,18 @@ class MainActivity : FlutterActivity() {
                         val intent = VpnService.prepare(this)
                         result.success(intent == null)
                     }
+                    "checkBatteryOptimization" -> {
+                        result.success(isBatteryOptimizationExempt())
+                    }
+                    "requestBatteryOptimization" -> {
+                        requestBatteryOptimizationExemption()
+                        result.success(null)
+                    }
                     "getPackageName" -> getPackageName(result)
                     "startVpn" -> {
                         VpnLogger.log(TAG, "🚀 StartVPN called")
                         val configJson = call.argument<String>("config")
-                        val accessToken = call.argument<String>("access_token")  // ← NEW!
+                        val accessToken = call.argument<String>("access_token")
 
                         if (configJson == null) {
                             VpnLogger.error(TAG, "No config provided")
@@ -143,7 +155,7 @@ class MainActivity : FlutterActivity() {
 
                         pendingResult = result
                         pendingConfig = configJson
-                        pendingAccessToken = accessToken  // ← NEW!
+                        pendingAccessToken = accessToken
 
                         // Save config and token to encrypted storage for AutoReconnectService
                         try {
@@ -160,7 +172,7 @@ class MainActivity : FlutterActivity() {
                             val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
                             prefs.edit().apply {
                                 putString("${prefix}_vpn_config", configJson)
-                                putString("${prefix}_access_token", accessToken)  // ← NEW!
+                                putString("${prefix}_access_token", accessToken)
                                 apply()
                             }
                             VpnLogger.log(TAG, "✅ Config and token saved to encrypted storage")
@@ -168,7 +180,7 @@ class MainActivity : FlutterActivity() {
                             VpnLogger.error(TAG, "Failed to save config/token", e)
                         }
 
-                        // ✅ CRITICAL FIX: Clear old death events in main process BEFORE starting VPN
+                        // Clear old death events BEFORE starting VPN
                         try {
                             val vpnPrefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                             vpnPrefs.edit().apply {
@@ -183,6 +195,16 @@ class MainActivity : FlutterActivity() {
                             VpnLogger.error(TAG, "Failed to clear old death events", e)
                         }
 
+                        // ✅ STEP 1: Battery optimization check (MANDATORY)
+                        if (!isBatteryOptimizationExempt()) {
+                            VpnLogger.log(TAG, "⚠️ Battery optimization not exempt - requesting")
+                            requestBatteryOptimizationExemption()
+                            return@setMethodCallHandler
+                        } else {
+                            VpnLogger.log(TAG, "✅ Battery optimization already exempt")
+                        }
+
+                        // ✅ STEP 2: Notification permission (if needed)
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                                 requestPermissions(
@@ -192,6 +214,8 @@ class MainActivity : FlutterActivity() {
                                 return@setMethodCallHandler
                             }
                         }
+
+                        // ✅ STEP 3: VPN permission
                         requestVpnPermission()
                     }
                     "stopVpn" -> {
@@ -335,6 +359,39 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun isBatteryOptimizationExempt(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            val isExempt = pm.isIgnoringBatteryOptimizations(packageName)
+            return isExempt
+        }
+        return true
+    }
+
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent().apply {
+                    action = Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST_CODE)
+                VpnLogger.log(TAG, "✅ Battery optimization exemption requested")
+            } catch (e: Exception) {
+                VpnLogger.error(TAG, "Failed to request battery exemption", e)
+                // If we can't request it, fail the connection
+                pendingResult?.error(
+                    "BATTERY_OPTIMIZATION_FAILED",
+                    "Battery optimization setting could not be accessed. This is required for VPN to work properly.",
+                    null
+                )
+                pendingResult = null
+                pendingConfig = null
+                pendingAccessToken = null
+            }
+        }
+    }
+
     private suspend fun checkSubscriptionStatus(): String {
         return withContext(Dispatchers.IO) {
             var socket: java.net.Socket? = null
@@ -417,7 +474,7 @@ class MainActivity : FlutterActivity() {
                             "unknown"
                         }
                     }
-                    statusCode == 401 || statusCode == 403 -> "expired"
+                    statusCode == 401 || statusCode == 403 -> "auth_failed"
                     else -> "unknown"
                 }
 
@@ -476,7 +533,7 @@ class MainActivity : FlutterActivity() {
                 startVpnInternal(it)
                 pendingResult = null
                 pendingConfig = null
-                pendingAccessToken = null  // ← NEW!
+                pendingAccessToken = null
             }
         }
     }
@@ -485,10 +542,9 @@ class MainActivity : FlutterActivity() {
         try {
             VpnLogger.log(TAG, "🚀 Starting VPN service...")
 
-            // ✅ Pass both config and token to VpnService
             val intent = Intent(this, MyVpnService::class.java).apply {
                 putExtra("VPN_CONFIG", pendingConfig)
-                putExtra("ACCESS_TOKEN", pendingAccessToken)  // ← NEW!
+                putExtra("ACCESS_TOKEN", pendingAccessToken)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -497,7 +553,6 @@ class MainActivity : FlutterActivity() {
                 startService(intent)
             }
 
-            // ✅ FIXED: Start verification with better retry logic
             verifyVpnStarted(result, 0)
 
         } catch (e: Exception) {
@@ -506,12 +561,8 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    /**
-     * ✅ FIXED: Recursive verification with up to 6 seconds total wait time
-     * Checks: 800ms, 2.3s, 3.8s, 5.3s, 6.8s
-     */
     private fun verifyVpnStarted(result: MethodChannel.Result, attemptNumber: Int) {
-        val delays = listOf(800L, 1500L, 1500L, 1500L, 1500L)  // Total: 6.8 seconds max
+        val delays = listOf(800L, 1500L, 1500L, 1500L, 1500L)
 
         if (attemptNumber >= delays.size) {
             VpnLogger.error(TAG, "❌ VPN failed to start after ${delays.size} attempts (${delays.sum()}ms)")
@@ -540,8 +591,6 @@ class MainActivity : FlutterActivity() {
                 }
 
                 VpnLogger.log(TAG, "⏳ VPN not ready yet, retry ${attemptNumber + 1}/${delays.size}...")
-
-                // Recursive call for next attempt
                 verifyVpnStarted(result, attemptNumber + 1)
 
             } catch (e: Exception) {
@@ -580,28 +629,66 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
-        if (requestCode == VPN_REQUEST_CODE) {
-            pendingResult?.let { result ->
-                if (resultCode == Activity.RESULT_OK) {
-                    VpnLogger.log(TAG, "✅ VPN permission granted by user")
+        when (requestCode) {
+            VPN_REQUEST_CODE -> {
+                pendingResult?.let { result ->
+                    if (resultCode == Activity.RESULT_OK) {
+                        VpnLogger.log(TAG, "✅ VPN permission granted by user")
 
-                    Handler(mainLooper).postDelayed({
-                        startVpnInternal(result)
+                        Handler(mainLooper).postDelayed({
+                            startVpnInternal(result)
+                            pendingResult = null
+                            pendingConfig = null
+                            pendingAccessToken = null
+                        }, 400)
+
+                    } else {
+                        VpnLogger.log(TAG, "❌ User denied VPN permission")
+                        result.error(
+                            "VPN_PERMISSION_DENIED",
+                            "User denied VPN permission",
+                            null
+                        )
                         pendingResult = null
                         pendingConfig = null
-                        pendingAccessToken = null  // ← NEW!
-                    }, 400)
+                        pendingAccessToken = null
+                    }
+                }
+            }
+            BATTERY_OPTIMIZATION_REQUEST_CODE -> {
+                // ✅ Check if battery optimization was granted (MANDATORY)
+                val isExempt = isBatteryOptimizationExempt()
+
+                if (isExempt) {
+                    VpnLogger.log(TAG, "✅ Battery optimization exemption granted")
+
+                    // ✅ Continue to notification permission
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            VpnLogger.log(TAG, "⚠️ Notification permission needed - requesting")
+                            requestPermissions(
+                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                                NOTIFICATION_REQUEST_CODE
+                            )
+                            return
+                        }
+                    }
+
+                    // If notification permission already granted (or not needed), proceed to VPN permission
+                    VpnLogger.log(TAG, "✅ Notification permission already granted or not needed")
+                    requestVpnPermission()
 
                 } else {
-                    VpnLogger.log(TAG, "❌ User denied VPN permission")
-                    result.error(
-                        "VPN_PERMISSION_DENIED",
-                        "User denied VPN permission",
+                    // ✅ Battery optimization DENIED - stop connection (like VPN/notification denial)
+                    VpnLogger.log(TAG, "❌ Battery optimization NOT granted - connection blocked")
+                    pendingResult?.error(
+                        "BATTERY_OPTIMIZATION_DENIED",
+                        "Battery optimization exemption is required for VPN to work properly in the background. Without it, Android may kill your VPN connection.",
                         null
                     )
                     pendingResult = null
                     pendingConfig = null
-                    pendingAccessToken = null  // ← NEW!
+                    pendingAccessToken = null
                 }
             }
         }
@@ -628,7 +715,7 @@ class MainActivity : FlutterActivity() {
                 )
                 pendingResult = null
                 pendingConfig = null
-                pendingAccessToken = null  // ← NEW!
+                pendingAccessToken = null
             }
         }
     }
