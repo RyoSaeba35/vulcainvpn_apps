@@ -48,4 +48,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: installer-output/VulcainVPN-Setup.exe
+          path: installer-output/VulcainVPN-Setup-*.exe
