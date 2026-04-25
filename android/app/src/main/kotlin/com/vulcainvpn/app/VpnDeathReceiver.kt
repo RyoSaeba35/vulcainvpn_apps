@@ -1,4 +1,4 @@
-package com.example.cross_platform_vpn
+package com.vulcainvpn.app
 
 import android.app.ActivityManager
 import android.content.BroadcastReceiver

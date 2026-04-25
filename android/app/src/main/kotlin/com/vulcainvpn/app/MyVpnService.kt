@@ -1,4 +1,4 @@
-package com.example.cross_platform_vpn
+package com.vulcainvpn.app
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -339,7 +339,17 @@ class MyVpnService : VpnService(), PlatformInterface {
                 }
 
                 val notification = createNotification("Vulcain VPN", "Connecting...")
-                startForeground(NOTIFICATION_ID, notification)
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+
                 Log.d(TAG, "✅ Started foreground immediately")
 
                 intent?.getStringExtra("VPN_CONFIG")?.let { config ->

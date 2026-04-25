@@ -1,4 +1,4 @@
-package com.example.cross_platform_vpn
+package com.vulcainvpn.app
 
 import android.app.Notification
 import android.app.NotificationChannel

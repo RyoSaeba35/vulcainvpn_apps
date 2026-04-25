@@ -4,8 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.BIND_VPN_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -15,7 +15,7 @@
 
     <application
         android:name=".VpnApplication"
-        android:label="Vulcain VPN"
+        android:label="VulcainVPN"
         android:icon="@mipmap/ic_launcher">
 
         <!-- Main Activity - THIS SHOULD BE MainActivity, NOT VpnApplication -->
@@ -42,7 +42,7 @@
             android:name=".MyVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="false"
-            android:foregroundServiceType="systemExempted">
+            android:foregroundServiceType="connectedDevice">
             <intent-filter>
                 <action android:name="android.net.VpnService"/>
             </intent-filter>
@@ -52,7 +52,7 @@
             android:name=".AutoReconnectService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync">
+            android:foregroundServiceType="connectedDevice">
         </service>
 
         <receiver

@@ -1,3 +1,15 @@
+import java.util.Properties
+import java.io.FileInputStream
+
+// Load keystore properties if they exist
+val keystorePropertiesFile = rootProject.file("key.properties")
+val keystoreProperties = Properties()
+val hasKeystore = keystorePropertiesFile.exists()
+
+if (hasKeystore) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,15 +17,15 @@ plugins {
 }
 
 android {
-    namespace = "com.example.cross_platform_vpn"
+    namespace = "com.vulcainvpn.app"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.cross_platform_vpn"
-        minSdk = flutter.minSdkVersion
+        applicationId = "com.vulcainvpn.app"
+        minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         ndk {
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
@@ -26,11 +38,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // NEW: Use kotlin DSL instead of kotlinOptions
     kotlin {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             freeCompilerArgs.addAll(listOf("-Xjvm-default=all"))
+        }
+    }
+
+    // Only create signing config if keystore exists
+    if (hasKeystore) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("KEYSTORE_FILE"))
+                storePassword = keystoreProperties.getProperty("KEYSTORE_PASSWORD")
+                keyAlias = keystoreProperties.getProperty("KEY_ALIAS")
+                keyPassword = keystoreProperties.getProperty("KEY_PASSWORD")
+            }
         }
     }
 
@@ -41,8 +64,16 @@ android {
             isShrinkResources = false
         }
         getByName("release") {
+            // Only use signing if keystore exists
+            if (hasKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 

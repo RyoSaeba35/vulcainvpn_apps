@@ -1,4 +1,4 @@
-package com.example.cross_platform_vpn
+package com.vulcainvpn.app
 
 import android.content.Context
 import android.util.Log
@@ -10,7 +10,7 @@ import java.util.*
 /**
  * Centralized file logging utility for debugging crashes
  * Keeps only the last 48 hours of logs automatically
- * Logs are saved to: /storage/emulated/0/Android/data/com.example.cross_platform_vpn/files/vpn_crash.log
+ * Logs are saved to: /storage/emulated/0/Android/data/com.vulcainvpn.app/files/vpn_crash.log
  */
 object VpnLogger {
     private const val TAG = "VpnLogger"

@@ -1,6 +1,6 @@
 #define MyAppName "Vulcain VPN"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "RyoSaeba35"
+#define MyAppPublisher "VulcainVPN"
 #define MyAppExeName "vulcain_vpn.exe"
 
 [Setup]
@@ -11,7 +11,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf64}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=installer-output
-OutputBaseFilename=VulcainVPN-Setup
+OutputBaseFilename=VulcainVPN-Setup-{#MyAppVersion}
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
