@@ -988,9 +988,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     // Show asterisks matching the length of the last IP shown
     setState(() {
       // Parse the last IP shown and replace each octet with asterisks
-      if (_displayIp.isNotEmpty && _displayIp.contains('.')) {
+      if (_displayRealIp.isNotEmpty && _displayRealIp.contains('.')) {
         try {
-          List<String> octets = _displayIp.split('.');
+          List<String> octets = _displayRealIp.split('.');
           List<String> maskedOctets = octets.map((octet) {
             // Replace each digit with an asterisk
             return '*' * octet.length;
@@ -998,11 +998,11 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           _displayIp = maskedOctets.join('.');  // e.g., "***.***.*.**"
         } catch (e) {
           // Fallback if parsing fails
-          _displayIp = '**************';
+          _displayIp = '***.**.*.***';
         }
       } else {
         // Fallback for invalid IP
-        _displayIp = '**************';
+        _displayIp = '***.**.*.***';
       }
       _displayCountry = 'Protected';
       _displayCountryCode = '';
@@ -1025,6 +1025,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       final result = await IpService.getPublicIpAndLocation();
       if (mounted) {
         setState(() {
+          _displayRealIp = result['ip'] ?? 'Unknown';
           _displayIp = result['ip'] ?? 'Unknown';
           _displayCountry = result['country'] ?? '';
           _displayCountryCode = result['countryCode'] ?? '';
