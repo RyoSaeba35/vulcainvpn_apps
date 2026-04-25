@@ -60,7 +60,15 @@ class AutoReconnectService : Service() {
 
         try {
             val notification = createNotification("Reconnecting VPN", "Checking network...")
-            startForeground(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
             VpnLogger.log(TAG, "✅ Started foreground with notification ID $NOTIFICATION_ID")
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Failed to start foreground", e)
