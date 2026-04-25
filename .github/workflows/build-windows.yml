@@ -49,3 +49,4 @@ jobs:
         with:
           name: windows-installer
           path: installer-output/VulcainVPN-Setup-*.exe
+          retention-days: 7 
