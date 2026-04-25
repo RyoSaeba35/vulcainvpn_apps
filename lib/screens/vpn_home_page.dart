@@ -37,7 +37,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
   Timer? _ipCheckTimer;
   bool _isProtected = false;
-  _displayRealIp = '';
+  String _displayRealIp = '';
   String _displayIp = '';
   String _displayCountry = '';
   String _displayCountryCode = '';
