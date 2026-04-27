@@ -22,10 +22,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * ✅ OPTIMIZED: Parallel race between 403 detection and API check
+ * ✅ FIXED: Fresh credential fetching after 3rd reconnect attempt
+ * ✅ FIXED: Counter accumulation logic - timestamp updated on success instead of zeroed
  *
  * Key behavior: Service STAYS ALIVE when network is down, waiting for NetworkCallback.
  * When network recovers, automatically reconnects WITHOUT user intervention.
  * Uses parallel racing: 403 detection (fast) vs API check (safe backup).
+ * Tracks reconnection count across service restarts - fetches fresh credentials on 3rd attempt.
  */
 class AutoReconnectService : Service() {
 
@@ -33,7 +36,7 @@ class AutoReconnectService : Service() {
         private const val TAG = "AutoReconnectService"
         private const val NOTIFICATION_ID = 2000
         private const val CHANNEL_ID = "auto_reconnect"
-        private const val MAX_ATTEMPTS = 5
+        private const val RECONNECT_COUNTER_RESET_MS = 300000L  // 5 minutes
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -42,7 +45,7 @@ class AutoReconnectService : Service() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var waitingForNetwork = false
 
-    // ✅ NEW: Track if service is alive (for 403 detection)
+    // ✅ Track if service is alive (for 403 detection)
     private val isServiceAlive = AtomicBoolean(true)
 
     override fun onCreate() {
@@ -171,7 +174,7 @@ class AutoReconnectService : Service() {
         networkCallback = null
     }
 
-    // ✅ MODIFIED: Parallel race between API check and reconnection attempt
+    // ✅ MODIFIED: Parallel race between API check and reconnection attempt with fresh credential fetching
     private suspend fun performReconnection(reason: String) {
         VpnLogger.log(TAG, "🚀 Starting reconnection flow (reason: $reason)")
         Log.d(TAG, "Starting reconnection (reason: $reason)")
@@ -195,10 +198,66 @@ class AutoReconnectService : Service() {
             }
             VpnLogger.log(TAG, "✅ Network available")
 
-            // ✅ NEW: STEP 3 - Parallel race between 403 detection and API check
-            VpnLogger.log(TAG, "STEP 3: Starting parallel subscription check + reconnect attempt")
+            // ✅ FIXED: STEP 2.5 - Track reconnection attempts across service restarts
+            val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+            val reconnectCount = prefs.getInt("auto_reconnect_count", 0)
+            val lastReconnectTime = prefs.getLong("last_reconnect_time", 0)
+            val currentTime = System.currentTimeMillis()
+            val timeSinceLastReconnect = if (lastReconnectTime == 0L) {
+                VpnLogger.log(TAG, "⏱️ First reconnect attempt (no previous timestamp)")
+                0L
+            } else {
+                currentTime - lastReconnectTime
+            }
 
-            val config = getConfig()
+            // Reset counter if it's been more than 5 minutes since last reconnect
+            val adjustedCount = if (timeSinceLastReconnect > RECONNECT_COUNTER_RESET_MS) {
+                VpnLogger.log(TAG, "⏱️ More than 5min since last reconnect - resetting counter")
+                0
+            } else {
+                reconnectCount
+            }
+
+            VpnLogger.log(TAG, "📊 Auto-reconnect count: $adjustedCount (time since last: ${timeSinceLastReconnect/1000}s)")
+
+            // Increment counter
+            val newCount = adjustedCount + 1
+            prefs.edit().apply {
+                putInt("auto_reconnect_count", newCount)
+                putLong("last_reconnect_time", currentTime)
+                apply()
+            }
+
+            // ✅ NEW: STEP 3 - Get config (fresh if count >= 3)
+            VpnLogger.log(TAG, "STEP 3: Getting VPN config...")
+
+            val config = if (newCount >= 3) {
+                // ✅ After 3rd reconnect attempt, ALWAYS fetch fresh credentials
+                VpnLogger.log(TAG, "🔄 Reconnect count >= 3 - FETCHING FRESH CREDENTIALS FROM BACKEND")
+
+                val deviceId = getSecureValue("device_id")
+                val apiKey = getSecureValue("api_key")
+
+                if (deviceId != null && apiKey != null) {
+                    val freshConfig = fetchFreshConfig(deviceId, apiKey)
+
+                    if (freshConfig != null) {
+                        VpnLogger.log(TAG, "✅ Using fresh credentials from backend")
+                        freshConfig
+                    } else {
+                        VpnLogger.log(TAG, "⚠️ Failed to fetch fresh credentials - falling back to cached")
+                        getConfig()
+                    }
+                } else {
+                    VpnLogger.log(TAG, "⚠️ No device credentials found - using cached config")
+                    getConfig()
+                }
+            } else {
+                // First 2 attempts: use cached config (faster)
+                VpnLogger.log(TAG, "📦 Using cached config (attempt $newCount of 3 before fresh fetch)")
+                getConfig()
+            }
+
             if (config == null) {
                 VpnLogger.log(TAG, "❌ No config available")
                 fail("No configuration")
@@ -206,7 +265,9 @@ class AutoReconnectService : Service() {
             }
             VpnLogger.log(TAG, "✅ Config retrieved (${config.length} chars)")
 
-            // Launch BOTH operations in parallel
+            // STEP 4: Launch BOTH operations in parallel
+            VpnLogger.log(TAG, "STEP 4: Starting parallel subscription check + reconnect attempt")
+
             val apiCheckJob = serviceScope.async(Dispatchers.IO) {
                 VpnLogger.log(TAG, "📡 API check starting (parallel)...")
                 checkSubscription()
@@ -214,7 +275,7 @@ class AutoReconnectService : Service() {
 
             val reconnectJob = serviceScope.async(Dispatchers.IO) {
                 VpnLogger.log(TAG, "🔌 Reconnect attempt starting (parallel)...")
-                attemptReconnect(config)
+                attemptSingleReconnect(config)
             }
 
             // Wait for API check with timeout
@@ -333,6 +394,15 @@ class AutoReconnectService : Service() {
 
             if (reconnectSuccess) {
                 VpnLogger.log(TAG, "✅ Reconnection successful!")
+
+                // ✅ FIXED: Reset counter on success - update timestamp instead of zeroing it
+                prefs.edit().apply {
+                    putInt("auto_reconnect_count", 0)
+                    putLong("last_reconnect_time", System.currentTimeMillis())  // Update timestamp, don't zero it
+                    apply()
+                }
+                VpnLogger.log(TAG, "✅ Reconnect counter reset (timestamp updated)")
+
                 success()
             } else {
                 // Check if it failed due to 403 detection
@@ -342,7 +412,7 @@ class AutoReconnectService : Service() {
                     stopSelf()
                 } else {
                     VpnLogger.log(TAG, "❌ Reconnection failed")
-                    fail("Could not reconnect after $MAX_ATTEMPTS attempts")
+                    fail("Reconnection attempt failed")
                 }
             }
 
@@ -353,58 +423,101 @@ class AutoReconnectService : Service() {
         }
     }
 
-    // ✅ NEW: Extracted reconnect logic for parallel execution
-    private suspend fun attemptReconnect(config: String): Boolean {
-        VpnLogger.log(TAG, "STEP 4: Starting reconnection attempts")
-        val delays = listOf(0L, 3000L, 6000L, 10000L, 15000L)
-
-        for (i in 1..MAX_ATTEMPTS) {
-            // Check if service was stopped by 403 detection
-            if (!isServiceAlive.get()) {
-                VpnLogger.log(TAG, "🚨 Service stopped by 403 detection - aborting reconnect")
-                return false
-            }
-
-            VpnLogger.log(TAG, "🔄 Reconnection attempt $i of $MAX_ATTEMPTS")
-            updateNotification("Reconnecting...", "Attempt $i of $MAX_ATTEMPTS")
-
-            if (i > 1) {
-                val delayMs = delays.getOrElse(i - 1) { 15000 }
-                VpnLogger.log(TAG, "⏳ Waiting ${delayMs}ms before retry")
-                delay(delayMs)
-            }
-
-            if (!isNetworkAvailable()) {
-                VpnLogger.log(TAG, "⚠️ Network lost during reconnection")
-
-                waitingForNetwork = true
-                VpnLogger.log(TAG, "🔔 Network lost - keeping service alive, waiting for recovery")
-                updateNotification("Waiting for network", "VPN will reconnect when internet is available")
-                return false
-            }
-
-            VpnLogger.log(TAG, "🚀 Starting VPN service")
-            startVpn(config)
-
-            VpnLogger.log(TAG, "⏳ Waiting 10s for VPN to connect")
-            delay(10000)
-
-            // ✅ Check if 403 detection stopped the service
-            if (!isServiceAlive.get()) {
-                VpnLogger.log(TAG, "🚨 Service stopped by 403 detection during reconnect attempt!")
-                return false
-            }
-
-            if (isVpnRunning()) {
-                VpnLogger.log(TAG, "✅ VPN is running - reconnection successful!")
-                return true
-            } else {
-                VpnLogger.log(TAG, "❌ VPN not running after attempt $i")
-            }
+    // ✅ RENAMED: Now it's just ONE attempt per service start (no internal loop)
+    private suspend fun attemptSingleReconnect(config: String): Boolean {
+        if (!isServiceAlive.get()) {
+            VpnLogger.log(TAG, "🚨 Service stopped by 403 detection - aborting reconnect")
+            return false
         }
 
-        VpnLogger.log(TAG, "❌ All $MAX_ATTEMPTS reconnection attempts failed")
-        return false
+        if (!isNetworkAvailable()) {
+            VpnLogger.log(TAG, "⚠️ Network lost during reconnection")
+            waitingForNetwork = true
+            VpnLogger.log(TAG, "🔔 Network lost - keeping service alive, waiting for recovery")
+            updateNotification("Waiting for network", "VPN will reconnect when internet is available")
+            return false
+        }
+
+        VpnLogger.log(TAG, "🚀 Starting VPN service")
+        startVpn(config)
+
+        VpnLogger.log(TAG, "⏳ Waiting 10s for VPN to connect")
+        delay(10000)
+
+        // ✅ Check if 403 detection stopped the service
+        if (!isServiceAlive.get()) {
+            VpnLogger.log(TAG, "🚨 Service stopped by 403 detection during reconnect attempt!")
+            return false
+        }
+
+        if (isVpnRunning()) {
+            VpnLogger.log(TAG, "✅ VPN is running - reconnection successful!")
+            return true
+        } else {
+            VpnLogger.log(TAG, "❌ VPN not running after attempt")
+            return false
+        }
+    }
+
+    // ✅ NEW: Fetch fresh config from backend /api/connect endpoint
+    private suspend fun fetchFreshConfig(deviceId: String, apiKey: String): String? = withContext(Dispatchers.IO) {
+        try {
+            VpnLogger.log(TAG, "📡 Calling /api/connect/$deviceId for FRESH credentials...")
+
+            val url = java.net.URL("https://api.vulcainvpn.com/api/connect/$deviceId")
+            val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
+
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("X-Api-Key", apiKey)
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+
+            val responseCode = connection.responseCode
+            VpnLogger.log(TAG, "📡 Backend /api/connect response: $responseCode")
+
+            if (responseCode == 200) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                VpnLogger.log(TAG, "✅ Fresh config received (${response.length} chars)")
+
+                // Save fresh config to encrypted storage for next time
+                try {
+                    val masterKey = MasterKey.Builder(this@AutoReconnectService)
+                        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                        .build()
+                    val prefs = EncryptedSharedPreferences.create(
+                        this@AutoReconnectService,
+                        "FlutterSecureStorage",
+                        masterKey,
+                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    )
+                    val prefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBhIHNlY3VyZSBzdG9yYWdlCg"
+                    prefs.edit().putString("${prefix}_vpn_config", response).apply()
+                    VpnLogger.log(TAG, "✅ Fresh config saved to encrypted storage")
+                } catch (e: Exception) {
+                    VpnLogger.error(TAG, "Failed to save fresh config to storage", e)
+                }
+
+                return@withContext response
+
+            } else {
+                VpnLogger.log(TAG, "❌ Backend returned error: $responseCode")
+
+                // Try to read error message
+                try {
+                    val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                    VpnLogger.log(TAG, "Error body: ${errorBody?.take(200)}")
+                } catch (e: Exception) {
+                    // Ignore error reading error
+                }
+
+                return@withContext null
+            }
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to fetch fresh config from backend", e)
+            return@withContext null
+        }
     }
 
     private suspend fun waitForNetwork(): Boolean {
@@ -441,7 +554,6 @@ class AutoReconnectService : Service() {
         VpnLogger.log(TAG, "🔐 Checking subscription status via API")
         return withContext(Dispatchers.IO) {
             try {
-                // ✅ FIX: Use device_id + api_key instead of JWT
                 val deviceId = getSecureValue("device_id")
                 val apiKey = getSecureValue("api_key")
 
@@ -451,12 +563,11 @@ class AutoReconnectService : Service() {
                 }
 
                 VpnLogger.log(TAG, "Making API request to check subscription...")
-                // ✅ Use the device endpoint with API Key
                 val url = java.net.URL("https://api.vulcainvpn.com/api/subscription/$deviceId")
                 val connection = url.openConnection() as javax.net.ssl.HttpsURLConnection
 
                 connection.requestMethod = "GET"
-                connection.setRequestProperty("X-Api-Key", apiKey)  // ✅ Use API Key!
+                connection.setRequestProperty("X-Api-Key", apiKey)
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.connectTimeout = 10000
                 connection.readTimeout = 10000
@@ -686,8 +797,7 @@ class AutoReconnectService : Service() {
                 action = "STOP_VPN"
             })
 
-            // ⭐ Wait longer for cleanup to complete
-            delay(2000)  // Increased from 1000ms
+            delay(2000)
 
             VpnLogger.log(TAG, "✅ Cleanup complete")
         } catch (e: Exception) {

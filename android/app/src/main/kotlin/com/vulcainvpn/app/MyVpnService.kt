@@ -339,7 +339,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                 }
 
                 val notification = createNotification("Vulcain VPN", "Connecting...")
-                
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
                     startForeground(
                         NOTIFICATION_ID,
@@ -1172,8 +1172,12 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
 
         if (options.autoRoute) {
-            builder.addDnsServer(options.dnsServerAddress.value)
+            // ✅ CRITICAL FIX: Always add explicit DNS servers
+            builder.addDnsServer("1.1.1.1")   // Cloudflare primary
+            builder.addDnsServer("8.8.8.8")   // Google primary
             builder.addRoute("0.0.0.0", 0)
+
+            VpnLogger.log(TAG, "✅ DNS servers configured: 1.1.1.1, 8.8.8.8")
         }
 
         val pfd = builder.establish() ?: throw Exception("Failed to establish VPN")

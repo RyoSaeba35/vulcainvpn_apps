@@ -42,6 +42,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   String _displayCountry = '';
   String _displayCountryCode = '';
   bool _isAnimatingIp = false;
+  bool _shouldStopAnimation = false;  // ✅ NEW: Flag to immediately stop animation
   StreamSubscription<bool>? _vpnSubscription;
   StreamSubscription<VpnEvent>? _eventSubscription;
 
@@ -985,8 +986,10 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _showProtectedIp() async {
-    // Animation already happened during 'connecting' phase
-    // Show asterisks matching the length of the last IP shown
+    // ✅ FIXED: Stop animation FIRST, then wait for it to finish
+    _shouldStopAnimation = true;
+    await Future.delayed(Duration(milliseconds: 100));  // Wait for animation loop to exit
+
     setState(() {
       // Parse the last IP shown and replace each octet with asterisks
       if (_displayRealIp.isNotEmpty && _displayRealIp.contains('.')) {
@@ -1048,6 +1051,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   Future<void> _startConnectingAnimation() async {
     setState(() {
       _isAnimatingIp = true;
+      _shouldStopAnimation = false;  // ✅ Reset the stop flag
       _displayCountry = '';
       _displayCountryCode = '';
     });
@@ -1059,10 +1063,14 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   Future<void> _animateIpContinuously() async {
     final random = Random();
 
-    // Keep cycling numbers until state changes to 'connected' or back to 'disconnected'
-    while (_connectionState == 'connecting' && mounted) {
+    // ✅ FIXED: Check both conditions to prevent race condition
+    while (_connectionState == 'connecting' && !_shouldStopAnimation && mounted) {
       await Future.delayed(Duration(milliseconds: 50));
-      if (!mounted) return;
+
+      // ✅ Double-check before setState to avoid race condition
+      if (_connectionState != 'connecting' || _shouldStopAnimation || !mounted) {
+        break;
+      }
 
       setState(() {
         int a = random.nextInt(256);
@@ -1073,6 +1081,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         _displayIp = newIp;
       });
     }
+
+    // ✅ Animation has stopped
+    print('🎬 IP animation stopped');
   }
 
   void _toggleConnection() async {
