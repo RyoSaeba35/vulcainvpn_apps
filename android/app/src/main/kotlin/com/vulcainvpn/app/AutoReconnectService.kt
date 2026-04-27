@@ -198,63 +198,27 @@ class AutoReconnectService : Service() {
             }
             VpnLogger.log(TAG, "✅ Network available")
 
-            // ✅ FIXED: STEP 2.5 - Track reconnection attempts across service restarts
-            val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-            val reconnectCount = prefs.getInt("auto_reconnect_count", 0)
-            val lastReconnectTime = prefs.getLong("last_reconnect_time", 0)
-            val currentTime = System.currentTimeMillis()
-            val timeSinceLastReconnect = if (lastReconnectTime == 0L) {
-                VpnLogger.log(TAG, "⏱️ First reconnect attempt (no previous timestamp)")
-                0L
-            } else {
-                currentTime - lastReconnectTime
-            }
-
-            // Reset counter if it's been more than 5 minutes since last reconnect
-            val adjustedCount = if (timeSinceLastReconnect > RECONNECT_COUNTER_RESET_MS) {
-                VpnLogger.log(TAG, "⏱️ More than 5min since last reconnect - resetting counter")
-                0
-            } else {
-                reconnectCount
-            }
-
-            VpnLogger.log(TAG, "📊 Auto-reconnect count: $adjustedCount (time since last: ${timeSinceLastReconnect/1000}s)")
-
-            // Increment counter
-            val newCount = adjustedCount + 1
-            prefs.edit().apply {
-                putInt("auto_reconnect_count", newCount)
-                putLong("last_reconnect_time", currentTime)
-                apply()
-            }
-
-            // ✅ NEW: STEP 3 - Get config (fresh if count >= 3)
+            // ✅ STEP 3 - ALWAYS fetch fresh credentials from backend
             VpnLogger.log(TAG, "STEP 3: Getting VPN config...")
 
-            val config = if (newCount >= 3) {
-                // ✅ After 3rd reconnect attempt, ALWAYS fetch fresh credentials
-                VpnLogger.log(TAG, "🔄 Reconnect count >= 3 - FETCHING FRESH CREDENTIALS FROM BACKEND")
+            val deviceId = getSecureValue("device_id")
+            val apiKey = getSecureValue("api_key")
 
-                val deviceId = getSecureValue("device_id")
-                val apiKey = getSecureValue("api_key")
+            val config = if (deviceId != null && apiKey != null) {
+                // ✅ ALWAYS fetch fresh credentials on every reconnect (prevents stale credential conflicts)
+                VpnLogger.log(TAG, "🔄 Fetching FRESH credentials from backend...")
 
-                if (deviceId != null && apiKey != null) {
-                    val freshConfig = fetchFreshConfig(deviceId, apiKey)
+                val freshConfig = fetchFreshConfig(deviceId, apiKey)
 
-                    if (freshConfig != null) {
-                        VpnLogger.log(TAG, "✅ Using fresh credentials from backend")
-                        freshConfig
-                    } else {
-                        VpnLogger.log(TAG, "⚠️ Failed to fetch fresh credentials - falling back to cached")
-                        getConfig()
-                    }
+                if (freshConfig != null) {
+                    VpnLogger.log(TAG, "✅ Using fresh credentials from backend")
+                    freshConfig
                 } else {
-                    VpnLogger.log(TAG, "⚠️ No device credentials found - using cached config")
+                    VpnLogger.log(TAG, "⚠️ Failed to fetch fresh credentials - falling back to cached")
                     getConfig()
                 }
             } else {
-                // First 2 attempts: use cached config (faster)
-                VpnLogger.log(TAG, "📦 Using cached config (attempt $newCount of 3 before fresh fetch)")
+                VpnLogger.log(TAG, "⚠️ No device credentials found - using cached config")
                 getConfig()
             }
 
@@ -394,15 +358,6 @@ class AutoReconnectService : Service() {
 
             if (reconnectSuccess) {
                 VpnLogger.log(TAG, "✅ Reconnection successful!")
-
-                // ✅ FIXED: Reset counter on success - update timestamp instead of zeroing it
-                prefs.edit().apply {
-                    putInt("auto_reconnect_count", 0)
-                    putLong("last_reconnect_time", System.currentTimeMillis())  // Update timestamp, don't zero it
-                    apply()
-                }
-                VpnLogger.log(TAG, "✅ Reconnect counter reset (timestamp updated)")
-
                 success()
             } else {
                 // Check if it failed due to 403 detection

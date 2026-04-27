@@ -1,5 +1,5 @@
 #define MyAppName "Vulcain VPN"
-#define MyAppVersion "1.0.6"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "VulcainVPN"
 #define MyAppExeName "vulcain_vpn.exe"
 
