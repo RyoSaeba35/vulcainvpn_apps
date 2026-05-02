@@ -1,0 +1,46 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install CocoaPods dependencies
+        run: |
+          cd macos
+          pod install
+        
+      - name: Build macOS app
+        run: flutter build macos --release
+
+      - name: Compress app bundle
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r vulcain_vpn_macos.zip vulcain_vpn.app
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulcain_vpn_macos
+          path: build/macos/Build/Products/Release/vulcain_vpn_macos.zip
+          retention-days: 7
