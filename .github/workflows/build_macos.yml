@@ -61,7 +61,7 @@ jobs:
       - name: Bundle sing-box binaries into app
         run: |
           SING_BOX_VERSION="1.13.11"
-          APP_RESOURCES="build/macos/Build/Products/Release/vulcain_vpn.app/Contents/Resources"
+          APP_RESOURCES="build/macos/Build/Products/Release/cross_platform_vpn.app/Contents/Resources"
           mkdir -p "$APP_RESOURCES"
 
           echo "→ Downloading Intel (amd64)..."
@@ -84,7 +84,7 @@ jobs:
       - name: Compress app bundle
         run: |
           cd build/macos/Build/Products/Release
-          zip -r vulcain_vpn_macos.zip vulcain_vpn.app
+          zip -r vulcain_vpn_macos.zip cross_platform_vpn.app
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
