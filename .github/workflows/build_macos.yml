@@ -61,30 +61,29 @@ jobs:
       - name: Bundle sing-box binaries into app
         run: |
           SING_BOX_VERSION="1.13.11"
-          APP_RESOURCES="build/macos/Build/Products/Release/cross_platform_vpn.app/Contents/Resources"
+          APP_NAME=$(ls build/macos/Build/Products/Release/ | grep "\.app$" | head -1)
+          echo "Detected app: $APP_NAME"
+          APP_RESOURCES="build/macos/Build/Products/Release/${APP_NAME}/Contents/Resources"
           mkdir -p "$APP_RESOURCES"
 
-          echo "→ Downloading Intel (amd64)..."
-          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz" \
-            -o /tmp/sing-box-amd64.tar.gz
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz" -o /tmp/sing-box-amd64.tar.gz
           tar -xzf /tmp/sing-box-amd64.tar.gz -C /tmp
           cp "/tmp/sing-box-${SING_BOX_VERSION}-darwin-amd64/sing-box" "$APP_RESOURCES/sing-box-amd64"
           chmod +x "$APP_RESOURCES/sing-box-amd64"
 
-          echo "→ Downloading Apple Silicon (arm64)..."
-          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz" \
-            -o /tmp/sing-box-arm64.tar.gz
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz" -o /tmp/sing-box-arm64.tar.gz
           tar -xzf /tmp/sing-box-arm64.tar.gz -C /tmp
           cp "/tmp/sing-box-${SING_BOX_VERSION}-darwin-arm64/sing-box" "$APP_RESOURCES/sing-box-arm64"
           chmod +x "$APP_RESOURCES/sing-box-arm64"
 
-          echo "✅ Binaries bundled:"
-          ls -lh "$APP_RESOURCES/sing-box-*"
+          echo "✅ Done:"
+          ls -lh "$APP_RESOURCES/"
 
       - name: Compress app bundle
         run: |
           cd build/macos/Build/Products/Release
-          zip -r vulcain_vpn_macos.zip cross_platform_vpn.app
+          APP_NAME=$(ls | grep "\.app$" | head -1)
+          zip -r vulcain_vpn_macos.zip "$APP_NAME"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -92,3 +91,11 @@ jobs:
           name: vulcain_vpn_macos
           path: build/macos/Build/Products/Release/vulcain_vpn_macos.zip
           retention-days: 7
+          
+      - name: Debug build output
+        run: |
+          echo "Release folder contents:"
+          ls -la build/macos/Build/Products/Release/
+          echo ""
+          echo "App bundle contents:"
+          ls -la "build/macos/Build/Products/Release/$(ls build/macos/Build/Products/Release/ | grep .app)/"
