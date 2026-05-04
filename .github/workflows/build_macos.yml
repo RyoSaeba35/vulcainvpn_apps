@@ -22,9 +22,28 @@ jobs:
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
-      # win_toast is Windows-only and fails to compile on macOS runner
+      # win_toast is Windows-only and fails to compile on macOS
       - name: Remove win_toast from pubspec
         run: sed -i '' 's/.*win_toast.*//' pubspec.yaml
+
+      # Replace windows_notification_service.dart with a no-op stub
+      # The real file imports win_toast which won't compile on macOS
+      - name: Stub out WindowsNotificationService for macOS build
+        run: |
+          cat > lib/services/windows_notification_service.dart << 'EOF'
+          // Stub for macOS build — real implementation is Windows-only
+          class WindowsNotificationService {
+            static Future<void> initialize() async {}
+            static Future<void> showToast({required String title, required String message, bool isError = false}) async {}
+            static Future<void> focusWindow() async {}
+            static Future<void> showCriticalAlert({required String title, required String message}) async {}
+          }
+          EOF
+
+      # Add missing MacosNotificationService import to main.dart
+      - name: Add MacosNotificationService import to main.dart
+        run: |
+          sed -i '' "s|import 'services/windows_notification_service.dart';|import 'services/windows_notification_service.dart';\nimport 'services/macos_notification_service.dart';|" lib/main.dart
 
       - name: Install dependencies
         run: flutter pub get
