@@ -55,6 +55,13 @@
             android:foregroundServiceType="connectedDevice">
         </service>
 
+        <service
+          android:name=".VpnWatchdogService"
+          android:process=":watchdog"
+          android:exported="false"
+          android:foregroundServiceType="connectedDevice" >
+        </service>
+
         <receiver
             android:name=".VpnDeathReceiver"
             android:exported="false"

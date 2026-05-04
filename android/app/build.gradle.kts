@@ -24,8 +24,8 @@ android {
         applicationId = "com.vulcainvpn.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.0"
+        versionCode = 7
+        versionName = "1.0.7"
 
         ndk {
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
@@ -94,4 +94,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }

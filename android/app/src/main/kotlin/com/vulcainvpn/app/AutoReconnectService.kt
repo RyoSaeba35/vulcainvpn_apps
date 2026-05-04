@@ -46,10 +46,10 @@ class AutoReconnectService : Service() {
         private const val KEY_RETRY_BATCH = "retry_batch"
         private const val KEY_LAST_RETRY_TIME = "last_retry_time"
 
-        private const val MAX_RETRIES_PER_BATCH = 3
-        private const val MAX_BATCHES = 2  // Two batches total
-        private const val BATCH_COOLDOWN_MS = 2 * 60 * 1000L  // 2 minutes
-        private const val RETRY_RESET_TIME_MS = 24 * 60 * 60 * 1000L  // 24 hours
+        private const val MAX_RETRIES_PER_BATCH = 5
+        private const val MAX_BATCHES = 1
+        private const val BATCH_COOLDOWN_MS = 0L
+        private const val RETRY_RESET_TIME_MS = 8 * 60 * 1000L
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -411,9 +411,7 @@ class AutoReconnectService : Service() {
 
                     if (isVpnRunning()) {
                         VpnLogger.log(TAG, "✅ Reconnected successfully! (batch $batch, attempt $attempt)")
-                        resetRetryState()
                         success()
-                        return
                     }
 
                     // Check if failure was due to authentication
@@ -458,26 +456,61 @@ class AutoReconnectService : Service() {
             val currentBatch = retryPrefs.getInt(KEY_RETRY_BATCH, 1)
 
             if (currentCount >= MAX_RETRIES_PER_BATCH && currentBatch >= MAX_BATCHES) {
-                // All attempts exhausted
+                // All attempts exhausted - give up permanently
+                VpnLogger.log(TAG, "⛔ All batches exhausted - stopping permanently")
                 showDisconnectNotification(
                     "VPN Disconnected",
                     "Unable to reconnect - Please reconnect manually"
                 )
+                resetRetryState()
+                stopSelf()
             } else if (currentCount >= MAX_RETRIES_PER_BATCH && currentBatch == 1) {
-                // Batch 1 complete, will enter cooldown
+                // Batch 1 complete, schedule cooldown period
+                VpnLogger.log(TAG, "⏸️ Batch 1 complete - scheduling 2-minute cooldown")
                 showDisconnectNotification(
                     "VPN Reconnecting",
                     "Retrying in 2 minutes..."
                 )
+
+                // Schedule restart after cooldown
+                withContext(Dispatchers.Main) {
+                    mainHandler.postDelayed({
+                        VpnLogger.log(TAG, "⏰ Cooldown complete - starting batch 2")
+                        val retryIntent = Intent(this@AutoReconnectService, AutoReconnectService::class.java).apply {
+                            putExtra("reason", reason)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(retryIntent)
+                        } else {
+                            startService(retryIntent)
+                        }
+                    }, BATCH_COOLDOWN_MS)
+                }
+                stopSelf()
             } else {
-                // More attempts remaining in current batch
+                // More attempts remaining in current batch - schedule next retry
+                VpnLogger.log(TAG, "🔄 Scheduling next retry (batch $currentBatch, attempt ${currentCount + 1}/$MAX_RETRIES_PER_BATCH)")
                 showDisconnectNotification(
                     "VPN Reconnecting",
-                    "Retrying... (batch $currentBatch, $currentCount/$MAX_RETRIES_PER_BATCH)"
+                    "Next retry in 10s... (batch $currentBatch, $currentCount/$MAX_RETRIES_PER_BATCH)"
                 )
-            }
 
-            stopSelf()
+                // Schedule next retry attempt (immediate, just enough delay to avoid tight loop)
+                withContext(Dispatchers.Main) {
+                    mainHandler.postDelayed({
+                        VpnLogger.log(TAG, "🚀 Starting next retry attempt")
+                        val retryIntent = Intent(this@AutoReconnectService, AutoReconnectService::class.java).apply {
+                            putExtra("reason", reason)
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(retryIntent)
+                        } else {
+                            startService(retryIntent)
+                        }
+                    }, 10000)  // 10 second delay before next retry
+                }
+                stopSelf()
+            }
 
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Reconnection failed", e)

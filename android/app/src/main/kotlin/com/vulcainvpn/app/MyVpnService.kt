@@ -45,13 +45,14 @@ import android.net.NetworkRequest
 import android.os.PowerManager
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
+import android.content.ComponentName
 
 class MyVpnService : VpnService(), PlatformInterface {
 
     companion object {
         private const val TAG = "MyVpnService"
-        private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "vpn_channel"
+        private const val NOTIFICATION_ID = VpnConstants.SHARED_NOTIFICATION_ID
+        private const val CHANNEL_ID = VpnConstants.NOTIFICATION_CHANNEL_ID
 
         private const val PREFS_NAME = "vpn_state"
         private const val KEY_IS_RUNNING = "is_running"
@@ -401,7 +402,7 @@ class MyVpnService : VpnService(), PlatformInterface {
             val notification = NotificationCompat.Builder(this, "vpn_disconnect")
                 .setContentTitle(title)
                 .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -564,12 +565,22 @@ class MyVpnService : VpnService(), PlatformInterface {
 
                 if (deviceId == null || apiKey == null) {
                     VpnLogger.log(TAG, "❌ No device credentials available")
-                    notifyFlutterVpnDeath("auth_required", "Device not registered")
+
+                    setVpnState(false)  // ✅ AJOUTE: Reset state
+
                     mainHandler.post {
+                        // ✅ AJOUTE: Show notification to user
+                        showAuthFailedNotification()
+
+                        // ✅ AJOUTE: Remove foreground notification
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+
                         releaseWakeLock("vpn_start_failed")
                         synchronized(this@MyVpnService) { isStarting = false }
                         stopSelf()
                     }
+
+                    notifyFlutterVpnDeath("auth_required", "Device not registered")
                     return@Thread
                 }
 
@@ -586,24 +597,39 @@ class MyVpnService : VpnService(), PlatformInterface {
                         VpnLogger.log(TAG, "Stopping VPN start - sending subscription_expired death event")
 
                         setVpnState(false)
-                        notifyFlutterVpnDeath("subscription_expired", "Your VPN subscription has expired")
 
                         mainHandler.post {
+                            // ✅ Show notification
+                            showSubscriptionExpiredNotification()
+
+                            // ✅ AJOUTE: Remove foreground notification
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+
                             releaseWakeLock("subscription_expired")
                             synchronized(this@MyVpnService) { isStarting = false }
                             stopSelf()
                         }
+
+                        notifyFlutterVpnDeath("subscription_expired", "Your VPN subscription has expired")
                         return@Thread
                     }
                     "auth_failed" -> {
                         VpnLogger.log(TAG, "❌ Authentication failed - token invalid")
                         setVpnState(false)
-                        notifyFlutterVpnDeath("auth_required", "Session expired - please login again")
+
                         mainHandler.post {
+                            // ✅ Show notification
+                            showAuthFailedNotification()
+
+                            // ✅ AJOUTE: Remove foreground notification
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+
                             releaseWakeLock("auth_failed")
                             synchronized(this@MyVpnService) { isStarting = false }
                             stopSelf()
                         }
+
+                        notifyFlutterVpnDeath("auth_required", "Session expired - please login again")
                         return@Thread
                     }
                     "active" -> {
@@ -669,23 +695,41 @@ class MyVpnService : VpnService(), PlatformInterface {
                 Log.d(TAG, "✅ VPN started successfully")
                 VpnLogger.log(TAG, "✅ VPN FULLY CONNECTED")
 
-                // ✅ Clear starting flag after successful start
+                // Clear starting flag after successful start
                 synchronized(this@MyVpnService) { isStarting = false }
 
-                // ✅ Start heartbeat monitoring (backup detection)
+                // Start watchdog service
+                startWatchdogService()
+
+                Handler(Looper.getMainLooper()).postDelayed({
+                    try {
+                        val updatedNotification = createNotification("Vulcain VPN", "Connected")
+                        notificationManager.notify(NOTIFICATION_ID, updatedNotification)
+                        VpnLogger.log(TAG, "✅ Notification priority refreshed after watchdog start")
+                    } catch (e: Exception) {
+                        VpnLogger.error(TAG, "Failed to refresh notification", e)
+                    }
+                }, 500)
+
+                // Start heartbeat monitoring (backup detection)
                 startHeartbeatMonitoring()
 
             } catch (e: Exception) {
                 VpnLogger.error(TAG, "❌ VPN START FAILED", e)
                 Log.e(TAG, "❌ Failed to start VPN", e)
+
                 setVpnState(false)
+
+                mainHandler.post {
+                    // ✅ AJOUTE: Remove foreground notification
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+
+                    releaseWakeLock("vpn_start_error")
+                    synchronized(this@MyVpnService) { isStarting = false }
+                    stopSelf()
+                }
+
                 notifyFlutterVpnState("error", "Failed to start: ${e.message}")
-                releaseWakeLock("vpn_start_error")
-
-                // ✅ Clear starting flag on error
-                synchronized(this@MyVpnService) { isStarting = false }
-
-                stopSelf()
             }
         }.start()
     }
@@ -738,7 +782,6 @@ class MyVpnService : VpnService(), PlatformInterface {
         }.start()
     }
 
-    // ✅ ADD THIS NEW FUNCTION:
     private fun showSubscriptionExpiredNotification() {
         try {
             val notificationIntent = Intent(this, MainActivity::class.java).apply {
@@ -768,6 +811,40 @@ class MyVpnService : VpnService(), PlatformInterface {
             Log.d(TAG, "✅ Subscription expired notification shown")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to show subscription expired notification: ${e.message}")
+        }
+    }
+
+    private fun showAuthFailedNotification() {
+        try {
+            val notificationIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                putExtra("open_from_notification", true)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                notificationIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Login Required")
+                .setContentText("Your session has expired. Please login again.")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.notify(998, notification)  // Different ID from subscription (999)
+
+            Log.d(TAG, "✅ Auth failed notification shown")
+            VpnLogger.log(TAG, "✅ Auth failed notification shown")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show auth failed notification: ${e.message}")
+            VpnLogger.error(TAG, "Failed to show auth failed notification", e)
         }
     }
 
@@ -893,11 +970,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                 }
 
                 // ✅ FIXED: Send backend heartbeat with logging
-                try {
-                    sendBackendHeartbeat()
-                } catch (e: Exception) {
-                    Log.w(TAG, "⚠️ Backend heartbeat error: ${e.message}")
-                }
+                sendBackendHeartbeat()
 
                 // ✅ NEW: Check subscription every 30 heartbeats (5 minutes)
                 heartbeatCounter++
@@ -1103,95 +1176,38 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     }
 
-    private suspend fun sendBackendHeartbeat() {
-        withContext(Dispatchers.IO) {
+    private fun sendBackendHeartbeat() {
+        Thread {
             try {
-                val deviceId = getSecureValue("device_id") ?: return@withContext
-                val apiKey = getSecureValue("api_key") ?: return@withContext
+                val deviceId = getSecureValue("device_id") ?: return@Thread
+                val apiKey = getSecureValue("api_key") ?: return@Thread
 
-                // ⭐ NEW: Get underlying network (bypass VPN)
-                val underlyingNetwork = getUnderlyingNetwork()
-                if (underlyingNetwork == null) {
-                    Log.w(TAG, "⚠️ No underlying network - skipping heartbeat")
-                    return@withContext
-                }
-
+                // ⭐ Send through VPN tunnel (no network binding needed)
                 val url = URL("https://api.vulcainvpn.com/api/heartbeat/$deviceId")
-
-                // ⭐ NEW: Use underlying network (not VPN)
-                val connection = underlyingNetwork.openConnection(url) as HttpsURLConnection
+                val connection = url.openConnection() as HttpsURLConnection
 
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("X-Api-Key", apiKey)
-                connection.connectTimeout = 3000
-                connection.readTimeout = 3000
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
 
                 val responseCode = connection.responseCode
                 connection.disconnect()
 
                 when (responseCode) {
                     200 -> {
-                        Log.d(TAG, "💚 Backend heartbeat sent successfully (bypassed VPN)")
-                        VpnLogger.log(TAG, "💚 Backend heartbeat sent successfully")
-                    }
-                    403, 401, 404 -> {
-                        Log.e(TAG, "🚨 Backend heartbeat: HTTP $responseCode - Checking subscription status...")
-                        VpnLogger.log(TAG, "⚠️ Backend heartbeat failed: HTTP $responseCode")
-
-                        val subscriptionStatus = checkSubscriptionStatus()
-                        Log.e(TAG, "Subscription status: $subscriptionStatus")
-
-                        withContext(Dispatchers.Main) {
-                            if (!isServiceAlive.get() || deathEventSent) return@withContext
-
-                            when (subscriptionStatus) {
-                                "expired", "canceled" -> {
-                                    Log.e(TAG, "🔴 Subscription expired/canceled - disconnecting VPN")
-                                    acquireWakeLock("subscription_expired")
-                                    handleSubscriptionExpired()
-                                }
-                                "auth_failed" -> {
-                                    Log.e(TAG, "🔴 Device credentials invalid - disconnecting VPN")
-                                    acquireWakeLock("device_revoked")
-
-                                    isNormalStop = false
-                                    deathEventSent = true
-                                    stopHeartbeatMonitoring()
-
-                                    try {
-                                        boxService?.close()
-                                        boxService = null
-                                        fileDescriptor?.close()
-                                        fileDescriptor = null
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error closing VPN: ${e.message}")
-                                    }
-
-                                    setVpnState(false)
-                                    notifyFlutterVpnDeath("device_revoked", "Device credentials revoked - please login again")
-
-                                    Thread {
-                                        Thread.sleep(300)
-                                        releaseWakeLock("device_revoked_handled")
-                                        stopSelf()
-                                    }.start()
-                                }
-                                else -> {
-                                    Log.w(TAG, "⚠️ Could not verify subscription status ($subscriptionStatus) - continuing VPN")
-                                }
-                            }
-                        }
+                        Log.d(TAG, "✅ Backend heartbeat successful")
+                        VpnLogger.log(TAG, "✅ Backend heartbeat successful")
                     }
                     else -> {
                         Log.w(TAG, "⚠️ Backend heartbeat: HTTP $responseCode")
-                        VpnLogger.log(TAG, "⚠️ Backend heartbeat failed: HTTP $responseCode")
                     }
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "⚠️ Backend heartbeat error: ${e.message}")
-                VpnLogger.log(TAG, "⚠️ Backend heartbeat error: ${e.message}")
             }
-        }
+        }.start()
     }
 
     private suspend fun handleHeartbeatFailure() {
@@ -1313,6 +1329,9 @@ class MyVpnService : VpnService(), PlatformInterface {
             fileDescriptor = null
             boxService?.close()
             boxService = null
+
+            // Stop watchdog service
+            stopWatchdogService()
 
             setVpnState(false)
 
@@ -1874,7 +1893,7 @@ class MyVpnService : VpnService(), PlatformInterface {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -1886,6 +1905,9 @@ class MyVpnService : VpnService(), PlatformInterface {
                 stopPendingIntent
             )
             .setDeleteIntent(stopPendingIntent)
+            .setGroup("vpn_services")
+            .setGroupSummary(true)
+            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_SUMMARY)
             .build()
     }
 
@@ -1937,6 +1959,44 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Error during VPN cleanup", e)
+        }
+    }
+
+    // ✅ NEW: Start watchdog service in separate process
+    private fun startWatchdogService() {
+        try {
+            val intent = Intent(this, VpnWatchdogService::class.java).apply {
+                // ✅ AJOUTE: Passe le contenu de la notification actuelle
+                putExtra("notification_title", "Vulcain VPN")
+                putExtra("notification_text", "Connected")
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+
+            VpnLogger.log(TAG, "✅ Watchdog service started")
+            Log.d(TAG, "✅ VPN watchdog service started")
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to start watchdog", e)
+            Log.e(TAG, "Failed to start watchdog: ${e.message}")
+        }
+    }
+
+    private fun stopWatchdogService() {
+        try {
+            val intent = Intent(this, VpnWatchdogService::class.java)
+            stopService(intent)
+
+            VpnLogger.log(TAG, "✅ Watchdog service stopped")
+            Log.d(TAG, "✅ VPN watchdog service stopped")
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to stop watchdog", e)
+            Log.e(TAG, "Failed to stop watchdog: ${e.message}")
         }
     }
 }

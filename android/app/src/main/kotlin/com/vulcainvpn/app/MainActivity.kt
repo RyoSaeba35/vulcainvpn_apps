@@ -25,6 +25,8 @@ import androidx.security.crypto.MasterKey
 import android.os.PowerManager
 import android.net.Uri
 import android.provider.Settings
+import androidx.work.*
+import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
 
@@ -59,6 +61,7 @@ class MainActivity : FlutterActivity() {
         VpnLogger.init(this)
         VpnLogger.log(TAG, "🟢 MainActivity onCreate")
 
+        scheduleVpnHealthChecks()
         handleNotificationIntent(intent)
     }
 
@@ -193,6 +196,20 @@ class MainActivity : FlutterActivity() {
                             VpnLogger.log(TAG, "✅ Cleared old death events (main process)")
                         } catch (e: Exception) {
                             VpnLogger.error(TAG, "Failed to clear old death events", e)
+                        }
+
+                        // ✅ RESET AUTO-RECONNECT COUNTER ON MANUAL CONNECT
+                        try {
+                            val retryPrefs = getSharedPreferences("auto_reconnect_retry", Context.MODE_PRIVATE)
+                            retryPrefs.edit().apply {
+                                putInt("retry_count", 0)
+                                putInt("retry_batch", 1)
+                                putLong("last_retry_time", 0)
+                                apply()
+                            }
+                            VpnLogger.log(TAG, "✅ Reset auto-reconnect counter (manual connect)")
+                        } catch (e: Exception) {
+                            VpnLogger.error(TAG, "Failed to reset retry counter", e)
                         }
 
                         // ✅ STEP 1: Battery optimization check (MANDATORY)
@@ -720,9 +737,44 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    // ✅ NEW: Schedule periodic VPN health checks via WorkManager
+    private fun scheduleVpnHealthChecks() {
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.NOT_REQUIRED)  // Run even without network
+                .setRequiresBatteryNotLow(false)  // Run even on low battery
+                .setRequiresCharging(false)  // Run when not charging
+                .build()
+
+            val healthCheckRequest = PeriodicWorkRequestBuilder<VpnHealthCheckWorker>(
+                15, TimeUnit.MINUTES  // Every 15 minutes (minimum allowed)
+            )
+                .setConstraints(constraints)
+                .setBackoffCriteria(
+                    BackoffPolicy.LINEAR,
+                    1, TimeUnit.MINUTES
+                )
+                .build()
+
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "vpn_health_check",
+                ExistingPeriodicWorkPolicy.KEEP,  // Keep existing if already scheduled
+                healthCheckRequest
+            )
+
+            Log.d(TAG, "✅ WorkManager VPN health checks scheduled (every 15 min)")
+            VpnLogger.log(TAG, "✅ WorkManager VPN health checks scheduled")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to schedule WorkManager: ${e.message}")
+            VpnLogger.error(TAG, "Failed to schedule WorkManager", e)
+        }
+    }
+    
     override fun onDestroy() {
         super.onDestroy()
         VpnLogger.log(TAG, "🔴 MainActivity destroyed")
         setStatusSink(null)
     }
+
 }
