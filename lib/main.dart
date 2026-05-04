@@ -8,8 +8,9 @@ import 'l10n/app_localizations.dart';
 import 'screens/auth_gate.dart';
 import 'services/security_checker.dart';
 import 'services/vpn_service_android.dart';
-import 'services/notification_service.dart'; // ✅ NEW: Add this import
+import 'services/notification_service.dart';
 import 'services/windows_notification_service.dart';
+import 'services/macos_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();

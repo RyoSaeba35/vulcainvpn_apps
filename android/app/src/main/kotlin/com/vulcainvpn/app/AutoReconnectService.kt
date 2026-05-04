@@ -412,13 +412,14 @@ class AutoReconnectService : Service() {
                     if (isVpnRunning()) {
                         VpnLogger.log(TAG, "✅ Reconnected successfully! (batch $batch, attempt $attempt)")
                         success()
+                        return
                     }
 
                     // Check if failure was due to authentication
                     val vpnStatePrefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                     val deathReason = vpnStatePrefs.getString("death_reason", "")
 
-                    if (deathReason == "auth_required" || deathReason == "device_revoked") {
+                    if (deathReason == "auth_required" || deathReason == "device_revoked" || deathReason == "credentials_expired") {
                         VpnLogger.log(TAG, "⛔ Authentication failed - credentials expired/invalid")
 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {

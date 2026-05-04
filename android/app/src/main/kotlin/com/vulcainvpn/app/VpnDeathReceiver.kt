@@ -89,8 +89,10 @@ class VpnDeathReceiver : BroadcastReceiver() {
             "process_crashed" -> true
             "vpn_broken" -> true
             "network_lost" -> true  // ✅ FIXED: network_lost should trigger auto-reconnect!
+            "credentials_expired" -> true
             "permission_revoked" -> false
             "subscription_expired" -> false
+            "device_revoked" -> false
             else -> false
         }
 

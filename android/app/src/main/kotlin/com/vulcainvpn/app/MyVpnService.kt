@@ -782,6 +782,179 @@ class MyVpnService : VpnService(), PlatformInterface {
         }.start()
     }
 
+    // ✅ NEW: Handle 403 errors by verifying subscription status first
+    private fun handle403Errors() {
+        if (!isServiceAlive.get()) {
+            Log.w(TAG, "handle403Errors called on destroyed service")
+            isHandlingSubscriptionExpired.set(false)
+            return
+        }
+
+        if (!getVpnState()) {
+            Log.w(TAG, "Already disconnected, ignoring 403 errors")
+            isHandlingSubscriptionExpired.set(false)
+            return
+        }
+
+        Log.e(TAG, "🔍 Verifying subscription status via API (checking if 403 is subscription vs credentials)")
+        VpnLogger.critical(TAG, "🔍 Verifying subscription status after 403 errors")
+
+        // Check subscription status in background thread
+        Thread {
+            try {
+                val deviceId = getSecureValue("device_id")
+                val apiKey = getSecureValue("api_key")
+
+                if (deviceId == null || apiKey == null) {
+                    Log.e(TAG, "❌ No credentials - cannot verify subscription")
+                    mainHandler.post {
+                        // Treat as auth failure
+                        handleAuthenticationFailure("device_revoked", "Device credentials missing")
+                    }
+                    return@Thread
+                }
+
+                // Call API to check subscription
+                val subscriptionStatus = runBlocking {
+                    checkSubscription(deviceId, apiKey)
+                }
+
+                Log.d(TAG, "📋 Subscription API returned: $subscriptionStatus")
+
+                mainHandler.post {
+                    when (subscriptionStatus) {
+                        "expired", "canceled" -> {
+                            // API confirms subscription is expired - stop permanently
+                            Log.e(TAG, "✅ API CONFIRMED: Subscription expired")
+                            VpnLogger.critical(TAG, "✅ API CONFIRMED: Subscription actually expired")
+                            handleSubscriptionExpired()
+                        }
+                        "active" -> {
+                            // API says subscription is active but we're getting 403s
+                            // This means CREDENTIALS expired, not subscription
+                            Log.e(TAG, "🔑 CREDENTIALS EXPIRED: Subscription active but getting 403s")
+                            VpnLogger.critical(TAG, "🔑 CREDENTIALS EXPIRED: Need fresh credentials from /api/connect")
+                            handleCredentialsExpired()
+                        }
+                        "auth_failed" -> {
+                            // Device credentials are invalid
+                            Log.e(TAG, "🚫 DEVICE REVOKED: API returned auth_failed")
+                            VpnLogger.critical(TAG, "🚫 DEVICE REVOKED: Device no longer authorized")
+                            handleAuthenticationFailure("device_revoked", "Device credentials revoked")
+                        }
+                        else -> {
+                            // API check failed or returned unknown - treat as network issue
+                            Log.w(TAG, "⚠️ API check inconclusive ($subscriptionStatus) - treating as credentials issue")
+                            VpnLogger.log(TAG, "⚠️ API check inconclusive - assuming credentials expired")
+                            handleCredentialsExpired()
+                        }
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "API verification failed: ${e.message}")
+                VpnLogger.error(TAG, "API verification error", e)
+
+                mainHandler.post {
+                    // If we can't verify, assume credentials expired (safer to reconnect than stop)
+                    Log.w(TAG, "⚠️ Cannot verify subscription - assuming credentials expired")
+                    handleCredentialsExpired()
+                }
+            }
+        }.start()
+    }
+
+    // ✅ NEW: Handle credentials expiry (reconnectable)
+    private fun handleCredentialsExpired() {
+        if (!isServiceAlive.get()) {
+            Log.w(TAG, "handleCredentialsExpired called on destroyed service")
+            isHandlingSubscriptionExpired.set(false)
+            return
+        }
+
+        Log.e(TAG, "🔑 Stopping VPN - Credentials expired (will reconnect with fresh credentials)")
+        VpnLogger.critical(TAG, "💀 VPN DIED: Credentials expired (reconnectable)")
+
+        isNormalStop = false
+        deathEventSent = true
+
+        stopHeartbeatMonitoring()
+
+        serviceScope.launch {
+            cleanupVpn("credentials_expired")
+
+            withContext(Dispatchers.Main) {
+                setVpnState(false)
+
+                // ✅ Send credentials_expired death event (AutoReconnectService WILL reconnect)
+                notifyFlutterVpnDeath("credentials_expired", "VPN credentials expired - reconnecting with fresh credentials")
+
+                auth403Count.set(0)
+
+                Thread {
+                    try {
+                        notifyBackendDisconnect()
+                        Log.d(TAG, "✅ Backend notified of credentials expiry")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to notify backend: ${e.message}")
+                    }
+
+                    Thread.sleep(300)
+                    isHandlingSubscriptionExpired.set(false)
+                    releaseWakeLock("credentials_expired")
+                    stopSelf()
+                }.start()
+            }
+        }
+    }
+
+    // ✅ NEW: Handle authentication failure (device revoked, etc.)
+    private fun handleAuthenticationFailure(reason: String, message: String) {
+        if (!isServiceAlive.get()) {
+            Log.w(TAG, "handleAuthenticationFailure called on destroyed service")
+            isHandlingSubscriptionExpired.set(false)
+            return
+        }
+
+        Log.e(TAG, "🚫 Stopping VPN - Authentication failure: $reason")
+        VpnLogger.critical(TAG, "💀 VPN DIED: $reason")
+
+        isNormalStop = false
+        deathEventSent = true
+
+        stopHeartbeatMonitoring()
+
+        serviceScope.launch {
+            cleanupVpn(reason)
+
+            withContext(Dispatchers.Main) {
+                setVpnState(false)
+
+                // Show notification
+                showAuthFailedNotification()
+
+                // Send death event (non-reconnectable)
+                notifyFlutterVpnDeath(reason, message)
+
+                auth403Count.set(0)
+
+                Thread {
+                    try {
+                        notifyBackendDisconnect()
+                        Log.d(TAG, "✅ Backend notified of $reason")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to notify backend: ${e.message}")
+                    }
+
+                    Thread.sleep(300)
+                    isHandlingSubscriptionExpired.set(false)
+                    releaseWakeLock(reason)
+                    stopSelf()
+                }.start()
+            }
+        }
+    }
+
     private fun showSubscriptionExpiredNotification() {
         try {
             val notificationIntent = Intent(this, MainActivity::class.java).apply {
@@ -1585,13 +1758,13 @@ class MyVpnService : VpnService(), PlatformInterface {
 
                 // Check threshold
                 if (currentCount >= AUTH_403_THRESHOLD) {
-                    Log.e(TAG, "🔴 SUBSCRIPTION EXPIRED - $currentCount consecutive 403 errors in ${AUTH_403_WINDOW_MS/1000}s")
+                    Log.e(TAG, "🔴 SUBSCRIPTION FAILED - $currentCount consecutive 403 errors in ${AUTH_403_WINDOW_MS/1000}s")
                     VpnLogger.critical(TAG, "🔴 SUBSCRIPTION EXPIRED - $currentCount consecutive 403 errors in ${AUTH_403_WINDOW_MS/1000}s")
 
                     // ⭐ Prevent duplicate calls to handleSubscriptionExpired
                     if (isHandlingSubscriptionExpired.compareAndSet(false, true)) {
                         mainHandler.post {
-                            handleSubscriptionExpired()
+                            handle403Errors()
                         }
                     } else {
                         Log.w(TAG, "⚠️ Already handling subscription expiry - ignoring duplicate")
