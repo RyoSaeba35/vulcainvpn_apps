@@ -3,7 +3,7 @@ name: Build macOS
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   build-macos:
@@ -22,6 +22,10 @@ jobs:
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
+      # win_toast is Windows-only and fails to compile on macOS runner
+      - name: Remove win_toast from pubspec
+        run: sed -i '' 's/.*win_toast.*//' pubspec.yaml
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -29,9 +33,34 @@ jobs:
         run: |
           cd macos
           pod install
-        
+
       - name: Build macOS app
         run: flutter build macos --release
+
+      # Copy sing-box binaries directly into the built .app bundle
+      # The app looks for them at: YourApp.app/Contents/Resources/
+      - name: Bundle sing-box binaries into app
+        run: |
+          SING_BOX_VERSION="1.13.11"
+          APP_RESOURCES="build/macos/Build/Products/Release/vulcain_vpn.app/Contents/Resources"
+          mkdir -p "$APP_RESOURCES"
+
+          echo "→ Downloading Intel (amd64)..."
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz" \
+            -o /tmp/sing-box-amd64.tar.gz
+          tar -xzf /tmp/sing-box-amd64.tar.gz -C /tmp
+          cp "/tmp/sing-box-${SING_BOX_VERSION}-darwin-amd64/sing-box" "$APP_RESOURCES/sing-box-amd64"
+          chmod +x "$APP_RESOURCES/sing-box-amd64"
+
+          echo "→ Downloading Apple Silicon (arm64)..."
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz" \
+            -o /tmp/sing-box-arm64.tar.gz
+          tar -xzf /tmp/sing-box-arm64.tar.gz -C /tmp
+          cp "/tmp/sing-box-${SING_BOX_VERSION}-darwin-arm64/sing-box" "$APP_RESOURCES/sing-box-arm64"
+          chmod +x "$APP_RESOURCES/sing-box-arm64"
+
+          echo "✅ Binaries bundled:"
+          ls -lh "$APP_RESOURCES/sing-box-*"
 
       - name: Compress app bundle
         run: |

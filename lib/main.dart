@@ -53,6 +53,20 @@ void main() async {
     });
   }
 
+  // Window manager setup (macOS only)
+  if (Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+    await MacosNotificationService.initialize();
+    const windowOptions = WindowOptions(
+      skipTaskbar: false,
+      title: 'Vulcain VPN',
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
   // Start app normally (or with warning)
   runApp(MyApp(
     showSecurityWarning: securityAction == SecurityAction.warn,
