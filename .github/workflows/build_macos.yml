@@ -22,29 +22,29 @@ jobs:
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
 
-      # win_toast is Windows-only and fails to compile on macOS
       - name: Remove win_toast from pubspec
-        run: sed -i '' 's/.*win_toast.*//' pubspec.yaml
+        run: |
+          sed -i '' 's/.*win_toast.*//' pubspec.yaml
 
-      # Relax SDK constraint so it works with the runner's cached Flutter
       - name: Relax SDK constraint in pubspec
-        run: sed -i '' 's/sdk: \^3\.10\.4/sdk: ">=3.5.0 <4.0.0"/' pubspec.yaml
+        run: |
+          sed -i '' "s/sdk: \^3\.10\.4/sdk: '>=3.5.0 <4.0.0'/" pubspec.yaml
 
-      # Replace windows_notification_service.dart with a no-op stub
-      # The real file imports win_toast which won't compile on macOS
       - name: Stub out WindowsNotificationService for macOS build
         run: |
-          cat > lib/services/windows_notification_service.dart << 'EOF'
-          // Stub for macOS build — real implementation is Windows-only
+          python3 -c "
+          content = '''// Stub for macOS build
           class WindowsNotificationService {
             static Future<void> initialize() async {}
             static Future<void> showToast({required String title, required String message, bool isError = false}) async {}
             static Future<void> focusWindow() async {}
             static Future<void> showCriticalAlert({required String title, required String message}) async {}
           }
-          EOF
+          '''
+          with open('lib/services/windows_notification_service.dart', 'w') as f:
+              f.write(content)
+          "
 
-      # Add missing MacosNotificationService import to main.dart
       - name: Add MacosNotificationService import to main.dart
         run: |
           sed -i '' "s|import 'services/windows_notification_service.dart';|import 'services/windows_notification_service.dart';\nimport 'services/macos_notification_service.dart';|" lib/main.dart
@@ -60,8 +60,6 @@ jobs:
       - name: Build macOS app
         run: flutter build macos --release
 
-      # Copy sing-box binaries directly into the built .app bundle
-      # The app looks for them at: YourApp.app/Contents/Resources/
       - name: Bundle sing-box binaries into app
         run: |
           SING_BOX_VERSION="1.13.11"
@@ -70,21 +68,19 @@ jobs:
           APP_RESOURCES="build/macos/Build/Products/Release/${APP_NAME}/Contents/Resources"
           mkdir -p "$APP_RESOURCES"
 
-          echo "→ Downloading Intel (amd64)..."
-          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz" \
-            -o /tmp/sing-box-amd64.tar.gz
+          echo "Downloading Intel (amd64)..."
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz" -o /tmp/sing-box-amd64.tar.gz
           tar -xzf /tmp/sing-box-amd64.tar.gz -C /tmp
           cp "/tmp/sing-box-${SING_BOX_VERSION}-darwin-amd64/sing-box" "$APP_RESOURCES/sing-box-amd64"
           chmod +x "$APP_RESOURCES/sing-box-amd64"
 
-          echo "→ Downloading Apple Silicon (arm64)..."
-          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz" \
-            -o /tmp/sing-box-arm64.tar.gz
+          echo "Downloading Apple Silicon (arm64)..."
+          curl -L "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz" -o /tmp/sing-box-arm64.tar.gz
           tar -xzf /tmp/sing-box-arm64.tar.gz -C /tmp
           cp "/tmp/sing-box-${SING_BOX_VERSION}-darwin-arm64/sing-box" "$APP_RESOURCES/sing-box-arm64"
           chmod +x "$APP_RESOURCES/sing-box-arm64"
 
-          echo "✅ Binaries bundled:"
+          echo "Binaries bundled:"
           ls -lh "$APP_RESOURCES/"
 
       - name: Compress app bundle
