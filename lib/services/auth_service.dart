@@ -29,6 +29,9 @@ class AuthService {
     iOptions: IOSOptions(
       accessibility: KeychainAccessibility.first_unlock,  // ✅ FIX #15: Better security
     ),
+    mOptions: MacOsOptions(
+      useDataProtectionKeyChain: false,  // fallback to less secure but functional storage
+    ),
   );
 
   // Login — stores both access and refresh tokens

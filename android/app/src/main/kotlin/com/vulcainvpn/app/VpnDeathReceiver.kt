@@ -219,7 +219,7 @@ class VpnDeathReceiver : BroadcastReceiver() {
             }
                 .setContentTitle(title)
                 .setContentText("Tap to reconnect")
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .build()

@@ -103,14 +103,19 @@ class AutoReconnectService : Service() {
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
+                stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
                 @Suppress("DEPRECATION")
-                stopForeground(false)
+                stopForeground(true)
             }
 
-            showDisconnectNotification(title, message)
-            stopSelf()
+            stopWatchdogService()
+
+            serviceScope.launch {
+                cleanupVpn()
+                showDisconnectNotification(title, message)
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
 
@@ -137,16 +142,18 @@ class AutoReconnectService : Service() {
             VpnLogger.log(TAG, "⛔ All retry batches exhausted - giving up permanently")
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
+                stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
                 @Suppress("DEPRECATION")
-                stopForeground(false)
+                stopForeground(true)
             }
 
             showDisconnectNotification(
                 "VPN Disconnected",
                 "Unable to reconnect - Please reconnect manually"
             )
+
+            stopWatchdogService()
 
             // Reset for next time user manually reconnects
             retryPrefs.edit()
@@ -155,7 +162,14 @@ class AutoReconnectService : Service() {
                 .putLong(KEY_LAST_RETRY_TIME, 0)
                 .apply()
 
-            stopSelf()
+            serviceScope.launch {
+                cleanupVpn()
+                showDisconnectNotification(
+                    "VPN Disconnected",
+                    "Unable to reconnect - Please reconnect manually"
+                )
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
 
@@ -219,10 +233,10 @@ class AutoReconnectService : Service() {
                 VpnLogger.log(TAG, "⛔ All batches complete - giving up")
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_DETACH)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                 } else {
                     @Suppress("DEPRECATION")
-                    stopForeground(false)
+                    stopForeground(true)
                 }
 
                 showDisconnectNotification(
@@ -309,11 +323,15 @@ class AutoReconnectService : Service() {
                 VpnLogger.log(TAG, "✈️ Airplane mode detected - stopping VPN")
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_DETACH)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
                 } else {
                     @Suppress("DEPRECATION")
-                    stopForeground(false)
+                    stopForeground(true)
                 }
+
+                stopWatchdogService()
+
+                cleanupVpn()
 
                 showDisconnectNotification("VPN Disconnected", "Airplane mode enabled")
                 resetRetryState()
@@ -340,10 +358,10 @@ class AutoReconnectService : Service() {
                     VpnLogger.log(TAG, "✈️ Airplane mode enabled during reconnect")
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        stopForeground(STOP_FOREGROUND_DETACH)
+                        stopForeground(STOP_FOREGROUND_REMOVE)
                     } else {
                         @Suppress("DEPRECATION")
-                        stopForeground(false)
+                        stopForeground(true)
                     }
 
                     showDisconnectNotification("VPN Disconnected", "Airplane mode enabled")
@@ -362,11 +380,15 @@ class AutoReconnectService : Service() {
                             VpnLogger.log(TAG, "⛔ Subscription expired during reconnect - stopping")
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                stopForeground(STOP_FOREGROUND_DETACH)
+                                stopForeground(STOP_FOREGROUND_REMOVE)
                             } else {
                                 @Suppress("DEPRECATION")
-                                stopForeground(false)
+                                stopForeground(true)
                             }
+
+                            stopWatchdogService()
+
+                            cleanupVpn()
 
                             showDisconnectNotification("VPN Disconnected", "Subscription expired")
                             resetRetryState()
@@ -377,11 +399,15 @@ class AutoReconnectService : Service() {
                             VpnLogger.log(TAG, "⛔ Auth failed during reconnect - stopping")
 
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                stopForeground(STOP_FOREGROUND_DETACH)
+                                stopForeground(STOP_FOREGROUND_REMOVE)
                             } else {
                                 @Suppress("DEPRECATION")
-                                stopForeground(false)
+                                stopForeground(true)
                             }
+
+                            stopWatchdogService()
+
+                            cleanupVpn()
 
                             showDisconnectNotification("VPN Disconnected", "Authentication failed - Please login again")
                             resetRetryState()
@@ -423,11 +449,15 @@ class AutoReconnectService : Service() {
                         VpnLogger.log(TAG, "⛔ Authentication failed - credentials expired/invalid")
 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            stopForeground(STOP_FOREGROUND_DETACH)
+                            stopForeground(STOP_FOREGROUND_REMOVE)
                         } else {
                             @Suppress("DEPRECATION")
-                            stopForeground(false)
+                            stopForeground(true)
                         }
+
+                        stopWatchdogService()
+
+                        cleanupVpn()
 
                         showDisconnectNotification("VPN Disconnected", "Please reconnect manually to refresh credentials")
                         resetRetryState()
@@ -445,10 +475,10 @@ class AutoReconnectService : Service() {
             VpnLogger.log(TAG, "⏱️ 1 minute passed for batch $batch, attempt $attempt")
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_DETACH)
+                stopForeground(STOP_FOREGROUND_REMOVE)
             } else {
                 @Suppress("DEPRECATION")
-                stopForeground(false)
+                stopForeground(true)
             }
 
             // Check if we should continue
@@ -459,6 +489,11 @@ class AutoReconnectService : Service() {
             if (currentCount >= MAX_RETRIES_PER_BATCH && currentBatch >= MAX_BATCHES) {
                 // All attempts exhausted - give up permanently
                 VpnLogger.log(TAG, "⛔ All batches exhausted - stopping permanently")
+
+                stopWatchdogService()
+
+                cleanupVpn()
+
                 showDisconnectNotification(
                     "VPN Disconnected",
                     "Unable to reconnect - Please reconnect manually"
@@ -615,10 +650,11 @@ class AutoReconnectService : Service() {
     private fun showDisconnectNotification(title: String, message: String) {
         try {
             VpnLogger.log(TAG, "📢 Showing disconnect notification: $title - $message")
-            Log.d(TAG, "📢 Showing disconnect notification: $title - $message")
 
+            // ✅ Make the intent open the app and trigger reconnection
             val intent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("auto_reconnect_requested", true)  // ✅ Signal to Flutter to reconnect
             }
             val pendingIntent = PendingIntent.getActivity(
                 this, 0, intent,
@@ -628,21 +664,20 @@ class AutoReconnectService : Service() {
             val notification = NotificationCompat.Builder(this, DISCONNECT_CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(message)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setOngoing(false)  // ✅ Not ongoing - user can dismiss
                 .build()
 
             val nm = getSystemService(NotificationManager::class.java)
             nm.notify(1001, notification)
 
             VpnLogger.log(TAG, "✅ Disconnect notification posted (ID: 1001)")
-            Log.d(TAG, "✅ Disconnect notification posted successfully")
         } catch (e: Exception) {
             VpnLogger.error(TAG, "❌ Failed to show notification", e)
-            Log.e(TAG, "❌ Failed to show notification: ${e.message}", e)
         }
     }
 
@@ -750,7 +785,7 @@ class AutoReconnectService : Service() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("VPN Disconnected")
             .setContentText("$message - Tap to reconnect")
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -808,6 +843,18 @@ class AutoReconnectService : Service() {
             VpnLogger.log(TAG, "✅ Cleanup complete")
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Cleanup error", e)
+        }
+    }
+
+    private fun stopWatchdogService() {
+        try {
+            val intent = Intent(this, VpnWatchdogService::class.java)
+            stopService(intent)
+            VpnLogger.log(TAG, "✅ VPN watchdog service stopped")
+            Log.d(TAG, "✅ VPN watchdog service stopped")
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to stop watchdog", e)
+            Log.e(TAG, "Failed to stop watchdog: ${e.message}")
         }
     }
 
