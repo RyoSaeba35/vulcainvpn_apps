@@ -2,8 +2,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
-import 'dart:async';  // ✅ FIX #10: For timeout handling
-import 'dart:math';  // ✅ FIX #7: For cryptographically secure random
+import 'dart:async';
+import 'dart:math';
 import 'package:device_info_plus/device_info_plus.dart';
 
 class AuthService {
@@ -13,76 +13,137 @@ class AuthService {
   static const String _apiKeyKey = 'api_key';
   static const String _deviceIdKey = 'device_id';
   static const String _emailKey = 'user_email';
-  static const String _tokenExpiryKey = 'token_expiry';  // ✅ FIX #10: Track token expiry
+  static const String _tokenExpiryKey = 'token_expiry';
 
-  // ✅ FIX #10: Timeout configuration (matching Fix #9)
   static const Duration _authTimeout = Duration(seconds: 15);
+
+  // ✅ Migration tracking flag (in-memory, resets each app session)
+  static bool _hasCheckedMigration = false;
 
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
-      resetOnError: true,  // ✅ FIX #15: Clear on corruption
+      resetOnError: true,
     ),
     wOptions: WindowsOptions(
       useBackwardCompatibility: true,
     ),
     iOptions: IOSOptions(
-      accessibility: KeychainAccessibility.first_unlock,  // ✅ FIX #15: Better security
+      accessibility: KeychainAccessibility.first_unlock,
     ),
     mOptions: MacOsOptions(
-      useDataProtectionKeyChain: false,  // fallback to less secure but functional storage
+      useDataProtectionKeyChain: false,
     ),
   );
 
+  // ✅ NEW: Initialize and migrate old device IDs
+  /// Call this once at app startup in main.dart:
+  /// ```dart
+  /// void main() async {
+  ///   WidgetsFlutterBinding.ensureInitialized();
+  ///   await AuthService.initialize();
+  ///   runApp(MyApp());
+  /// }
+  /// ```
+  static Future<void> initialize() async {
+    final loggedIn = await isLoggedIn();
+    if (loggedIn) {
+      await _migrateOldDeviceId();
+    }
+  }
+
+  // ✅ NEW: Migrate old device_id to email-scoped storage
+  static Future<void> _migrateOldDeviceId() async {
+    // Skip if we already checked this session
+    if (_hasCheckedMigration) return;
+    _hasCheckedMigration = true;
+
+    try {
+      final email = await getStoredEmail();
+      if (email == null) return;
+
+      final emailKey = '${_deviceIdKey}_$email';
+      final emailScoped = await _storage.read(key: emailKey);
+
+      // Already migrated - nothing to do
+      if (emailScoped != null && emailScoped.isNotEmpty) {
+        return;
+      }
+
+      // Check if old generic device_id exists
+      final oldDeviceId = await _storage.read(key: _deviceIdKey);
+      if (oldDeviceId != null && oldDeviceId.isNotEmpty) {
+        print('🔄 Migrating old device_id to email-scoped storage...');
+        print('   Old key: $_deviceIdKey');
+        print('   New key: $emailKey');
+        print('   device_id: $oldDeviceId');
+
+        // Copy to email-scoped key
+        await _storage.write(key: emailKey, value: oldDeviceId);
+
+        print('✅ Migration complete!');
+      }
+    } catch (e) {
+      print('⚠️ Migration failed (non-critical): $e');
+    }
+  }
+
   // Login — stores both access and refresh tokens
   static Future<bool> login(String email, String password) async {
-    // ✅ FIX #14: Validate inputs before sending
+    // Validate inputs before sending
     if (email.isEmpty || password.isEmpty) {
       print('❌ Empty credentials');
       return false;
     }
 
-    // ✅ FIX #14: Basic email validation
+    // Basic email validation
     final emailRegex = RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$');
     if (!emailRegex.hasMatch(email)) {
       print('❌ Invalid email format');
       return false;
     }
 
-    // ✅ FIX #14: Password length check
+    // Password length check
     if (password.length < 6) {
       print('❌ Password too short (minimum 6 characters)');
       return false;
     }
 
-    // ✅ FIX #14: Sanitize email (remove whitespace, lowercase)
+    // Sanitize email (remove whitespace, lowercase)
     final sanitizedEmail = email.trim().toLowerCase();
 
     try {
       // Step 1 — Login and get tokens
-      // ✅ FIX #10: Add timeout to auth requests
+      print('🔐 Logging in as $sanitizedEmail...');
+
       final response = await http.post(
         Uri.parse('$_baseUrl/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'email': sanitizedEmail,  // ✅ FIX #14: Use sanitized email
+          'email': sanitizedEmail,
           'password': password,
         }),
       ).timeout(_authTimeout);
 
-      if (response.statusCode != 200) return false;
+      if (response.statusCode != 200) {
+        print('❌ Login failed: ${response.statusCode}');
+        return false;
+      }
 
       final data = json.decode(response.body);
+
+      print('✅ Login successful');
 
       // Store both tokens
       await _storage.write(key: _accessTokenKey, value: data['access_token']);
       await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
       await saveEmail(data['user']['email']);
 
-      // ✅ FIX #10: Store token expiry time for better tracking
+      // Store token expiry time for better tracking
       await _storeTokenExpiry(data['access_token']);
 
       // Step 2 — Generate unique device ID
+      print('📱 Generating device credentials...');
       final deviceId = await _getDeviceId();
       final platform = Platform.isAndroid ? 'android' :
                        Platform.isIOS ? 'ios' :
@@ -90,8 +151,14 @@ class AuthService {
                        Platform.isMacOS ? 'macos' : 'linux';
       final deviceName = await _getDeviceName();
 
+      print('📱 Device info:');
+      print('   device_id: $deviceId');
+      print('   platform: $platform');
+      print('   name: $deviceName');
+
       // Step 3 — Register device and store api_key
-      // ✅ FIX #10: Add timeout to device registration
+      print('📱 Registering device with backend...');
+
       final registerResponse = await http.post(
         Uri.parse('$_baseUrl/devices/register'),
         headers: {
@@ -105,28 +172,47 @@ class AuthService {
         }),
       ).timeout(_authTimeout);
 
-      if (registerResponse.statusCode == 200 ||
-          registerResponse.statusCode == 201) {
-        final registerData = json.decode(registerResponse.body);
-        await saveApiKey(registerData['api_key']);
-        await saveDeviceId(deviceId);
-      }
+      print('📱 Registration response: ${registerResponse.statusCode}');
 
-      return true;
+      if (registerResponse.statusCode == 200 || registerResponse.statusCode == 201) {
+        final registerData = json.decode(registerResponse.body);
+
+        print('🔑 Registration successful!');
+        print('   api_key: ${registerData['api_key']}');
+        print('   returned device_id: ${registerData['device_id']}');
+
+        await saveApiKey(registerData['api_key']);
+
+        // Verify credentials were saved
+        final savedApiKey = await getApiKey();
+        final savedDeviceId = await getDeviceId();
+
+        print('✅ Credentials saved to storage:');
+        print('   saved api_key: ${savedApiKey?.substring(0, 16)}...');
+        print('   saved device_id: $savedDeviceId');
+
+        return true;
+      } else {
+        print('❌ Device registration FAILED: ${registerResponse.statusCode}');
+        print('   Response body: ${registerResponse.body}');
+
+        // Login succeeded but device registration failed
+        // User will see "device not registered" when trying to connect
+        return true;
+      }
     } catch (e) {
-      print('Login error: $e');
+      print('❌ Login error: $e');
       return false;
     }
   }
 
   // Refresh the access token
-  // ✅ FIX #10: Enhanced with timeout and retry logic
   static Future<bool> refreshAccessToken() async {
     try {
       final refreshToken = await _storage.read(key: _refreshTokenKey);
       if (refreshToken == null) return false;
 
-      // ✅ FIX #10: Retry token refresh once on failure (network resilience)
+      // Retry token refresh once on failure (network resilience)
       for (int attempt = 1; attempt <= 2; attempt++) {
         try {
           final response = await http.post(
@@ -142,7 +228,7 @@ class AuthService {
             await _storage.write(key: _accessTokenKey, value: data['access_token']);
             await _storage.write(key: _refreshTokenKey, value: data['refresh_token']);
 
-            // ✅ FIX #10: Store new token expiry
+            // Store new token expiry
             await _storeTokenExpiry(data['access_token']);
 
             print('✅ Token refreshed successfully${attempt > 1 ? " (retry $attempt)" : ""}');
@@ -221,7 +307,7 @@ class AuthService {
     }
   }
 
-  // ✅ FIX #10: Store token expiry timestamp for better tracking
+  // Store token expiry timestamp for better tracking
   static Future<void> _storeTokenExpiry(String token) async {
     try {
       final parts = token.split('.');
@@ -248,7 +334,6 @@ class AuthService {
     try {
       final token = await _storage.read(key: _accessTokenKey);
       if (token != null) {
-        // ✅ FIX #10: Add timeout to logout request
         await http.delete(
           Uri.parse('$_baseUrl/logout'),
           headers: {'Authorization': 'Bearer $token'},
@@ -256,15 +341,10 @@ class AuthService {
       }
     } catch (e) {
       print('Logout API call failed: $e');
-      // ✅ FIX #10: Always clear local storage even if backend call fails
     }
 
-    // ✅ FIX #13: Comprehensive session cleanup
+    // Comprehensive session cleanup
     await _storage.deleteAll();
-
-    // ✅ FIX #13: Note - ApiService.clearRateLimitCache() should also be called
-    // This should be done at the app layer to avoid circular dependencies
-    // Example: await AuthService.logout(); ApiService.clearRateLimitCache();
   }
 
   // DEPRECATED: Use getValidAccessToken() instead
@@ -288,14 +368,39 @@ class AuthService {
     return await _storage.read(key: _apiKeyKey);
   }
 
-  // Store device_id
-  static Future<void> saveDeviceId(String deviceId) async {
-    await _storage.write(key: _deviceIdKey, value: deviceId);
-  }
-
-  // Get stored device_id
+  // ✅ UPDATED: Get stored device_id with lazy migration fallback
   static Future<String?> getDeviceId() async {
-    return await _storage.read(key: _deviceIdKey);
+    final email = await getStoredEmail();
+    if (email == null) {
+      print('⚠️ Cannot get device ID - user not logged in');
+      return null;
+    }
+
+    final emailKey = '${_deviceIdKey}_$email';
+    final deviceId = await _storage.read(key: emailKey);
+
+    // Found in email-scoped key
+    if (deviceId != null && deviceId.isNotEmpty) {
+      return deviceId;
+    }
+
+    // ✅ LAZY MIGRATION: Check old generic key as fallback
+    print('⚠️ Device ID not found in email-scoped storage, checking old location...');
+    final oldDeviceId = await _storage.read(key: _deviceIdKey);
+
+    if (oldDeviceId != null && oldDeviceId.isNotEmpty) {
+      print('🔄 Found old device_id, migrating now...');
+      print('   Migrating: $oldDeviceId');
+
+      // Migrate to email-scoped key
+      await _storage.write(key: emailKey, value: oldDeviceId);
+
+      print('✅ Migration complete!');
+      return oldDeviceId;
+    }
+
+    print('⚠️ Device ID not found for $email');
+    return null;
   }
 
   // Save email on login
@@ -311,37 +416,38 @@ class AuthService {
   // ─── Private helpers ───────────────────────────────────────────────────────
 
   static Future<String> _getDeviceId() async {
-    // Reuse stored device ID if available
-    final stored = await _storage.read(key: _deviceIdKey);
-    if (stored != null) return stored;
-
-    try {
-      final deviceInfo = DeviceInfoPlugin();
-      String id;
-
-      if (Platform.isAndroid) {
-        final info = await deviceInfo.androidInfo;
-        id = info.id;
-      } else if (Platform.isIOS) {
-        final info = await deviceInfo.iosInfo;
-        id = info.identifierForVendor ?? _generateFallbackId();
-      } else if (Platform.isWindows) {
-        final info = await deviceInfo.windowsInfo;
-        id = info.deviceId;
-      } else if (Platform.isMacOS) {
-        final info = await deviceInfo.macOsInfo;
-        id = info.systemGUID ?? _generateFallbackId();
-      } else {
-        id = _generateFallbackId();
-      }
-
-      return id;
-    } catch (e) {
+    // Get current user email
+    final email = await getStoredEmail();
+    if (email == null) {
       return _generateFallbackId();
     }
+
+    // Generate device_id specific to this email
+    final emailKey = '${_deviceIdKey}_$email';
+
+    final stored = await _storage.read(key: emailKey);
+    if (stored != null && stored.isNotEmpty) {
+      print('📱 Using stored device UUID for $email: $stored');
+
+      // ✅ ALSO save to generic key for MyVpnService compatibility
+      await _storage.write(key: _deviceIdKey, value: stored);
+
+      return stored;
+    }
+
+    // Generate new UUID for this email
+    print('📱 Generating new device UUID for $email...');
+    final newId = _generateFallbackId();
+
+    // ✅ Save to BOTH keys
+    await _storage.write(key: emailKey, value: newId);
+    await _storage.write(key: _deviceIdKey, value: newId);
+
+    print('📱 ✅ Generated device UUID for $email: $newId');
+    return newId;
   }
 
-  /// ✅ FIX #7: Generate cryptographically secure device ID
+  /// Generate cryptographically secure device ID
   ///
   /// Uses UUID v4 format with Random.secure() for unpredictable IDs
   /// Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx

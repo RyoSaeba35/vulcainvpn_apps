@@ -686,6 +686,12 @@ class WindowsVpnService extends VpnService {
         throw Exception(errorData['message'] ?? 'Maximum active devices reached');
       }
 
+      if (response.statusCode == 503) {
+        await _log('Service Unavailable - Technical issue (503)');
+        final errorData = json.decode(response.body);
+        throw Exception('TECHNICAL_ISSUE|${errorData['message'] ?? 'We\'re experiencing technical difficulties. Please try again shortly.'}');
+      }
+
       if (response.statusCode != 200) {
         await _log('Failed to get credentials: ${response.statusCode}');
         try {

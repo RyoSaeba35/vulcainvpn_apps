@@ -482,43 +482,157 @@ class MyVpnService : VpnService(), PlatformInterface {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            "STOP_VPN" -> {
-                isNormalStop = true
-                stopVpnService()
-                return START_NOT_STICKY
+        try {
+            // ⭐ STEP 1: Start foreground IMMEDIATELY (before ANY other code)
+            val notification = createNotification("Vulcain VPN", "Connecting...")
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
             }
-            else -> {
-                if (!areNotificationsEnabled()) {
-                    Log.e(TAG, "Notifications are disabled!")
-                    stopSelf()
+
+            VpnLogger.log(TAG, "✅ Started foreground immediately")
+
+            // ⭐ STEP 2: Handle STOP action
+            when (intent?.action) {
+                "STOP_VPN" -> {
+                    VpnLogger.log(TAG, "🛑 STOP_VPN action received")
+                    isNormalStop = true
+                    stopVpnService()
                     return START_NOT_STICKY
                 }
+            }
 
-                val notification = createNotification("Vulcain VPN", "Connecting...")
+            // ⭐ STEP 3: Check notifications (AFTER startForeground)
+            if (!areNotificationsEnabled()) {
+                VpnLogger.log(TAG, "⚠️ Notifications disabled - showing error")
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
-                    startForeground(
-                        NOTIFICATION_ID,
-                        notification,
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                    )
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
+                // Show a system dialog or toast since we can't show notification
+                try {
+                    val errorIntent = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        putExtra("error", "notifications_disabled")
+                    }
+                    startActivity(errorIntent)
+                } catch (e: Exception) {
+                    VpnLogger.error(TAG, "Failed to show error", e)
                 }
 
-                Log.d(TAG, "✅ Started foreground immediately")
+                // Stop service gracefully (already called startForeground, so safe)
+                stopSelf()
+                return START_NOT_STICKY
+            }
 
-                intent?.getStringExtra("VPN_CONFIG")?.let { config ->
-                    cachedConfig = config
-                }
+            // ⭐ STEP 4: Cache config/token
+            intent?.getStringExtra("VPN_CONFIG")?.let { config ->
+                cachedConfig = config
+                VpnLogger.log(TAG, "✅ Config cached (${config.length} chars)")
+            }
 
-                intent?.getStringExtra("ACCESS_TOKEN")?.let { token ->
-                    cachedAccessToken = token
-                }
+            intent?.getStringExtra("ACCESS_TOKEN")?.let { token ->
+                cachedAccessToken = token
+                VpnLogger.log(TAG, "✅ Access token cached")
+            }
 
-                if (!getVpnState()) startVpnService()
-                return START_STICKY
+            // ⭐ STEP 5: DEFENSIVE - Detect stale state
+            val vpnPrefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+            val storedVpnRunning = vpnPrefs.getBoolean("vpn_running", false)
+            val actuallyRunning = isVpnActive() // Check actual VPN state
+
+            if (storedVpnRunning && !actuallyRunning) {
+                VpnLogger.log(TAG, "⚠️ STALE STATE DETECTED!")
+                VpnLogger.log(TAG, "   Stored state: vpn_running=true")
+                VpnLogger.log(TAG, "   Actual state: VPN not active")
+                VpnLogger.log(TAG, "   Likely cause: App updated or crashed while VPN running")
+
+                // Clear stale state
+                vpnPrefs.edit()
+                    .putBoolean("vpn_running", false)
+                    .putBoolean("vpn_was_running", false)
+                    .apply()
+
+                VpnLogger.log(TAG, "✅ Stale state cleared - will start fresh")
+            }
+
+            // ⭐ STEP 6: Start VPN (now safe from stale state)
+            if (!getVpnState()) {
+                VpnLogger.log(TAG, "🚀 VPN not running - starting VPN service")
+                startVpnService()
+            } else {
+                VpnLogger.log(TAG, "ℹ️ VPN already running - skipping start")
+            }
+
+            return START_STICKY
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "❌ onStartCommand failed", e)
+
+            // Try to show error to user
+            try {
+                showCriticalErrorNotification("VPN failed to start: ${e.message}")
+            } catch (e2: Exception) {
+                VpnLogger.error(TAG, "Failed to show error notification", e2)
+            }
+
+            stopSelf()
+            return START_NOT_STICKY
+        }
+    }
+
+    // ⭐ Helper: Check actual VPN state (not SharedPreferences)
+    private fun isVpnActive(): Boolean {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val activeNetwork = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to check VPN state", e)
+            false
+        }
+    }
+
+    // ⭐ Helper: Show critical error notification
+    private fun showCriticalErrorNotification(message: String) {
+        try {
+            createNotificationChannelIfNeeded() // Make sure channel exists
+
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("vpn_error", message)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("VPN Error")
+                .setContentText(message)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(8888, notification)
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to show critical error", e)
+        }
+    }
+
+    private fun createNotificationChannelIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            if (manager.getNotificationChannel(CHANNEL_ID) == null) {
+                createNotificationChannel()
             }
         }
     }
@@ -584,61 +698,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                     return@Thread
                 }
 
-                VpnLogger.log(TAG, "🔍 Checking subscription before starting VPN...")
-                val subscriptionStatus = runBlocking {
-                    checkSubscription(deviceId, apiKey)
-                }
-
-                VpnLogger.log(TAG, "Subscription status: $subscriptionStatus")
-
-                when (subscriptionStatus) {
-                    "expired", "canceled" -> {
-                        VpnLogger.log(TAG, "❌ Subscription not active ($subscriptionStatus)")
-                        VpnLogger.log(TAG, "Stopping VPN start - sending subscription_expired death event")
-
-                        setVpnState(false)
-
-                        mainHandler.post {
-                            // ✅ Show notification
-                            showSubscriptionExpiredNotification()
-
-                            // ✅ AJOUTE: Remove foreground notification
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-
-                            releaseWakeLock("subscription_expired")
-                            synchronized(this@MyVpnService) { isStarting = false }
-                            stopSelf()
-                        }
-
-                        notifyFlutterVpnDeath("subscription_expired", "Your VPN subscription has expired")
-                        return@Thread
-                    }
-                    "auth_failed" -> {
-                        VpnLogger.log(TAG, "❌ Authentication failed - token invalid")
-                        setVpnState(false)
-
-                        mainHandler.post {
-                            // ✅ Show notification
-                            showAuthFailedNotification()
-
-                            // ✅ AJOUTE: Remove foreground notification
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-
-                            releaseWakeLock("auth_failed")
-                            synchronized(this@MyVpnService) { isStarting = false }
-                            stopSelf()
-                        }
-
-                        notifyFlutterVpnDeath("auth_required", "Session expired - please login again")
-                        return@Thread
-                    }
-                    "active" -> {
-                        VpnLogger.log(TAG, "✅ Subscription is active - proceeding with VPN start")
-                    }
-                    else -> {
-                        VpnLogger.log(TAG, "⚠️ Subscription status unknown - proceeding with caution")
-                    }
-                }
+                VpnLogger.log(TAG, "✅ Credentials found - proceeding (subscription validated by backend)")
 
                 // ⭐ NEW: Clean up any existing instances before starting
                 try {
@@ -2156,6 +2216,33 @@ class MyVpnService : VpnService(), PlatformInterface {
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Failed to start watchdog", e)
             Log.e(TAG, "Failed to start watchdog: ${e.message}")
+        }
+    }
+
+    private fun showErrorNotification(message: String) {
+        try {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("VPN Error")
+                .setContentText(message)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .build()
+
+            notificationManager.notify(8888, notification)
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to show error notification", e)
         }
     }
 

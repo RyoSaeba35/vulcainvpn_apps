@@ -27,6 +27,9 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.work.*
 import java.util.concurrent.TimeUnit
+import android.app.NotificationChannel
+import android.app.PendingIntent
+import androidx.core.app.NotificationCompat
 
 class MainActivity : FlutterActivity() {
 
@@ -57,6 +60,8 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        handleAppUpdateRecovery()
 
         VpnLogger.init(this)
         VpnLogger.log(TAG, "🟢 MainActivity onCreate")
@@ -770,7 +775,145 @@ class MainActivity : FlutterActivity() {
             VpnLogger.error(TAG, "Failed to schedule WorkManager", e)
         }
     }
-    
+
+    private fun handleAppUpdateRecovery() {
+        try {
+            val appPrefs = getSharedPreferences("app_state", Context.MODE_PRIVATE)
+            val vpnPrefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+
+            val lastVersion = appPrefs.getInt("version_code", 0)
+            val currentVersion = packageManager.getPackageInfo(packageName, 0).longVersionCode.toInt()
+
+            val wasRunning = vpnPrefs.getBoolean("vpn_running", false)
+
+            // First launch or same version - no update
+            if (lastVersion == 0 || lastVersion == currentVersion) {
+                appPrefs.edit().putInt("version_code", currentVersion).apply()
+                return
+            }
+
+            VpnLogger.log(TAG, "📦 App updated: v$lastVersion → v$currentVersion")
+
+            if (wasRunning) {
+                VpnLogger.log(TAG, "⚠️ VPN was running during update - initiating recovery")
+
+                // CRITICAL: Aggressive cleanup
+                performAppUpdateRecovery()
+
+                // Store death event
+                vpnPrefs.edit()
+                    .putBoolean("has_unread_death", true)
+                    .putString("death_reason", "app_updated")
+                    .putString("death_message", "App updated - reconnect to continue")
+                    .putBoolean("vpn_running", false)
+                    .putBoolean("auto_reconnect_enabled", false) // Don't auto-reconnect!
+                    .apply()
+
+                // Show user-friendly notification
+                showAppUpdateNotification()
+            }
+
+            // Update version
+            appPrefs.edit().putInt("version_code", currentVersion).apply()
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "App update recovery failed", e)
+        }
+    }
+
+    private fun performAppUpdateRecovery() {
+        VpnLogger.log(TAG, "🧹 Starting app update recovery cleanup...")
+
+        try {
+            // 1. Stop all services aggressively
+            VpnLogger.log(TAG, "Stopping MyVpnService...")
+            stopService(Intent(this, MyVpnService::class.java))
+
+            VpnLogger.log(TAG, "Stopping VpnWatchdogService...")
+            stopService(Intent(this, VpnWatchdogService::class.java))
+
+            VpnLogger.log(TAG, "Stopping AutoReconnectService...")
+            stopService(Intent(this, AutoReconnectService::class.java))
+
+            // Give Android time to actually stop services
+            Thread.sleep(500)
+
+            // 2. Clear all VPN-related shared preferences
+            VpnLogger.log(TAG, "Clearing VPN state...")
+            getSharedPreferences("vpn_state", Context.MODE_PRIVATE).edit().clear().apply()
+
+            VpnLogger.log(TAG, "Clearing auto-reconnect state...")
+            getSharedPreferences("auto_reconnect_retry", Context.MODE_PRIVATE).edit().clear().apply()
+
+            // 3. Cancel all notifications
+            VpnLogger.log(TAG, "Clearing notifications...")
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.cancelAll()
+
+            // 4. Cancel WorkManager jobs
+            VpnLogger.log(TAG, "Canceling WorkManager jobs...")
+            WorkManager.getInstance(this).cancelAllWork()
+
+            // 5. Re-schedule WorkManager (fresh start)
+            VpnLogger.log(TAG, "Re-scheduling WorkManager...")
+            scheduleVpnHealthChecks() // Your existing method
+
+            VpnLogger.log(TAG, "✅ App update recovery complete")
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Recovery cleanup error", e)
+        }
+    }
+
+    private fun showAppUpdateNotification() {
+        try {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+
+            // Create channel if needed
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    "app_updates",
+                    "App Updates",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Important app update notifications"
+                    enableVibration(true)
+                    setShowBadge(true)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            // Intent to open app and trigger reconnect
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("app_updated_reconnect", true)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val notification = NotificationCompat.Builder(this, "app_updates")
+                .setContentTitle("VulcainVPN Updated")
+                .setContentText("Tap to reconnect VPN")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(pendingIntent)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .build()
+
+            notificationManager.notify(9999, notification)
+
+            VpnLogger.log(TAG, "✅ App update notification shown")
+
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to show app update notification", e)
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         VpnLogger.log(TAG, "🔴 MainActivity destroyed")

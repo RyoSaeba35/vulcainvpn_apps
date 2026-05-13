@@ -119,6 +119,12 @@ class AndroidVpnService extends VpnService {
         throw Exception(errorData['message'] ?? 'Maximum active devices reached. Please disconnect another device first.');
       }
 
+      if (response.statusCode == 503) {
+        print('❌ Service Unavailable - Technical issue (503)');
+        final errorData = json.decode(response.body);
+        throw Exception('TECHNICAL_ISSUE|${errorData['message'] ?? 'We\'re experiencing technical difficulties. Please try again shortly.'}');
+      }
+
       if (response.statusCode != 200) {
         print('❌ API error: ${response.statusCode}');
         print('   Body: ${response.body}');

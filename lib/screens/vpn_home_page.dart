@@ -1125,6 +1125,11 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
         print('❌ VPN Connection Error: $errorString');
 
+        if (errorString.contains('TECHNICAL_ISSUE')) {
+          _showTechnicalIssueDialog(loc, errorString);
+          return;
+        }
+
         if (errorString.contains('No active subscription') ||
             errorString.contains('Subscription expired') ||
             errorString.contains('403')) {
@@ -1238,6 +1243,118 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             },
             icon: Icon(Icons.shopping_cart),
             label: Text(loc.renewNow),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTechnicalIssueDialog(AppLocalizations loc, String errorString) {
+    // Extract the actual message after the prefix
+    final message = errorString
+        .split('TECHNICAL_ISSUE|')
+        .last
+        .replaceAll('Exception: ', '');
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.engineering, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Service Temporarily Unavailable',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Our engineering team has been notified and is working on a fix.',
+                      style: TextStyle(
+                        color: Colors.blue,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.schedule, color: Colors.green, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Expected resolution: Within 10-15 minutes',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Dismiss', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              // Retry connection after brief delay
+              Future.delayed(Duration(milliseconds: 300), () {
+                _toggleConnection();
+              });
+            },
+            icon: Icon(Icons.refresh),
+            label: Text('Try Again'),
             style: ElevatedButton.styleFrom(
               backgroundColor: MyColors.myOrange,
               foregroundColor: Colors.white,

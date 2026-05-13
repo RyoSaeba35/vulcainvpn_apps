@@ -24,8 +24,8 @@ android {
         applicationId = "com.vulcainvpn.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.0.8"
+        versionCode = 11
+        versionName = "1.1.1"
 
         ndk {
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))

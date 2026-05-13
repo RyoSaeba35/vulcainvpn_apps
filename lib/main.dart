@@ -11,9 +11,12 @@ import 'services/vpn_service_android.dart';
 import 'services/notification_service.dart';
 import 'services/windows_notification_service.dart';
 import 'services/macos_notification_service.dart';
+import 'services/auth_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await AuthService.initialize();
 
   // ✅ FIX #8: Check device security before app starts
   final securityAction = await SecurityChecker.evaluateSecurity(
