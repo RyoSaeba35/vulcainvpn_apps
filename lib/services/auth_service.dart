@@ -64,6 +64,60 @@ class AuthService {
     return await _storage.read(key: key);
   }
 
+  // ✅ NEW: Windows-safe token storage (uses SharedPreferences for reliability)
+  static Future<void> _writeToken(String key, String value) async {
+    if (Platform.isWindows) {
+      // Primary storage: SharedPreferences (survives reboots reliably)
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('win_$key', value);
+      print('💾 Saved $key to Windows SharedPreferences');
+
+      // Backup: Try secure storage (but don't fail if it doesn't work)
+      try {
+        await _storage.write(key: key, value: value);
+        print('💾 Backed up $key to Windows secure storage');
+      } catch (e) {
+        print('⚠️ Windows secure storage write failed (non-critical): $e');
+      }
+    } else {
+      await _write(key, value);
+    }
+  }
+
+  // ✅ NEW: Windows-safe token reading (with fallback)
+  static Future<String?> _readToken(String key) async {
+    if (Platform.isWindows) {
+      // Try SharedPreferences first (most reliable on Windows)
+      final prefs = await SharedPreferences.getInstance();
+      final fromPrefs = prefs.getString('win_$key');
+
+      if (fromPrefs != null && fromPrefs.isNotEmpty) {
+        print('✅ Read $key from Windows SharedPreferences (${fromPrefs.length} chars)');
+        return fromPrefs;
+      }
+
+      print('⚠️ $key not in SharedPreferences, trying secure storage...');
+
+      // Fallback: Try secure storage
+      try {
+        final fromSecure = await _storage.read(key: key);
+        if (fromSecure != null && fromSecure.isNotEmpty) {
+          print('✅ Found $key in secure storage, migrating to SharedPreferences...');
+          // Migrate to SharedPreferences for reliability
+          await prefs.setString('win_$key', fromSecure);
+          return fromSecure;
+        }
+      } catch (e) {
+        print('❌ Windows secure storage read failed: $e');
+      }
+
+      print('❌ $key not found in any Windows storage');
+      return null;
+    } else {
+      return await _read(key);
+    }
+  }
+
   static Future<void> initialize() async {
     final loggedIn = await isLoggedIn();
     if (loggedIn) {
@@ -153,9 +207,9 @@ class AuthService {
 
       print('✅ Login successful');
 
-      // Store both tokens
-      await _write(_accessTokenKey, data['access_token']);
-      await _write(_refreshTokenKey, data['refresh_token']);
+      // ✅ UPDATED: Use Windows-safe token storage
+      await _writeToken(_accessTokenKey, data['access_token']);
+      await _writeToken(_refreshTokenKey, data['refresh_token']);
       await saveEmail(data['user']['email']);
 
       // Store token expiry time for better tracking
@@ -225,27 +279,55 @@ class AuthService {
     }
   }
 
-  // Refresh the access token
+  // ✅ UPDATED: Refresh the access token with better diagnostics
   static Future<bool> refreshAccessToken() async {
     try {
-      final refreshToken = await _read(_refreshTokenKey);
-      if (refreshToken == null) return false;
+      print('🔄 Starting token refresh...');
+
+      final refreshToken = await _readToken(_refreshTokenKey);
+
+      if (refreshToken == null || refreshToken.isEmpty) {
+        print('❌ Refresh token is missing or empty!');
+        print('   Platform: ${Platform.operatingSystem}');
+
+        // Check if it exists in alternate storage
+        if (Platform.isWindows) {
+          final prefs = await SharedPreferences.getInstance();
+          final hasInPrefs = prefs.containsKey('win_$_refreshTokenKey');
+          print('   In SharedPreferences: $hasInPrefs');
+
+          try {
+            final inSecure = await _storage.read(key: _refreshTokenKey);
+            print('   In secure storage: ${inSecure != null}');
+          } catch (e) {
+            print('   Secure storage check failed: $e');
+          }
+        }
+
+        return false;
+      }
+
+      print('✅ Refresh token found (${refreshToken.length} chars)');
 
       // Retry token refresh once on failure (network resilience)
       for (int attempt = 1; attempt <= 2; attempt++) {
         try {
+          print('   Attempt $attempt: Calling refresh API...');
+
           final response = await http.post(
             Uri.parse('$_baseUrl/refresh'),
             headers: {'Content-Type': 'application/json'},
             body: json.encode({'refresh_token': refreshToken}),
           ).timeout(_authTimeout);
 
+          print('   API response: ${response.statusCode}');
+
           if (response.statusCode == 200) {
             final data = json.decode(response.body);
 
-            // Store new tokens (both are rotated)
-            await _write(_accessTokenKey, data['access_token']);
-            await _write(_refreshTokenKey, data['refresh_token']);
+            // ✅ UPDATED: Store new tokens with Windows-safe method
+            await _writeToken(_accessTokenKey, data['access_token']);
+            await _writeToken(_refreshTokenKey, data['refresh_token']);
 
             // Store new token expiry
             await _storeTokenExpiry(data['access_token']);
@@ -256,7 +338,7 @@ class AuthService {
 
           // Don't retry on 401 (invalid refresh token)
           if (response.statusCode == 401) {
-            print('❌ Refresh token invalid, logout required');
+            print('❌ Refresh token invalid (401), logout required');
             return false;
           }
 
@@ -267,6 +349,7 @@ class AuthService {
             continue;
           }
 
+          print('❌ Token refresh failed after $attempt attempts');
           return false;
         } on TimeoutException {
           if (attempt < 2) {
@@ -281,48 +364,95 @@ class AuthService {
 
       return false;
     } catch (e) {
-      print('Token refresh error: $e');
+      print('❌ Token refresh error: $e');
       return false;
     }
   }
 
-  // Get valid access token (auto-refresh if needed)
+  // ✅ UPDATED: Get valid access token with better error handling
   static Future<String?> getValidAccessToken() async {
-    String? accessToken = await _read(_accessTokenKey);
+    print('🔍 Getting valid access token...');
 
-    if (accessToken == null) return null;
+    String? accessToken = await _readToken(_accessTokenKey);
 
-    // Check if token is expiring in next 5 minutes
-    if (_isTokenExpiringSoon(accessToken)) {
-      print('Token expiring soon, refreshing...');
+    if (accessToken == null || accessToken.isEmpty) {
+      print('⚠️ Access token missing - attempting refresh...');
       final refreshed = await refreshAccessToken();
-      if (!refreshed) return null;
-      accessToken = await _read(_accessTokenKey);
+      if (!refreshed) {
+        print('❌ Token refresh failed - user needs to re-login');
+        return null;
+      }
+      accessToken = await _readToken(_accessTokenKey);
+
+      if (accessToken == null || accessToken.isEmpty) {
+        print('❌ Access token still null after refresh!');
+        return null;
+      }
+    }
+
+    print('✅ Access token found (${accessToken.length} chars)');
+
+    // Check if token is expiring soon
+    if (_isTokenExpiringSoon(accessToken)) {
+      print('⏰ Token expiring soon, refreshing proactively...');
+      final refreshed = await refreshAccessToken();
+      if (!refreshed) {
+        print('⚠️ Preventive refresh failed, using existing token');
+        // Still return the current token - might still work
+        return accessToken;
+      }
+      accessToken = await _readToken(_accessTokenKey);
     }
 
     return accessToken;
   }
 
-  // Check if JWT is expiring in next 5 minutes
+  // ✅ IMPROVED: Better error handling in token decode
   static bool _isTokenExpiringSoon(String token) {
     try {
+      if (token.isEmpty) {
+        print('⚠️ Empty token in expiry check');
+        return true;
+      }
+
       final parts = token.split('.');
-      if (parts.length != 3) return true;
+      if (parts.length != 3) {
+        print('⚠️ Invalid JWT format (${parts.length} parts)');
+        return true;
+      }
 
       final payload = json.decode(
         utf8.decode(base64Url.decode(base64Url.normalize(parts[1]))),
       );
 
       final exp = payload['exp'];
-      if (exp == null) return false;
+      if (exp == null) {
+        print('⚠️ JWT missing expiry claim');
+        return false; // No expiry = don't force refresh
+      }
 
       final expiryDate = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+      final now = DateTime.now();
 
-      // Refresh if less than 5 minutes remaining
-      return DateTime.now().isAfter(expiryDate.subtract(const Duration(minutes: 5)));
+      if (expiryDate.isBefore(now)) {
+        print('⚠️ Token already expired at $expiryDate');
+        return true;
+      }
+
+      final timeRemaining = expiryDate.difference(now);
+      final isExpiringSoon = timeRemaining.inMinutes < 5;
+
+      if (isExpiringSoon) {
+        print('⏰ Token expires in ${timeRemaining.inMinutes} minutes');
+      } else {
+        print('✅ Token valid for ${timeRemaining.inMinutes} more minutes');
+      }
+
+      return isExpiringSoon;
     } catch (e) {
-      print('Token decode error: $e');
-      return true;
+      print('❌ Token decode error: $e');
+      // Don't force refresh on decode errors - token might be in new format
+      return false;
     }
   }
 
@@ -348,10 +478,10 @@ class AuthService {
     }
   }
 
-  // Logout — calls backend and clears all stored credentials
+  // ✅ UPDATED: Logout with Windows cleanup
   static Future<void> logout() async {
     try {
-      final token = await _read(_accessTokenKey);
+      final token = await _readToken(_accessTokenKey);
       if (token != null) {
         await http.delete(
           Uri.parse('$_baseUrl/logout'),
@@ -362,12 +492,24 @@ class AuthService {
       print('Logout API call failed: $e');
     }
 
-    // Comprehensive session cleanup
+    // Clear secure storage
     await _storage.deleteAll();
+
+    // Clear macOS fallback
     if (Platform.isMacOS) {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys().where((k) => k.startsWith('mac_fallback_')).toList();
       for (final key in keys) await prefs.remove(key);
+    }
+
+    // ✅ NEW: Clear Windows fallback
+    if (Platform.isWindows) {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys().where((k) => k.startsWith('win_')).toList();
+      for (final key in keys) {
+        await prefs.remove(key);
+        print('🗑️ Cleared Windows storage: $key');
+      }
     }
   }
 
@@ -376,10 +518,23 @@ class AuthService {
     return await getValidAccessToken();
   }
 
-  // Check if user is logged in (checks refresh token existence)
+  // ✅ UPDATED: Check if user is logged in with diagnostics
   static Future<bool> isLoggedIn() async {
-    final refreshToken = await _read(_refreshTokenKey);
-    return refreshToken != null;
+    final refreshToken = await _readToken(_refreshTokenKey);
+    final isValid = refreshToken != null && refreshToken.isNotEmpty;
+
+    if (!isValid) {
+      print('⚠️ User not logged in - refresh token missing');
+      if (Platform.isWindows) {
+        final prefs = await SharedPreferences.getInstance();
+        final hasKey = prefs.containsKey('win_$_refreshTokenKey');
+        print('   Windows SharedPreferences has key: $hasKey');
+      }
+    } else {
+      print('✅ User is logged in (refresh token exists)');
+    }
+
+    return isValid;
   }
 
   // Store api_key after device registration
