@@ -101,7 +101,7 @@ class VpnConfigService {
         {
           "type": "tun",
           "tag": "tun-in",
-          "interface_name": "VulcainVPN",
+          if (Platform.isWindows) "interface_name": "Vulcain VPN",
           "address": ["172.19.0.1/30"],
           "mtu": 1420,
           "auto_route": true,
