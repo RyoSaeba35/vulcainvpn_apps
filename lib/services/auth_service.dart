@@ -53,7 +53,7 @@ class AuthService {
     if (Platform.isMacOS) {
       await _macSave(key, value);
     } else {
-      await _storage.write(key: key, value: value);
+      await _storage.write(key: key, value);
     }
   }
 
@@ -82,7 +82,7 @@ class AuthService {
       if (email == null) return;
 
       final emailKey = '${_deviceIdKey}_$email';
-      final emailScoped = await _read(key: emailKey);
+      final emailScoped = await _read(emailKey);
 
       // Already migrated - nothing to do
       if (emailScoped != null && emailScoped.isNotEmpty) {
@@ -90,7 +90,7 @@ class AuthService {
       }
 
       // Check if old generic device_id exists
-      final oldDeviceId = await _read(key: _deviceIdKey);
+      final oldDeviceId = await _read(_deviceIdKey);
       if (oldDeviceId != null && oldDeviceId.isNotEmpty) {
         print('🔄 Migrating old device_id to email-scoped storage...');
         print('   Old key: $_deviceIdKey');
@@ -98,7 +98,7 @@ class AuthService {
         print('   device_id: $oldDeviceId');
 
         // Copy to email-scoped key
-        await _write(key: emailKey, value: oldDeviceId);
+        await _write(emailKey, oldDeviceId);
 
         print('✅ Migration complete!');
       }
@@ -154,8 +154,8 @@ class AuthService {
       print('✅ Login successful');
 
       // Store both tokens
-      await _write(key: _accessTokenKey, value: data['access_token']);
-      await _write(key: _refreshTokenKey, value: data['refresh_token']);
+      await _write(_accessTokenKey, data['access_token']);
+      await _write(_refreshTokenKey, data['refresh_token']);
       await saveEmail(data['user']['email']);
 
       // Store token expiry time for better tracking
@@ -228,7 +228,7 @@ class AuthService {
   // Refresh the access token
   static Future<bool> refreshAccessToken() async {
     try {
-      final refreshToken = await _read(key: _refreshTokenKey);
+      final refreshToken = await _read(_refreshTokenKey);
       if (refreshToken == null) return false;
 
       // Retry token refresh once on failure (network resilience)
@@ -244,8 +244,8 @@ class AuthService {
             final data = json.decode(response.body);
 
             // Store new tokens (both are rotated)
-            await _write(key: _accessTokenKey, value: data['access_token']);
-            await _write(key: _refreshTokenKey, value: data['refresh_token']);
+            await _write(_accessTokenKey, data['access_token']);
+            await _write(_refreshTokenKey, data['refresh_token']);
 
             // Store new token expiry
             await _storeTokenExpiry(data['access_token']);
@@ -288,7 +288,7 @@ class AuthService {
 
   // Get valid access token (auto-refresh if needed)
   static Future<String?> getValidAccessToken() async {
-    String? accessToken = await _read(key: _accessTokenKey);
+    String? accessToken = await _read(_accessTokenKey);
 
     if (accessToken == null) return null;
 
@@ -297,7 +297,7 @@ class AuthService {
       print('Token expiring soon, refreshing...');
       final refreshed = await refreshAccessToken();
       if (!refreshed) return null;
-      accessToken = await _read(key: _accessTokenKey);
+      accessToken = await _read(_accessTokenKey);
     }
 
     return accessToken;
@@ -340,7 +340,7 @@ class AuthService {
       if (exp != null) {
         await _write(
           key: _tokenExpiryKey,
-          value: exp.toString(),
+          exp.toString(),
         );
       }
     } catch (e) {
@@ -351,7 +351,7 @@ class AuthService {
   // Logout — calls backend and clears all stored credentials
   static Future<void> logout() async {
     try {
-      final token = await _read(key: _accessTokenKey);
+      final token = await _read(_accessTokenKey);
       if (token != null) {
         await http.delete(
           Uri.parse('$_baseUrl/logout'),
@@ -378,19 +378,19 @@ class AuthService {
 
   // Check if user is logged in (checks refresh token existence)
   static Future<bool> isLoggedIn() async {
-    final refreshToken = await _read(key: _refreshTokenKey);
+    final refreshToken = await _read(_refreshTokenKey);
     return refreshToken != null;
   }
 
   // Store api_key after device registration
   static Future<void> saveApiKey(String apiKey) async {
-    await _write(key: _apiKeyKey, value: apiKey);
+    await _write(_apiKeyKey, apiKey);
     await _macSave(_apiKeyKey, apiKey);
   }
 
   // Get stored api_key
   static Future<String?> getApiKey() async {
-    return await _read(key: _apiKeyKey) ?? await _macRead(_apiKeyKey);
+    return await _read(_apiKeyKey) ?? await _macRead(_apiKeyKey);
   }
 
   // ✅ UPDATED: Get stored device_id with lazy migration fallback
@@ -402,7 +402,7 @@ class AuthService {
     }
 
     final emailKey = '${_deviceIdKey}_$email';
-    final deviceId = await _read(key: emailKey);
+    final deviceId = await _read(emailKey);
 
     // Found in email-scoped key
     if (deviceId != null && deviceId.isNotEmpty) {
@@ -411,14 +411,14 @@ class AuthService {
 
     // ✅ LAZY MIGRATION: Check old generic key as fallback
     print('⚠️ Device ID not found in email-scoped storage, checking old location...');
-    final oldDeviceId = await _read(key: _deviceIdKey);
+    final oldDeviceId = await _read(_deviceIdKey);
 
     if (oldDeviceId != null && oldDeviceId.isNotEmpty) {
       print('🔄 Found old device_id, migrating now...');
       print('   Migrating: $oldDeviceId');
 
       // Migrate to email-scoped key
-      await _write(key: emailKey, value: oldDeviceId);
+      await _write(emailKey, oldDeviceId);
 
       print('✅ Migration complete!');
       return oldDeviceId;
@@ -430,13 +430,13 @@ class AuthService {
 
   // Save email on login
   static Future<void> saveEmail(String email) async {
-    await _write(key: _emailKey, value: email);
+    await _write(_emailKey, email);
     await _macSave(_emailKey, email);
   }
 
   // Get stored email
   static Future<String?> getStoredEmail() async {
-    return await _read(key: _emailKey) ?? await _macRead(_emailKey);
+    return await _read(_emailKey) ?? await _macRead(_emailKey);
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
@@ -451,12 +451,12 @@ class AuthService {
     // Generate device_id specific to this email
     final emailKey = '${_deviceIdKey}_$email';
 
-    final stored = await _read(key: emailKey);
+    final stored = await _read(emailKey);
     if (stored != null && stored.isNotEmpty) {
       print('📱 Using stored device UUID for $email: $stored');
 
       // ✅ ALSO save to generic key for MyVpnService compatibility
-      await _write(key: _deviceIdKey, value: stored);
+      await _write(_deviceIdKey, stored);
       await _macSave(_deviceIdKey, stored);
 
       return stored;
@@ -467,8 +467,8 @@ class AuthService {
     final newId = _generateFallbackId();
 
     // ✅ Save to BOTH keys
-    await _write(key: emailKey, value: newId);
-    await _write(key: _deviceIdKey, value: newId);
+    await _write(emailKey, newId);
+    await _write(_deviceIdKey, newId);
     await _macSave(_deviceIdKey, newId);
 
     print('📱 ✅ Generated device UUID for $email: $newId');
