@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
-import 'secure_config_service.dart';
 import 'vpn_service_android.dart'; // For VpnEvent types
 import 'macos_notification_service.dart';
 
@@ -17,7 +16,6 @@ class MacosVpnService extends VpnService {
   static bool _isConnected = false;
   static bool _isNormalStop = false;
 
-  static String? _configPath;
   static String? _plaintextPath;
 
   static Timer? _processChecker;
@@ -43,12 +41,10 @@ class MacosVpnService extends VpnService {
 
   /// Path to the app bundle's Resources folder (where sing-box binary lives)
   static String get _resourcesDir {
-    // Executable is at: YourApp.app/Contents/MacOS/vulcain_vpn
-    // Resources are at: YourApp.app/Contents/Resources/
     return '${File(Platform.resolvedExecutable).parent.parent.path}/Resources';
   }
 
-  static String get _logPath => '${_resourcesDir}/vpn_log.txt';
+  static String get _logPath => '$_resourcesDir/vpn_log.txt';
 
   static Future<void> _log(String message) async {
     try {
@@ -56,7 +52,7 @@ class MacosVpnService extends VpnService {
       if (await logFile.exists()) {
         final size = await logFile.length();
         if (size > 1024 * 1024) {
-          await logFile.rename('${_resourcesDir}/vpn_log_old.txt');
+          await logFile.rename('$_resourcesDir/vpn_log_old.txt');
         }
       }
       final timestamp = DateTime.now().toIso8601String();
@@ -65,14 +61,25 @@ class MacosVpnService extends VpnService {
     } catch (e) {
       print('Log error: $e');
     }
+    print(message);
+  }
+
+  /// Safe file delete — plain File.delete, no keychain/security APIs
+  static Future<void> _deleteFile(String? path) async {
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      await _log('File delete error ($path): $e');
+    }
   }
 
   /// Detect architecture and return the correct sing-box binary name
   static String get _singBoxPath {
     final result = Process.runSync('uname', ['-m']);
     final arch = result.stdout.toString().trim();
-    final binary =
-        arch.contains('arm') ? 'sing-box-arm64' : 'sing-box-amd64';
+    final binary = arch.contains('arm') ? 'sing-box-arm64' : 'sing-box-amd64';
     return '$_resourcesDir/$binary';
   }
 
@@ -121,19 +128,8 @@ class MacosVpnService extends VpnService {
     ));
 
     await _killSingBox();
-
-    try {
-      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
-        await SecureConfigService.secureDelete(_plaintextPath!);
-      }
-      if (_configPath != null && await File(_configPath!).exists()) {
-        await SecureConfigService.secureDelete(_configPath!);
-      }
-      _plaintextPath = null;
-      _configPath = null;
-    } catch (e) {
-      await _log('Config cleanup error: $e');
-    }
+    await _deleteFile(_plaintextPath);
+    _plaintextPath = null;
 
     _isConnected = false;
     _statusController.add(false);
@@ -155,7 +151,8 @@ class MacosVpnService extends VpnService {
 
   static void _startProcessChecker() {
     _processChecker?.cancel();
-    _processChecker = Timer.periodic(const Duration(seconds: 3), (timer) async {
+    _processChecker =
+        Timer.periodic(const Duration(seconds: 3), (timer) async {
       if (!_isConnected) {
         timer.cancel();
         return;
@@ -227,9 +224,8 @@ class MacosVpnService extends VpnService {
             _lastSuccessfulPing = DateTime.now();
           } else {
             _consecutiveFailures++;
-            final timeSinceLastSuccess = DateTime.now()
-                .difference(_lastSuccessfulPing!)
-                .inSeconds;
+            final timeSinceLastSuccess =
+                DateTime.now().difference(_lastSuccessfulPing!).inSeconds;
             await _log(
                 'Heartbeat failed ($_consecutiveFailures/$_maxConsecutiveFailures) '
                 '- Last success: ${timeSinceLastSuccess}s ago');
@@ -314,7 +310,6 @@ class MacosVpnService extends VpnService {
     }
 
     await _log('VPN IS BROKEN - Device has network but VPN pings failing');
-
     _wasNetworkLost = false;
 
     await MacosNotificationService.showToast(
@@ -347,19 +342,8 @@ class MacosVpnService extends VpnService {
     }
 
     await _killSingBox();
-
-    try {
-      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
-        await SecureConfigService.secureDelete(_plaintextPath!);
-      }
-      if (_configPath != null && await File(_configPath!).exists()) {
-        await SecureConfigService.secureDelete(_configPath!);
-      }
-      _plaintextPath = null;
-      _configPath = null;
-    } catch (e) {
-      await _log('Config cleanup error: $e');
-    }
+    await _deleteFile(_plaintextPath);
+    _plaintextPath = null;
 
     _isConnected = false;
     _statusController.add(false);
@@ -386,6 +370,8 @@ class MacosVpnService extends VpnService {
 
         _isNormalStop = true;
         await _killSingBox();
+        await _deleteFile(_plaintextPath);
+        _plaintextPath = null;
 
         _isConnected = false;
         _statusController.add(false);
@@ -432,7 +418,6 @@ class MacosVpnService extends VpnService {
         throw Exception('sing-box not found at $_singBoxPath');
       }
 
-      // Ensure the binary is executable
       await Process.run('chmod', ['+x', _singBoxPath]);
 
       _singBoxProcess = await Process.start(
@@ -503,11 +488,8 @@ class MacosVpnService extends VpnService {
       final result = await Process.run('ifconfig', []);
       final output = result.stdout.toString();
 
-      // Look for active interfaces with inet addresses that aren't the VPN tun
       final lines = output.split('\n');
-      for (int i = 0; i < lines.length; i++) {
-        final line = lines[i];
-        // Active interface (not loopback, not tun/utun VPN interface)
+      for (final line in lines) {
         if (line.contains('inet ') &&
             !line.contains('127.0.0.1') &&
             !line.contains('172.19.')) {
@@ -520,7 +502,7 @@ class MacosVpnService extends VpnService {
       return false;
     } catch (e) {
       await _log('Error checking network interfaces: $e');
-      return true; // Assume network exists on error
+      return true;
     }
   }
 
@@ -538,8 +520,7 @@ class MacosVpnService extends VpnService {
       _isHandlingSubscriptionExpiry = false;
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(
-          'last_seen_at', DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt('last_seen_at', DateTime.now().millisecondsSinceEpoch);
 
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
@@ -561,8 +542,8 @@ class MacosVpnService extends VpnService {
 
       if (response.statusCode == 401) {
         final errorData = json.decode(response.body);
-        throw Exception(
-            errorData['message'] ?? 'Device not registered. Please login again.');
+        throw Exception(errorData['message'] ??
+            'Device not registered. Please login again.');
       }
 
       if (response.statusCode == 403) {
@@ -582,8 +563,8 @@ class MacosVpnService extends VpnService {
       if (response.statusCode != 200) {
         try {
           final errorData = json.decode(response.body);
-          throw Exception(
-              errorData['message'] ?? 'Failed to connect: ${response.statusCode}');
+          throw Exception(errorData['message'] ??
+              'Failed to connect: ${response.statusCode}');
         } catch (_) {
           throw Exception('Failed to connect: ${response.statusCode}');
         }
@@ -612,13 +593,12 @@ class MacosVpnService extends VpnService {
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
 
       final tempDir = await getTemporaryDirectory();
-      _configPath = '${tempDir.path}/config.json.enc';
       _plaintextPath = '${tempDir.path}/config.json';
 
-      await SecureConfigService.writeEncryptedConfig(_configPath!, configJson);
+      // Write plaintext config only — no encryption on macOS
+      // (SecureConfigService uses keychain APIs not available on unsigned builds)
       await File(_plaintextPath!).writeAsString(configJson);
 
-      // Ensure sing-box is executable on macOS
       await Process.run('chmod', ['+x', _singBoxPath]);
 
       _singBoxProcess = await Process.start(
@@ -647,15 +627,8 @@ class MacosVpnService extends VpnService {
 
       _singBoxProcess!.exitCode.then((code) async {
         await _log('sing-box exited with code: $code');
-
-        if (_plaintextPath != null) {
-          await SecureConfigService.secureDelete(_plaintextPath!);
-        }
-        if (_configPath != null) {
-          await SecureConfigService.secureDelete(_configPath!);
-        }
+        await _deleteFile(_plaintextPath);
         _plaintextPath = null;
-        _configPath = null;
 
         if (_isConnected) {
           _isConnected = false;
@@ -723,19 +696,8 @@ class MacosVpnService extends VpnService {
     }
 
     await _killSingBox();
-
-    try {
-      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
-        await SecureConfigService.secureDelete(_plaintextPath!);
-      }
-      if (_configPath != null && await File(_configPath!).exists()) {
-        await SecureConfigService.secureDelete(_configPath!);
-      }
-      _plaintextPath = null;
-      _configPath = null;
-    } catch (e) {
-      await _log('Config cleanup error: $e');
-    }
+    await _deleteFile(_plaintextPath);
+    _plaintextPath = null;
 
     _isConnected = false;
     _statusController.add(false);
