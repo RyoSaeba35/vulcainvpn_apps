@@ -53,7 +53,7 @@ class AuthService {
     if (Platform.isMacOS) {
       await _macSave(key, value);
     } else {
-      await _storage.write(key: key, value);
+      await _storage.write(key: key, value: value);
     }
   }
 
@@ -339,7 +339,7 @@ class AuthService {
       final exp = payload['exp'];
       if (exp != null) {
         await _write(
-          key: _tokenExpiryKey,
+          _tokenExpiryKey,
           exp.toString(),
         );
       }
