@@ -106,9 +106,7 @@ class VpnConfigService {
           "mtu": 1420,
           "auto_route": true,
           "strict_route": true,
-          "stack": "mixed",
-          "sniff": true,
-          "sniff_override_destination": true
+          "stack": "mixed"
         }
       ],
       "endpoints": [
@@ -186,6 +184,7 @@ class VpnConfigService {
       "route": {
         "default_domain_resolver": "dns-direct",
         "rules": [
+          {"action": "sniff"}, 
           {"protocol": "dns", "action": "hijack-dns"},
           {"ip_is_private": true, "action": "route", "outbound": "direct"}
         ],
