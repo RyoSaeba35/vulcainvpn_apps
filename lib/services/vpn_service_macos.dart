@@ -597,6 +597,7 @@ class MacosVpnService extends VpnService {
 
       // Write plaintext config only — no encryption on macOS
       // (SecureConfigService uses keychain APIs not available on unsigned builds)
+      await Directory(tempDir.path).create(recursive: true);
       await File(_plaintextPath!).writeAsString(configJson);
 
       await Process.run('chmod', ['+x', _singBoxPath]);
