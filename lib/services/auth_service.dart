@@ -5,6 +5,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:math';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
   static const String _baseUrl = 'https://api.vulcainvpn.com/api';
@@ -36,15 +37,18 @@ class AuthService {
     ),
   );
 
-  // ✅ NEW: Initialize and migrate old device IDs
-  /// Call this once at app startup in main.dart:
-  /// ```dart
-  /// void main() async {
-  ///   WidgetsFlutterBinding.ensureInitialized();
-  ///   await AuthService.initialize();
-  ///   runApp(MyApp());
-  /// }
-  /// ```
+  static Future<void> _macSave(String key, String value) async {
+    if (!Platform.isMacOS) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('mac_fallback_$key', value);
+  }
+
+  static Future<String?> _macRead(String key) async {
+    if (!Platform.isMacOS) return null;
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('mac_fallback_$key');
+  }
+
   static Future<void> initialize() async {
     final loggedIn = await isLoggedIn();
     if (loggedIn) {
@@ -361,11 +365,12 @@ class AuthService {
   // Store api_key after device registration
   static Future<void> saveApiKey(String apiKey) async {
     await _storage.write(key: _apiKeyKey, value: apiKey);
+    await _macSave(_apiKeyKey, apiKey);
   }
 
   // Get stored api_key
   static Future<String?> getApiKey() async {
-    return await _storage.read(key: _apiKeyKey);
+    return await _storage.read(key: _apiKeyKey) ?? await _macRead(_apiKeyKey);
   }
 
   // ✅ UPDATED: Get stored device_id with lazy migration fallback
@@ -373,7 +378,7 @@ class AuthService {
     final email = await getStoredEmail();
     if (email == null) {
       print('⚠️ Cannot get device ID - user not logged in');
-      return null;
+      return await _macRead(_deviceIdKey);
     }
 
     final emailKey = '${_deviceIdKey}_$email';
@@ -406,11 +411,12 @@ class AuthService {
   // Save email on login
   static Future<void> saveEmail(String email) async {
     await _storage.write(key: _emailKey, value: email);
+    await _macSave(_emailKey, email);
   }
 
   // Get stored email
   static Future<String?> getStoredEmail() async {
-    return await _storage.read(key: _emailKey);
+    return await _storage.read(key: _emailKey) ?? await _macRead(_emailKey);
   }
 
   // ─── Private helpers ───────────────────────────────────────────────────────
@@ -431,6 +437,7 @@ class AuthService {
 
       // ✅ ALSO save to generic key for MyVpnService compatibility
       await _storage.write(key: _deviceIdKey, value: stored);
+      await _macSave(_deviceIdKey, stored);
 
       return stored;
     }
@@ -442,6 +449,7 @@ class AuthService {
     // ✅ Save to BOTH keys
     await _storage.write(key: emailKey, value: newId);
     await _storage.write(key: _deviceIdKey, value: newId);
+    await _macSave(_deviceIdKey, newId);
 
     print('📱 ✅ Generated device UUID for $email: $newId');
     return newId;
