@@ -101,7 +101,7 @@ class VpnConfigService {
         {
           "type": "tun",
           "tag": "tun-in",
-          "interface_name": "Vulcain VPN",
+          "interface_name": "VulcainVPN",
           "address": ["172.19.0.1/30"],
           "mtu": 1420,
           "auto_route": true,
@@ -184,7 +184,7 @@ class VpnConfigService {
       "route": {
         "default_domain_resolver": "dns-direct",
         "rules": [
-          {"action": "sniff"}, 
+          {"action": "sniff"},
           {"protocol": "dns", "action": "hijack-dns"},
           {"ip_is_private": true, "action": "route", "outbound": "direct"}
         ],
