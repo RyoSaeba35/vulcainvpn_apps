@@ -544,6 +544,10 @@ class MacosVpnService extends VpnService {
       final deviceId = await AuthService.getDeviceId();
       final apiKey = await AuthService.getApiKey();
 
+      await _log('DEBUG deviceId: $deviceId');
+      await _log('DEBUG apiKey: $apiKey');
+      await _log('DEBUG email: ${await AuthService.getStoredEmail()}');
+
       if (deviceId == null || apiKey == null) {
         throw Exception('Device not registered. Please login again.');
       }
