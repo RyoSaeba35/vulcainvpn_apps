@@ -23,8 +23,13 @@ class _SubscriptionTabState extends State<SubscriptionTab>
   bool _isLoading = true;
   String? _error;
 
+  // Tracks when we last successfully loaded, to avoid re-fetching on every
+  // rebuild triggered by locale/theme changes via didChangeDependencies.
+  DateTime? _lastLoadedAt;
+  static const _reloadCooldown = Duration(minutes: 5);
+
   @override
-  bool get wantKeepAlive => false;
+  bool get wantKeepAlive => false; // Tab rebuilds when revisited — intentional
 
   @override
   void initState() {
@@ -35,13 +40,22 @@ class _SubscriptionTabState extends State<SubscriptionTab>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (mounted) {
-      _loadSubscription();
+    // Only reload if we've never loaded, or if the cooldown has passed.
+    // This preserves the "refresh on tab visit" intent without triggering
+    // on every parent rebuild (locale changes, theme, etc.).
+    if (!mounted) return;
+    final shouldReload = _lastLoadedAt == null ||
+        DateTime.now().difference(_lastLoadedAt!) > _reloadCooldown;
+    if (shouldReload) {
+      _loadSubscription(force: true);
     }
   }
 
-  Future<void> _loadSubscription() async {
-    if (_isLoading && _subscriptionData != null) return;
+  Future<void> _loadSubscription({bool force = false}) async {
+    // Fixed guard: skip if we're NOT loading and already have data.
+    // (Original was inverted: `_isLoading && data != null` almost never fires)
+    // force=true bypasses this for manual pull-to-refresh and retry button.
+    if (!force && !_isLoading && _subscriptionData != null) return;
 
     setState(() {
       _isLoading = true;
@@ -64,7 +78,8 @@ class _SubscriptionTabState extends State<SubscriptionTab>
         _isLoading = false;
       });
 
-      // ✅ UPDATED: Just disconnect VPN if expired (no popup)
+      _lastLoadedAt = DateTime.now();
+
       await _checkAndDisconnectIfExpired();
 
     } catch (e, stackTrace) {
@@ -81,7 +96,6 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
-  // ✅ UPDATED: Silently disconnect VPN if expired (no popup)
   Future<void> _checkAndDisconnectIfExpired() async {
     if (_subscriptionData == null) return;
 
@@ -101,22 +115,20 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
-  // ✅ UPDATED: Just disconnect VPN (no popup, no alert)
   Future<void> _disconnectVpn() async {
     try {
       if (Platform.isAndroid) {
         await AndroidVpnService().stopVpn();
-        print('✅ Android VPN disconnected (expired subscription)');
+        print('Android VPN disconnected (expired subscription)');
       } else if (Platform.isWindows) {
         await WindowsVpnService().stopVpn();
-        print('✅ Windows VPN disconnected (expired subscription)');
+        print('Windows VPN disconnected (expired subscription)');
       }
     } catch (e) {
       print('❌ Failed to disconnect VPN: $e');
     }
   }
 
-  // ✅ Open renewal page
   Future<void> _openRenewalPage() async {
     final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
     try {
@@ -152,7 +164,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
             Text(_error!, style: const TextStyle(color: Colors.red)),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: _loadSubscription,
+              onPressed: () => _loadSubscription(force: true),
               style: ElevatedButton.styleFrom(
                   backgroundColor: MyColors.myOrange),
               child: Text(loc.retry,
@@ -183,12 +195,11 @@ class _SubscriptionTabState extends State<SubscriptionTab>
                      (expiresAt != null && expiresAt.isBefore(DateTime.now()));
 
     return RefreshIndicator(
-      onRefresh: _loadSubscription,
+      onRefresh: () => _loadSubscription(force: true),
       color: MyColors.myOrange,
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          // ✅ Red warning banner if expired
           if (isExpired)
             Container(
               margin: const EdgeInsets.only(bottom: 16),
@@ -290,7 +301,6 @@ class _SubscriptionTabState extends State<SubscriptionTab>
             ],
           ),
 
-          // ✅ Renew button if expired
           if (isExpired) ...[
             const SizedBox(height: 24),
             SizedBox(
