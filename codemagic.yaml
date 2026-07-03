@@ -8,10 +8,6 @@ workflows:
       # (generate an App Store Connect API key at appstoreconnect.apple.com → Users and Access → Keys)
       app_store_connect: vulcainvpn_asc_key
     environment:
-      ios_signing:
-        distribution_type: app_store
-        # Both bundle IDs need to be registered in Apple Developer portal first
-        bundle_identifier: com.vulcainvpn.app
       vars:
         BUNDLE_ID: "com.vulcainvpn.app"
         EXT_BUNDLE_ID: "com.vulcainvpn.app.PacketTunnel"
