@@ -67,6 +67,24 @@ workflows:
             /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.vulcainvpn.app.PacketTunnel.Libbox" "$plist"
             echo "Patched $plist"
           done
+
+          # Known gomobile bug: it generates iOS frameworks using the macOS-style
+          # VERSIONED bundle layout (Framework/Versions/A/...), which Xcode links
+          # fine but Apple's App Store validator rejects on upload ("binary file
+          # is not permitted"). Flatten every Libbox.framework slice to the
+          # unversioned layout iOS actually requires.
+          find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -type d -name "Libbox.framework" | while read -r framework; do
+            if [ -d "$framework/Versions" ]; then
+              echo "Flattening versioned bundle: $framework"
+              flat_tmp=$(mktemp -d)
+              cp -RL "$framework/Versions/Current/." "$flat_tmp/"
+              rm -rf "$framework"
+              mkdir -p "$framework"
+              cp -R "$flat_tmp/." "$framework/"
+              rm -rf "$flat_tmp"
+              echo "Flattened $framework"
+            fi
+          done
           # Same package path (experimental/libbox) that SFA binds for Android
           # and SagerNet's own SFI client binds for iOS — this is the shared
           # cross-platform entry point, same Go source either way.
