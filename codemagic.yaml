@@ -4,10 +4,10 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     integrations:
-      # Set this up in Codemagic → Teams → Integrations → Apple Developer Portal
-      # (generate an App Store Connect API key at appstoreconnect.apple.com → Users and Access → Keys)
       app_store_connect: vulcainvpn_asc_key
     environment:
+      groups:
+        - ios_signing
       vars:
         BUNDLE_ID: "com.vulcainvpn.app"
         EXT_BUNDLE_ID: "com.vulcainvpn.app.PacketTunnel"
@@ -17,15 +17,7 @@ workflows:
     scripts:
       - name: Set up code signing (main app + extension)
         script: |
-          # --create needs an explicit private key to submit for certificate
-          # creation — without one it can't create OR save anything, which is
-          # exactly the "Cannot save Signing Certificates without certificate
-          # private key" error. Generate one RSA key and reuse it for BOTH
-          # bundle IDs: Apple Distribution certs aren't bundle-specific (one
-          # cert signs the whole team's apps), so the second call will find
-          # and reuse the same certificate rather than hitting Apple's
-          # 3-certificate account limit by creating a duplicate.
-          openssl genrsa -out /tmp/cert_key.pem 2048
+          echo "$CERTIFICATE_PRIVATE_KEY" > /tmp/cert_key.pem
 
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
@@ -44,14 +36,9 @@ workflows:
 
       - name: Build sing-box iOS framework
         script: |
-          # Pinned to v1.13.0-rc.1 — same version the Android libbox.aar was built
-          # from (RyoSaeba35/sing-box-for-android fork, version.properties).
-          # Keeping platforms on the same core version avoids config/protocol
-          # mismatches between Android and iOS builds.
           git clone --branch v1.13.0-rc.1 --depth 1 https://github.com/SagerNet/sing-box.git /tmp/sing-box
           cd /tmp/sing-box
 
-          # IMPORTANT: SagerNet uses their own gomobile fork, not golang.org/x/mobile
           go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.8
           go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.8
           export PATH="$PATH:$(go env GOPATH)/bin"
@@ -60,9 +47,6 @@ workflows:
           gomobile bind -v -target=ios,iossimulator \
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
-          # Same package path (experimental/libbox) that SFA binds for Android
-          # and SagerNet's own SFI client binds for iOS — this is the shared
-          # cross-platform entry point, same Go source either way.
 
       - name: Flutter build ipa
         script: |
