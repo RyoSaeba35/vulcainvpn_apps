@@ -17,11 +17,24 @@ workflows:
     scripts:
       - name: Set up code signing (main app + extension)
         script: |
-          # Fetches/creates provisioning profiles for BOTH bundle IDs automatically
+          # --create needs an explicit private key to submit for certificate
+          # creation — without one it can't create OR save anything, which is
+          # exactly the "Cannot save Signing Certificates without certificate
+          # private key" error. Generate one RSA key and reuse it for BOTH
+          # bundle IDs: Apple Distribution certs aren't bundle-specific (one
+          # cert signs the whole team's apps), so the second call will find
+          # and reuse the same certificate rather than hitting Apple's
+          # 3-certificate account limit by creating a duplicate.
+          openssl genrsa -out /tmp/cert_key.pem 2048
+
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE --create
+            --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/cert_key.pem \
+            --create
           app-store-connect fetch-signing-files "$EXT_BUNDLE_ID" \
-            --type IOS_APP_STORE --create
+            --type IOS_APP_STORE \
+            --certificate-key=@file:/tmp/cert_key.pem \
+            --create
           keychain initialize
           keychain add-certificates
           xcode-project use-profiles
