@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../main.dart';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
@@ -31,6 +34,11 @@ class _SettingsTabState extends State<SettingsTab> {
   ConnectionMode _connectionMode = ConnectionMode.balanced;
   bool _isLoadingSettings = true;
 
+  // ── Diagnostic report state ───────────────────────────────────────────────
+  bool _isSendingReport = false;
+  int _logSizeKB = 0;
+  static const _platform = MethodChannel('com.vulcain.vpn/control');
+
   @override
   void initState() {
     super.initState();
@@ -40,10 +48,20 @@ class _SettingsTabState extends State<SettingsTab> {
   Future<void> _loadSettings() async {
     final autoReconnect = await SettingsService.getAutoReconnect();
     final connectionMode = await SettingsService.getConnectionMode();
+
+    int logSize = 0;
+    if (Platform.isAndroid) {
+      try {
+        final raw = await _platform.invokeMethod('getLogSizeKB');
+        logSize = (raw as num).toInt();
+      } catch (_) {}
+    }
+
     if (mounted) {
       setState(() {
         _autoReconnectEnabled = autoReconnect;
         _connectionMode = connectionMode;
+        _logSizeKB = logSize;
         _isLoadingSettings = false;
       });
     }
@@ -215,6 +233,176 @@ class _SettingsTabState extends State<SettingsTab> {
       case ConnectionMode.balanced:
         return loc.modeBalancedFull;
     }
+  }
+
+  // ── Diagnostic report ─────────────────────────────────────────────────────
+
+  Future<void> _sendDiagnosticReport() async {
+    if (!Platform.isAndroid) return;
+
+    // Debounce handled on native side too, but also prevent double-tap in UI
+    if (_isSendingReport) return;
+    setState(() => _isSendingReport = true);
+
+    try {
+      // Get fresh access token — user is logged in so this should always work
+      final token = await AuthService.getValidAccessToken();
+      if (token == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please log in again before sending a report.'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
+      final result = await _platform.invokeMethod('sendDiagnosticReport', {
+        'access_token': token,
+        'device': '${Platform.operatingSystem} device',
+        'os_version': Platform.operatingSystemVersion,
+        'app_version': '1.1.1',
+        'message': '',
+      });
+
+      if (!mounted) return;
+
+      if (result == 'sent') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Diagnostic report sent. Thank you!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else if (result == 'debounced') {
+        // Silent — already sending
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send report ($result). Please try again.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error sending report: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingReport = false);
+    }
+  }
+
+  Future<void> _clearLogs() async {
+    if (!Platform.isAndroid) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear Diagnostic Logs'),
+        content: const Text('This will permanently delete all diagnostic logs stored on this device. Are you sure?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await _platform.invokeMethod('clearLogs');
+        if (mounted) {
+          setState(() => _logSizeKB = 0);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Diagnostic logs cleared.'),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to clear logs: $e'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // ── Legal links ───────────────────────────────────────────────────────────
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not open link: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  void _openLicences(BuildContext context) {
+    // Flutter's built-in LicensePage reads all pub.dev package licences automatically
+    showLicensePage(
+      context: context,
+      applicationName: 'Vulcain VPN',
+      applicationVersion: '1.1.1',
+      applicationIcon: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Image.asset('assets/icons/icon.png', width: 48, height: 48),
+      ),
+    );
+  }
+
+  Widget _buildLegalRow(String label, String url) {
+    return InkWell(
+      onTap: () => _launchUrl(url),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+            ),
+            Icon(Icons.open_in_new, size: 16, color: Colors.grey[500]),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showLogoutDialog(BuildContext context) {
@@ -416,6 +604,121 @@ class _SettingsTabState extends State<SettingsTab> {
                         );
                       }
                     },
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 32),
+
+        // ── Support & Diagnostics ─────────────────────────────────────────
+        if (Platform.isAndroid)
+          InfoCard(
+            title: 'Support & Diagnostics',
+            icon: Icons.bug_report_outlined,
+            children: [
+              // Log size indicator
+              InfoRow(
+                label: 'Diagnostic log size',
+                value: _logSizeKB > 0 ? '$_logSizeKB KB' : 'Empty',
+              ),
+              const SizedBox(height: 12),
+
+              // Send report button
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _isSendingReport ? null : _sendDiagnosticReport,
+                  icon: _isSendingReport
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: MyColors.myOrange,
+                          ),
+                        )
+                      : const Icon(Icons.email_outlined, color: MyColors.myOrange),
+                  label: Text(
+                    _isSendingReport ? 'Sending report...' : 'Send Diagnostic Report',
+                    style: const TextStyle(color: MyColors.myOrange),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: MyColors.myOrange),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Clear logs button
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: _logSizeKB == 0 ? null : _clearLogs,
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: _logSizeKB == 0 ? Colors.grey : Colors.red[400],
+                    size: 18,
+                  ),
+                  label: Text(
+                    'Clear Diagnostic Logs',
+                    style: TextStyle(
+                      color: _logSizeKB == 0 ? Colors.grey : Colors.red[400],
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ),
+
+              // Explanation
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Diagnostic reports are sent directly and securely to our support team. '
+                  'Only technical logs are included — no personal data beyond your account email.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[500],
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+        if (Platform.isAndroid) const SizedBox(height: 16),
+
+        // ── Legal ─────────────────────────────────────────────────────────
+        InfoCard(
+          title: 'Legal',
+          icon: Icons.gavel_outlined,
+          children: [
+            _buildLegalRow('Privacy Policy', 'https://www.vulcainvpn.com/privacy'),
+            const Divider(height: 1),
+            _buildLegalRow('Terms of Service', 'https://www.vulcainvpn.com/terms'),
+            const Divider(height: 1),
+            _buildLegalRow('Logging Policy', 'https://www.vulcainvpn.com/logging'),
+            const Divider(height: 1),
+
+            // Open source licences — Flutter built-in LicensePage
+            InkWell(
+              onTap: () => _openLicences(context),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Open Source Licences',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                    Icon(Icons.chevron_right, color: Colors.grey[400]),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

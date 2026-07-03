@@ -14,6 +14,7 @@ class AuthGate extends StatefulWidget {
 class _AuthGateState extends State<AuthGate> {
   bool _isLoading = true;
   bool _isLoggedIn = false;
+  String? _sessionResetReason; // Non-null when keystore was wiped unexpectedly
 
   @override
   void initState() {
@@ -23,22 +24,31 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _checkAuth() async {
     final loggedIn = await AuthService.isLoggedIn();
+    // Read reset reason AFTER isLoggedIn() — it's set inside that call
+    final resetReason = await AuthService.getSessionResetReason();
     if (mounted) {
       setState(() {
         _isLoggedIn = loggedIn;
+        _sessionResetReason = resetReason;
         _isLoading = false;
       });
     }
   }
 
   void _onLoginSuccess() {
-    setState(() => _isLoggedIn = true);
+    setState(() {
+      _isLoggedIn = true;
+      _sessionResetReason = null;
+    });
   }
 
   void _onLogout() async {
     await AuthService.logout();
     if (mounted) {
-      setState(() => _isLoggedIn = false);
+      setState(() {
+        _isLoggedIn = false;
+        _sessionResetReason = null;
+      });
     }
   }
 
@@ -54,7 +64,10 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     if (!_isLoggedIn) {
-      return LoginScreen(onLoginSuccess: _onLoginSuccess);
+      return LoginScreen(
+        onLoginSuccess: _onLoginSuccess,
+        sessionResetReason: _sessionResetReason,
+      );
     }
 
     return VpnHomePage(onLogout: _onLogout);

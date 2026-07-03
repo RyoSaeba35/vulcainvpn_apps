@@ -34,15 +34,17 @@ class _SubscriptionTabState extends State<SubscriptionTab>
   @override
   void initState() {
     super.initState();
-    _loadSubscription();
+    // ✅ Do NOT call _loadSubscription() here.
+    // Flutter always calls didChangeDependencies() immediately after initState
+    // on first build, which handles the initial load. Calling it here too
+    // caused two simultaneous API requests every time the tab opened.
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Only reload if we've never loaded, or if the cooldown has passed.
-    // This preserves the "refresh on tab visit" intent without triggering
-    // on every parent rebuild (locale changes, theme, etc.).
+    // Fires on first build (handles initial load) and on subsequent tab visits.
+    // Cooldown prevents unnecessary re-fetches on locale/theme rebuilds.
     if (!mounted) return;
     final shouldReload = _lastLoadedAt == null ||
         DateTime.now().difference(_lastLoadedAt!) > _reloadCooldown;
@@ -80,6 +82,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
 
       _lastLoadedAt = DateTime.now();
 
+      // ✅ UPDATED: Just disconnect VPN if expired (no popup)
       await _checkAndDisconnectIfExpired();
 
     } catch (e, stackTrace) {
@@ -96,6 +99,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
+  // ✅ UPDATED: Silently disconnect VPN if expired (no popup)
   Future<void> _checkAndDisconnectIfExpired() async {
     if (_subscriptionData == null) return;
 
@@ -115,20 +119,22 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
+  // ✅ UPDATED: Just disconnect VPN (no popup, no alert)
   Future<void> _disconnectVpn() async {
     try {
       if (Platform.isAndroid) {
         await AndroidVpnService().stopVpn();
-        print('Android VPN disconnected (expired subscription)');
+        print('✅ Android VPN disconnected (expired subscription)');
       } else if (Platform.isWindows) {
         await WindowsVpnService().stopVpn();
-        print('Windows VPN disconnected (expired subscription)');
+        print('✅ Windows VPN disconnected (expired subscription)');
       }
     } catch (e) {
       print('❌ Failed to disconnect VPN: $e');
     }
   }
 
+  // ✅ Open renewal page
   Future<void> _openRenewalPage() async {
     final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
     try {
@@ -200,6 +206,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          // ✅ Red warning banner if expired
           if (isExpired)
             Container(
               margin: const EdgeInsets.only(bottom: 16),
@@ -301,6 +308,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
             ],
           ),
 
+          // ✅ Renew button if expired
           if (isExpired) ...[
             const SizedBox(height: 24),
             SizedBox(

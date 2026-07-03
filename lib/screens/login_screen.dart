@@ -9,7 +9,13 @@ import 'package:window_manager/window_manager.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
-  const LoginScreen({super.key, required this.onLoginSuccess});
+  final String? sessionResetReason;
+
+  const LoginScreen({
+    super.key,
+    required this.onLoginSuccess,
+    this.sessionResetReason,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -130,6 +136,36 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                     style: TextStyle(color: Colors.white54, fontSize: 14),
                   ),
                   const SizedBox(height: 40),
+
+                  // ✅ Session reset banner — shown when keystore was wiped
+                  // (OS update, device restore, some Samsung/Xiaomi devices)
+                  if (widget.sessionResetReason != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.15),
+                        border: Border.all(color: Colors.orange, width: 1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.info_outline,
+                              color: Colors.orange, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              widget.sessionResetReason!,
+                              style: const TextStyle(
+                                color: Colors.orange,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
                   // Email field
                   TextField(

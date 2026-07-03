@@ -26,11 +26,10 @@ import javax.net.ssl.HttpsURLConnection
  * ✅ Two-batch retry strategy with cooldown
  *
  * Behavior:
- * - Batch 1: 3 retries (1 min each = 3 min total)
- * - 2-minute cooldown
- * - Batch 2: 3 retries (1 min each = 3 min total)
- * - Total: ~8 minutes before giving up permanently
- * - Reset counter only after 24h or manual reconnection
+ * - Batch 1: 5 retries (1 min each = 5 min total)
+ * - Batch 2: 5 retries (1 min each = 5 min total)
+ * - Total: ~10 minutes before giving up permanently
+ * - Reset counter after 8 minutes of stability OR on manual reconnect
  */
 class AutoReconnectService : Service() {
 
@@ -50,6 +49,10 @@ class AutoReconnectService : Service() {
         private const val MAX_BATCHES = 1
         private const val BATCH_COOLDOWN_MS = 0L
         private const val RETRY_RESET_TIME_MS = 8 * 60 * 1000L
+
+        // ✅ FIX: Key to mark that a reconnect is in progress so watchdog
+        // doesn't self-destruct when is_running is briefly false during cleanup.
+        private const val KEY_RECONNECT_IN_PROGRESS = "reconnect_in_progress"
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -94,25 +97,18 @@ class AutoReconnectService : Service() {
             storedReason == "device_revoked" || storedReason == "airplane_mode") {
             VpnLogger.log(TAG, "⛔ Non-reconnectable reason: $storedReason - stopping immediately")
 
-            val (title, message) = when (storedReason) {
-                "airplane_mode" -> Pair("VPN Disconnected", "Airplane mode enabled")
-                "subscription_expired" -> Pair("VPN Disconnected", "Subscription expired - Please reopen app")
-                "auth_required" -> Pair("VPN Disconnected", "Authentication required - Please login again")
-                "device_revoked" -> Pair("VPN Disconnected", "Device access revoked - Please login again")
-                else -> Pair("VPN Disconnected", "VPN stopped")
-            }
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
-
+            stopForegroundCompat()
             stopWatchdogService()
 
             serviceScope.launch {
                 cleanupVpn()
+                val (title, message) = when (storedReason) {
+                    "airplane_mode" -> Pair("VPN Disconnected", "Airplane mode enabled")
+                    "subscription_expired" -> Pair("VPN Disconnected", "Subscription expired - Please reopen app")
+                    "auth_required" -> Pair("VPN Disconnected", "Authentication required - Please login again")
+                    "device_revoked" -> Pair("VPN Disconnected", "Device access revoked - Please login again")
+                    else -> Pair("VPN Disconnected", "VPN stopped")
+                }
                 showDisconnectNotification(title, message)
                 stopSelf()
             }
@@ -124,9 +120,9 @@ class AutoReconnectService : Service() {
         val lastRetryTime = retryPrefs.getLong(KEY_LAST_RETRY_TIME, 0)
         val now = System.currentTimeMillis()
 
-        // Reset everything if 24 hours passed since last attempt
+        // Reset if enough time has passed since last attempt (stable period)
         if (now - lastRetryTime > RETRY_RESET_TIME_MS) {
-            VpnLogger.log(TAG, "🔄 Resetting retry state (24 hours passed)")
+            VpnLogger.log(TAG, "🔄 Resetting retry state (stable period elapsed)")
             retryPrefs.edit()
                 .putInt(KEY_RETRY_COUNT, 0)
                 .putInt(KEY_RETRY_BATCH, 1)
@@ -137,59 +133,36 @@ class AutoReconnectService : Service() {
         val currentRetryCount = retryPrefs.getInt(KEY_RETRY_COUNT, 0)
         val currentRetryBatch = retryPrefs.getInt(KEY_RETRY_BATCH, 1)
 
-        // Check if we've exhausted all retries
+        // Check if we've exhausted all batches
         if (currentRetryBatch > MAX_BATCHES) {
             VpnLogger.log(TAG, "⛔ All retry batches exhausted - giving up permanently")
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
-
-            showDisconnectNotification(
-                "VPN Disconnected",
-                "Unable to reconnect - Please reconnect manually"
-            )
-
+            stopForegroundCompat()
+            showDisconnectNotification("VPN Disconnected", "Unable to reconnect - Please reconnect manually")
             stopWatchdogService()
 
-            // Reset for next time user manually reconnects
-            retryPrefs.edit()
-                .putInt(KEY_RETRY_COUNT, 0)
-                .putInt(KEY_RETRY_BATCH, 1)
-                .putLong(KEY_LAST_RETRY_TIME, 0)
-                .apply()
+            // Reset so next manual reconnect starts fresh
+            resetRetryState()
 
             serviceScope.launch {
                 cleanupVpn()
-                showDisconnectNotification(
-                    "VPN Disconnected",
-                    "Unable to reconnect - Please reconnect manually"
-                )
+                showDisconnectNotification("VPN Disconnected", "Unable to reconnect - Please reconnect manually")
                 stopSelf()
             }
             return START_NOT_STICKY
         }
 
-        // Check if we need to wait between batches
+        // Check if we need to wait between batches (cooldown)
         if (currentRetryCount >= MAX_RETRIES_PER_BATCH && currentRetryBatch == 1) {
             val timeSinceLastRetry = now - lastRetryTime
 
             if (timeSinceLastRetry < BATCH_COOLDOWN_MS) {
-                // Still in cooldown period
                 val remainingCooldown = BATCH_COOLDOWN_MS - timeSinceLastRetry
                 val remainingSeconds = (remainingCooldown / 1000).toInt()
                 VpnLogger.log(TAG, "⏸️ Batch 1 complete - waiting ${remainingSeconds}s before batch 2")
 
-                // Update notification to show countdown
-                updateNotification(
-                    "VPN Reconnecting",
-                    "Retrying in ${remainingSeconds}s..."
-                )
+                updateNotification("VPN Reconnecting", "Retrying in ${remainingSeconds}s...")
 
-                // Schedule retry after cooldown
                 mainHandler.postDelayed({
                     VpnLogger.log(TAG, "⏰ Cooldown complete - starting batch 2")
                     retryPrefs.edit()
@@ -198,20 +171,14 @@ class AutoReconnectService : Service() {
                         .putLong(KEY_LAST_RETRY_TIME, System.currentTimeMillis())
                         .apply()
 
-                    // Restart service for batch 2
                     val retryIntent = Intent(this, AutoReconnectService::class.java).apply {
                         putExtra("reason", reason)
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(retryIntent)
-                    } else {
-                        startService(retryIntent)
-                    }
+                    startServiceCompat(retryIntent)
                 }, remainingCooldown)
 
                 return START_NOT_STICKY
             } else {
-                // Cooldown finished, move to batch 2
                 VpnLogger.log(TAG, "✅ Cooldown complete - moving to batch 2")
                 retryPrefs.edit()
                     .putInt(KEY_RETRY_BATCH, 2)
@@ -229,50 +196,20 @@ class AutoReconnectService : Service() {
             VpnLogger.log(TAG, "⛔ Batch $updatedBatch exhausted ($updatedRetryCount/$MAX_RETRIES_PER_BATCH)")
 
             if (updatedBatch >= MAX_BATCHES) {
-                // All batches done - give up
                 VpnLogger.log(TAG, "⛔ All batches complete - giving up")
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(true)
-                }
-
-                showDisconnectNotification(
-                    "VPN Disconnected",
-                    "Unable to reconnect - Please reconnect manually"
-                )
-
-                retryPrefs.edit()
-                    .putInt(KEY_RETRY_COUNT, 0)
-                    .putInt(KEY_RETRY_BATCH, 1)
-                    .putLong(KEY_LAST_RETRY_TIME, 0)
-                    .apply()
-
+                stopForegroundCompat()
+                showDisconnectNotification("VPN Disconnected", "Unable to reconnect - Please reconnect manually")
+                resetRetryState()
                 stopSelf()
                 return START_NOT_STICKY
             } else {
-                // Move to cooldown before next batch
-                retryPrefs.edit()
-                    .putLong(KEY_LAST_RETRY_TIME, now)
-                    .apply()
-
-                // Will trigger cooldown check
+                retryPrefs.edit().putLong(KEY_LAST_RETRY_TIME, now).apply()
                 stopSelf()
-
-                // Schedule next check
                 mainHandler.postDelayed({
-                    val retryIntent = Intent(this, AutoReconnectService::class.java).apply {
+                    startServiceCompat(Intent(this, AutoReconnectService::class.java).apply {
                         putExtra("reason", reason)
-                    }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(retryIntent)
-                    } else {
-                        startService(retryIntent)
-                    }
+                    })
                 }, 1000)
-
                 return START_NOT_STICKY
             }
         }
@@ -293,9 +230,7 @@ class AutoReconnectService : Service() {
                 performReconnection(reason, currentBatch, currentCount)
             } catch (e: Exception) {
                 VpnLogger.error(TAG, "Exception in performReconnection", e)
-                withContext(Dispatchers.Main) {
-                    fail("Error: ${e.message}")
-                }
+                withContext(Dispatchers.Main) { fail("Error: ${e.message}") }
             }
         }
 
@@ -306,9 +241,8 @@ class AutoReconnectService : Service() {
 
     private fun updateNotification(title: String, message: String) {
         try {
-            val notification = createNotification(title, message)
             val nm = getSystemService(NotificationManager::class.java)
-            nm.notify(NOTIFICATION_ID, notification)
+            nm.notify(NOTIFICATION_ID, createNotification(title, message))
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Failed to update notification", e)
         }
@@ -318,59 +252,46 @@ class AutoReconnectService : Service() {
         VpnLogger.log(TAG, "🚀 Starting reconnection (reason: $reason, batch: $batch, attempt: $attempt/$MAX_RETRIES_PER_BATCH)")
 
         try {
-            // Check airplane mode
+            // Check airplane mode first
             if (isAirplaneModeOn()) {
-                VpnLogger.log(TAG, "✈️ Airplane mode detected - stopping VPN")
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                } else {
-                    @Suppress("DEPRECATION")
-                    stopForeground(true)
-                }
-
+                VpnLogger.log(TAG, "✈️ Airplane mode detected - stopping")
+                stopForegroundCompat()
                 stopWatchdogService()
-
                 cleanupVpn()
-
                 showDisconnectNotification("VPN Disconnected", "Airplane mode enabled")
                 resetRetryState()
                 stopSelf()
                 return
             }
 
-            // Clean up
+            // ✅ FIX: Set reconnect_in_progress flag BEFORE cleanup so the watchdog
+            // (separate process) knows is_running=false is intentional and won't self-destruct.
+            setReconnectInProgress(true)
+
             VpnLogger.log(TAG, "🧹 Cleaning up VPN")
             cleanupVpn()
+            VpnLogger.log(TAG, "✅ Cleanup complete")
 
-            // ⭐ Try reconnecting for 1 minute (changed from 5)
             VpnLogger.log(TAG, "🔄 Attempting reconnection (1 min timeout)")
 
             val startTime = System.currentTimeMillis()
-            val maxRetryTime = 1 * 60 * 1000L  // ⭐ 1 minute instead of 5
+            val maxRetryTime = 1 * 60 * 1000L
             var subAttempt = 0
 
             while (System.currentTimeMillis() - startTime < maxRetryTime) {
                 subAttempt++
 
-                // Check airplane mode again
                 if (isAirplaneModeOn()) {
                     VpnLogger.log(TAG, "✈️ Airplane mode enabled during reconnect")
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        stopForeground(true)
-                    }
-
+                    stopForegroundCompat()
                     showDisconnectNotification("VPN Disconnected", "Airplane mode enabled")
+                    setReconnectInProgress(false)
                     resetRetryState()
                     stopSelf()
                     return
                 }
 
-                // Check subscription every 30 seconds
+                // Check subscription every 30 seconds (every 3rd sub-attempt)
                 if (subAttempt % 3 == 0) {
                     VpnLogger.log(TAG, "🔐 Checking subscription status...")
                     val subscriptionStatus = checkSubscription()
@@ -378,65 +299,50 @@ class AutoReconnectService : Service() {
                     when (subscriptionStatus) {
                         "expired", "canceled" -> {
                             VpnLogger.log(TAG, "⛔ Subscription expired during reconnect - stopping")
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                stopForeground(STOP_FOREGROUND_REMOVE)
-                            } else {
-                                @Suppress("DEPRECATION")
-                                stopForeground(true)
-                            }
-
+                            stopForegroundCompat()
                             stopWatchdogService()
-
                             cleanupVpn()
-
                             showDisconnectNotification("VPN Disconnected", "Subscription expired")
+                            setReconnectInProgress(false)
                             resetRetryState()
                             stopSelf()
                             return
                         }
                         "auth_failed" -> {
                             VpnLogger.log(TAG, "⛔ Auth failed during reconnect - stopping")
-
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                stopForeground(STOP_FOREGROUND_REMOVE)
-                            } else {
-                                @Suppress("DEPRECATION")
-                                stopForeground(true)
-                            }
-
+                            stopForegroundCompat()
                             stopWatchdogService()
-
                             cleanupVpn()
-
                             showDisconnectNotification("VPN Disconnected", "Authentication failed - Please login again")
+                            setReconnectInProgress(false)
                             resetRetryState()
                             stopSelf()
                             return
                         }
-                        "active" -> {
-                            VpnLogger.log(TAG, "✅ Subscription still active")
-                        }
+                        "active" -> VpnLogger.log(TAG, "✅ Subscription still active")
                     }
                 }
 
-                // Check network
                 if (isNetworkAvailable()) {
                     VpnLogger.log(TAG, "✅ Network available - attempting connection (sub-attempt $subAttempt)")
 
                     val config = getConfig()
                     if (config == null) {
                         VpnLogger.log(TAG, "❌ No config available")
+                        setReconnectInProgress(false)
                         fail("No configuration")
                         return
                     }
 
-                    // Try to connect
                     startVpn(config)
-                    delay(10000)  // Wait 10s
+                    delay(10000)
 
                     if (isVpnRunning()) {
                         VpnLogger.log(TAG, "✅ Reconnected successfully! (batch $batch, attempt $attempt)")
+                        // ✅ FIX: Clear reconnect flag and reset batch counter on success.
+                        // Without this, the next VPN death would immediately see
+                        // "all batches exhausted" and give up with zero retries.
+                        setReconnectInProgress(false)
                         success()
                         return
                     }
@@ -447,110 +353,85 @@ class AutoReconnectService : Service() {
 
                     if (deathReason == "auth_required" || deathReason == "device_revoked" || deathReason == "credentials_expired") {
                         VpnLogger.log(TAG, "⛔ Authentication failed - credentials expired/invalid")
-
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                            stopForeground(STOP_FOREGROUND_REMOVE)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            stopForeground(true)
-                        }
-
+                        stopForegroundCompat()
                         stopWatchdogService()
-
                         cleanupVpn()
-
                         showDisconnectNotification("VPN Disconnected", "Please reconnect manually to refresh credentials")
+                        setReconnectInProgress(false)
                         resetRetryState()
                         stopSelf()
                         return
                     }
                 }
 
-                // Wait 10s before retry
                 VpnLogger.log(TAG, "⏳ Retrying in 10s... (sub-attempt $subAttempt)")
                 delay(10000)
             }
 
-            // 1 minute passed for this attempt
+            // 1 minute passed — clear reconnect flag regardless of outcome
+            setReconnectInProgress(false)
+
             VpnLogger.log(TAG, "⏱️ 1 minute passed for batch $batch, attempt $attempt")
+            stopForegroundCompat()
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
-                @Suppress("DEPRECATION")
-                stopForeground(true)
-            }
-
-            // Check if we should continue
             val retryPrefs = getSharedPreferences(PREFS_RETRY_NAME, Context.MODE_PRIVATE)
             val currentCount = retryPrefs.getInt(KEY_RETRY_COUNT, 0)
             val currentBatch = retryPrefs.getInt(KEY_RETRY_BATCH, 1)
 
             if (currentCount >= MAX_RETRIES_PER_BATCH && currentBatch >= MAX_BATCHES) {
-                // All attempts exhausted - give up permanently
                 VpnLogger.log(TAG, "⛔ All batches exhausted - stopping permanently")
-
                 stopWatchdogService()
-
                 cleanupVpn()
-
-                showDisconnectNotification(
-                    "VPN Disconnected",
-                    "Unable to reconnect - Please reconnect manually"
-                )
+                showDisconnectNotification("VPN Disconnected", "Unable to reconnect - Please reconnect manually")
                 resetRetryState()
                 stopSelf()
             } else if (currentCount >= MAX_RETRIES_PER_BATCH && currentBatch == 1) {
-                // Batch 1 complete, schedule cooldown period
-                VpnLogger.log(TAG, "⏸️ Batch 1 complete - scheduling 2-minute cooldown")
-                showDisconnectNotification(
-                    "VPN Reconnecting",
-                    "Retrying in 2 minutes..."
-                )
+                VpnLogger.log(TAG, "⏸️ Batch 1 complete - scheduling cooldown")
+                showDisconnectNotification("VPN Reconnecting", "Retrying in 2 minutes...")
 
-                // Schedule restart after cooldown
                 withContext(Dispatchers.Main) {
                     mainHandler.postDelayed({
                         VpnLogger.log(TAG, "⏰ Cooldown complete - starting batch 2")
-                        val retryIntent = Intent(this@AutoReconnectService, AutoReconnectService::class.java).apply {
+                        startServiceCompat(Intent(this@AutoReconnectService, AutoReconnectService::class.java).apply {
                             putExtra("reason", reason)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(retryIntent)
-                        } else {
-                            startService(retryIntent)
-                        }
+                        })
                     }, BATCH_COOLDOWN_MS)
                 }
                 stopSelf()
             } else {
-                // More attempts remaining in current batch - schedule next retry
                 VpnLogger.log(TAG, "🔄 Scheduling next retry (batch $currentBatch, attempt ${currentCount + 1}/$MAX_RETRIES_PER_BATCH)")
-                showDisconnectNotification(
-                    "VPN Reconnecting",
-                    "Next retry in 10s... (batch $currentBatch, $currentCount/$MAX_RETRIES_PER_BATCH)"
-                )
+                showDisconnectNotification("VPN Reconnecting", "Next retry in 10s... (batch $currentBatch, $currentCount/$MAX_RETRIES_PER_BATCH)")
 
-                // Schedule next retry attempt (immediate, just enough delay to avoid tight loop)
                 withContext(Dispatchers.Main) {
                     mainHandler.postDelayed({
                         VpnLogger.log(TAG, "🚀 Starting next retry attempt")
-                        val retryIntent = Intent(this@AutoReconnectService, AutoReconnectService::class.java).apply {
+                        startServiceCompat(Intent(this@AutoReconnectService, AutoReconnectService::class.java).apply {
                             putExtra("reason", reason)
-                        }
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(retryIntent)
-                        } else {
-                            startService(retryIntent)
-                        }
-                    }, 10000)  // 10 second delay before next retry
+                        })
+                    }, 10000)
                 }
                 stopSelf()
             }
 
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Reconnection failed", e)
+            setReconnectInProgress(false)
             fail("Reconnection error: ${e.message}")
+        }
+    }
+
+    // ✅ FIX: Set/clear the reconnect_in_progress flag so VpnWatchdogService (separate
+    // process) can distinguish "is_running=false because cleanup" from "VPN actually died".
+    // The watchdog checks this before self-destructing on shouldBeRunning=false.
+    private fun setReconnectInProgress(inProgress: Boolean) {
+        try {
+            getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_RECONNECT_IN_PROGRESS, inProgress)
+                .apply()
+            VpnLogger.log(TAG, if (inProgress) "🔄 Reconnect in progress flag SET" else "✅ Reconnect in progress flag CLEARED")
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Failed to set reconnect flag", e)
         }
     }
 
@@ -600,8 +481,8 @@ class AutoReconnectService : Service() {
 
     private fun resetRetryState() {
         try {
-            val retryPrefs = getSharedPreferences(PREFS_RETRY_NAME, Context.MODE_PRIVATE)
-            retryPrefs.edit()
+            getSharedPreferences(PREFS_RETRY_NAME, Context.MODE_PRIVATE)
+                .edit()
                 .putInt(KEY_RETRY_COUNT, 0)
                 .putInt(KEY_RETRY_BATCH, 1)
                 .putLong(KEY_LAST_RETRY_TIME, 0)
@@ -633,11 +514,7 @@ class AutoReconnectService : Service() {
 
     private fun isAirplaneModeOn(): Boolean {
         return try {
-            val value = Settings.Global.getInt(
-                contentResolver,
-                Settings.Global.AIRPLANE_MODE_ON,
-                0
-            )
+            val value = Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0)
             val isOn = value != 0
             VpnLogger.log(TAG, "✈️ Airplane mode check: $isOn")
             isOn
@@ -651,10 +528,9 @@ class AutoReconnectService : Service() {
         try {
             VpnLogger.log(TAG, "📢 Showing disconnect notification: $title - $message")
 
-            // ✅ Make the intent open the app and trigger reconnection
             val intent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("auto_reconnect_requested", true)  // ✅ Signal to Flutter to reconnect
+                putExtra("auto_reconnect_requested", true)
             }
             val pendingIntent = PendingIntent.getActivity(
                 this, 0, intent,
@@ -669,7 +545,7 @@ class AutoReconnectService : Service() {
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setOngoing(false)  // ✅ Not ongoing - user can dismiss
+                .setOngoing(false)
                 .build()
 
             val nm = getSystemService(NotificationManager::class.java)
@@ -686,13 +562,10 @@ class AutoReconnectService : Service() {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             val network = cm.activeNetwork ?: return false
             val caps = cm.getNetworkCapabilities(network) ?: return false
-
-            val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            val hasTransport = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                               caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                               caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-
-            hasInternet && hasTransport
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Network check error", e)
             false
@@ -755,6 +628,12 @@ class AutoReconnectService : Service() {
         try {
             getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                 .edit().putBoolean("has_unread_death", false).apply()
+
+            // ✅ FIX: Reset the batch counter after a successful reconnect.
+            // Without this, the next VPN death immediately finds retry_batch > MAX_BATCHES
+            // and gives up with zero retry attempts, showing "unable to reconnect" instantly.
+            resetRetryState()
+
             val nm = getSystemService(NotificationManager::class.java)
             nm.cancel(NOTIFICATION_ID)
         } catch (e: Exception) {
@@ -797,27 +676,19 @@ class AutoReconnectService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notificationManager = getSystemService(NotificationManager::class.java)
+            val nm = getSystemService(NotificationManager::class.java)
 
-            val reconnectChannel = NotificationChannel(
-                CHANNEL_ID,
-                "VPN Auto-Reconnect",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Shows when VPN is attempting to reconnect"
-            }
-            notificationManager.createNotificationChannel(reconnectChannel)
+            nm.createNotificationChannel(NotificationChannel(
+                CHANNEL_ID, "VPN Auto-Reconnect", NotificationManager.IMPORTANCE_LOW
+            ).apply { description = "Shows when VPN is attempting to reconnect" })
 
-            val disconnectChannel = NotificationChannel(
-                DISCONNECT_CHANNEL_ID,
-                "VPN Disconnect Alerts",
-                NotificationManager.IMPORTANCE_HIGH
+            nm.createNotificationChannel(NotificationChannel(
+                DISCONNECT_CHANNEL_ID, "VPN Disconnect Alerts", NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Important alerts when VPN disconnects"
                 enableVibration(true)
                 setShowBadge(true)
-            }
-            notificationManager.createNotificationChannel(disconnectChannel)
+            })
 
             VpnLogger.log(TAG, "✅ Notification channels created")
         }
@@ -848,13 +719,27 @@ class AutoReconnectService : Service() {
 
     private fun stopWatchdogService() {
         try {
-            val intent = Intent(this, VpnWatchdogService::class.java)
-            stopService(intent)
+            stopService(Intent(this, VpnWatchdogService::class.java))
             VpnLogger.log(TAG, "✅ VPN watchdog service stopped")
-            Log.d(TAG, "✅ VPN watchdog service stopped")
         } catch (e: Exception) {
             VpnLogger.error(TAG, "Failed to stop watchdog", e)
-            Log.e(TAG, "Failed to stop watchdog: ${e.message}")
+        }
+    }
+
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+    }
+
+    private fun startServiceCompat(intent: Intent) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
     }
 
@@ -863,5 +748,11 @@ class AutoReconnectService : Service() {
         VpnLogger.log(TAG, "🔴 AutoReconnectService onDestroy")
         reconnectJob?.cancel()
         serviceScope.cancel()
+
+        // ✅ SAFETY: Always clear the reconnect_in_progress flag on destroy.
+        // If the OS kills this service mid-reconnect (low memory, etc.), the flag
+        // would otherwise stay true forever, keeping the watchdog alive indefinitely.
+        // The watchdog's next check will then correctly see is_running=false and stop.
+        setReconnectInProgress(false)
     }
 }

@@ -194,6 +194,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     if (reason == 'service_killed') return true;
     if (reason == 'process_crashed') return true;
     if (reason == 'vpn_broken') return true;
+    if (reason == 'network_lost') return true;   // ✅ Matches VpnDeathReceiver.kt behaviour
     if (reason == 'subscription_expired') return false;  // ✅ CHANGED: Don't auto-reconnect!
     return false;
   }

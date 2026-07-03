@@ -21,6 +21,15 @@ class AuthService {
   // ✅ Migration tracking flag (in-memory, resets each app session)
   static bool _hasCheckedMigration = false;
 
+  // ─── Session reset detection ───────────────────────────────────────────────
+  // When Android Keystore is invalidated (OS update, device restore, some
+  // Samsung/Xiaomi devices), FlutterSecureStorage silently wipes all tokens
+  // because of resetOnError: true. Without this flag we can't tell the
+  // difference between "user logged out" and "keystore was wiped".
+  // We store this flag in plain SharedPreferences (survives keystore resets).
+  static const String _sessionFlagKey = 'vulcain_session_active';
+  static const String _sessionResetReasonKey = 'vulcain_session_reset_reason';
+
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(
       encryptedSharedPreferences: true,
@@ -47,6 +56,52 @@ class AuthService {
     if (!Platform.isMacOS) return null;
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('mac_fallback_$key');
+  }
+
+  // Mark that a real user session exists — stored in plain SharedPreferences
+  // so it survives a Keystore reset that wipes FlutterSecureStorage.
+  static Future<void> _setSessionFlag(bool active) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (active) {
+      await prefs.setBool(_sessionFlagKey, true);
+      // Clear any stale reset reason from a previous session
+      await prefs.remove(_sessionResetReasonKey);
+    } else {
+      await prefs.remove(_sessionFlagKey);
+      // ✅ Do NOT remove _sessionResetReasonKey here.
+      // If a reset reason was set (by markSessionResetPublic or _markSessionReset)
+      // just before logout(), it must survive so auth_gate can read it on the
+      // next launch and show the explanation banner on the login screen.
+      // The reason is cleared only when the user successfully logs in again
+      // (inside _setSessionFlag(true) above).
+    }
+  }
+
+  // Returns true if we previously recorded an active session.
+  // If tokens are now missing but this flag is set → keystore was wiped.
+  static Future<bool> _hadActiveSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_sessionFlagKey) ?? false;
+  }
+
+  // Store why the session was reset so the UI can show a clear message.
+  static Future<void> _markSessionReset(String reason) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_sessionFlagKey);
+    await prefs.setString(_sessionResetReasonKey, reason);
+  }
+
+  // Public version for api_service — called before logout() when token
+  // refresh fails, so the login screen can show an explanation banner.
+  static Future<void> markSessionResetPublic(String reason) async {
+    await _markSessionReset(reason);
+  }
+
+  // Returns a human-readable reason if the session was reset unexpectedly,
+  // or null if the user logged out normally.
+  static Future<String?> getSessionResetReason() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_sessionResetReasonKey);
   }
 
   static Future<void> _write(String key, String value) async {
@@ -211,6 +266,11 @@ class AuthService {
       await _writeToken(_accessTokenKey, data['access_token']);
       await _writeToken(_refreshTokenKey, data['refresh_token']);
       await saveEmail(data['user']['email']);
+
+      // ✅ Mark session as active in plain SharedPreferences
+      // This survives a Keystore reset so we can detect the difference
+      // between "user logged out" and "tokens were silently wiped"
+      await _setSessionFlag(true);
 
       // Store token expiry time for better tracking
       await _storeTokenExpiry(data['access_token']);
@@ -495,6 +555,9 @@ class AuthService {
     // Clear secure storage
     await _storage.deleteAll();
 
+    // ✅ Clear session flag — this was an intentional logout, not a reset
+    await _setSessionFlag(false);
+
     // Clear macOS fallback
     if (Platform.isMacOS) {
       final prefs = await SharedPreferences.getInstance();
@@ -518,23 +581,38 @@ class AuthService {
     return await getValidAccessToken();
   }
 
-  // ✅ UPDATED: Check if user is logged in with diagnostics
+  // ✅ UPDATED: Detects keystore wipe vs intentional logout
   static Future<bool> isLoggedIn() async {
     final refreshToken = await _readToken(_refreshTokenKey);
     final isValid = refreshToken != null && refreshToken.isNotEmpty;
 
-    if (!isValid) {
-      print('⚠️ User not logged in - refresh token missing');
+    if (isValid) {
+      print('✅ User is logged in (refresh token exists)');
+      return true;
+    }
+
+    // Token is missing. Was this an intentional logout or a keystore wipe?
+    final hadSession = await _hadActiveSession();
+
+    if (hadSession) {
+      // Session flag is set but tokens are gone — keystore was wiped.
+      // Record this so the login screen can show a clear explanation.
+      print('⚠️ Session flag set but tokens missing — keystore was reset');
+      await _markSessionReset(
+        'Your session was reset automatically (security key changed). '
+        'This can happen after an OS update or device restore. '
+        'Please log in again.',
+      );
+    } else {
+      print('⚠️ User not logged in — no previous session recorded');
       if (Platform.isWindows) {
         final prefs = await SharedPreferences.getInstance();
         final hasKey = prefs.containsKey('win_$_refreshTokenKey');
         print('   Windows SharedPreferences has key: $hasKey');
       }
-    } else {
-      print('✅ User is logged in (refresh token exists)');
     }
 
-    return isValid;
+    return false;
   }
 
   // Store api_key after device registration

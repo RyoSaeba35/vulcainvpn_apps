@@ -30,6 +30,9 @@ import java.util.concurrent.TimeUnit
 import android.app.NotificationChannel
 import android.app.PendingIntent
 import androidx.core.app.NotificationCompat
+import java.net.URL
+import javax.net.ssl.HttpsURLConnection
+import org.json.JSONObject
 
 class MainActivity : FlutterActivity() {
 
@@ -44,6 +47,7 @@ class MainActivity : FlutterActivity() {
     private var pendingResult: MethodChannel.Result? = null
     private var pendingConfig: String? = null
     private var pendingAccessToken: String? = null
+    private var lastDiagnosticReportMs = 0L  // Debounce: prevent spam taps
 
     companion object {
         @Volatile
@@ -217,6 +221,17 @@ class MainActivity : FlutterActivity() {
                             VpnLogger.error(TAG, "Failed to reset retry counter", e)
                         }
 
+                        // ✅ Clear reconnect_in_progress flag in case it was left set by
+                        // a process kill mid-reconnect. Without this, the watchdog would
+                        // stay alive indefinitely even after the user manually connects.
+                        try {
+                            getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+                                .edit().putBoolean("reconnect_in_progress", false).apply()
+                            VpnLogger.log(TAG, "✅ Cleared reconnect_in_progress flag (manual connect)")
+                        } catch (e: Exception) {
+                            VpnLogger.error(TAG, "Failed to clear reconnect flag", e)
+                        }
+
                         // ✅ STEP 1: Battery optimization check (MANDATORY)
                         if (!isBatteryOptimizationExempt()) {
                             VpnLogger.log(TAG, "⚠️ Battery optimization not exempt - requesting")
@@ -368,6 +383,102 @@ class MainActivity : FlutterActivity() {
                         val prefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
                         prefs.edit().putBoolean("has_unread_death", false).apply()
                         result.success(null)
+                    }
+
+                    // ─── Diagnostic log methods ───────────────────────────────────────
+                    "getLogPath" -> {
+                        val path = VpnLogger.getLogFilePath()
+                        VpnLogger.log(TAG, "📄 getLogPath: $path")
+                        result.success(path)
+                    }
+
+                    "getLogSizeKB" -> {
+                        val sizeKB = VpnLogger.getLogSizeKB()
+                        result.success(sizeKB)
+                    }
+
+                    "clearLogs" -> {
+                        VpnLogger.clearLogs()
+                        VpnLogger.log(TAG, "🗑️ Logs cleared by user")
+                        result.success(null)
+                    }
+
+                    "sendDiagnosticReport" -> {
+                        // Debounce — ignore taps within 5 seconds of the last one
+                        val now = System.currentTimeMillis()
+                        if (now - lastDiagnosticReportMs < 5000L) {
+                            VpnLogger.log(TAG, "⏱️ Diagnostic report debounced")
+                            result.success("debounced")
+                            return@setMethodCallHandler
+                        }
+                        lastDiagnosticReportMs = now
+
+                        val accessToken = call.argument<String>("access_token") ?: ""
+                        val deviceInfo  = call.argument<String>("device") ?: "Unknown"
+                        val osVersion   = call.argument<String>("os_version") ?: "Unknown"
+                        val appVersion  = call.argument<String>("app_version") ?: "Unknown"
+                        val userMessage = call.argument<String>("message") ?: ""
+
+                        // Read log on background thread — don't block main thread
+                        Thread {
+                            try {
+                                val logPath = VpnLogger.getLogFilePath()
+                                val logContent = if (logPath != null) {
+                                    val logFile = java.io.File(logPath)
+                                    if (logFile.exists()) logFile.readText() else "Log file not found"
+                                } else {
+                                    "Logger not initialized"
+                                }
+
+                                // Trim to last 100KB
+                                val trimmed = if (logContent.length > 100_000) {
+                                    "[Log trimmed — showing last 100KB]\n\n" + logContent.takeLast(100_000)
+                                } else {
+                                    logContent
+                                }
+
+                                val payload = JSONObject().apply {
+                                    put("device",      deviceInfo)
+                                    put("os_version",  osVersion)
+                                    put("app_version", appVersion)
+                                    put("message",     userMessage)
+                                    put("log",         trimmed)
+                                }
+
+                                val url = URL("https://api.vulcainvpn.com/api/diagnostic_report")
+                                val conn = url.openConnection() as HttpsURLConnection
+                                conn.requestMethod = "POST"
+                                conn.setRequestProperty("Content-Type", "application/json")
+                                conn.setRequestProperty("Authorization", "Bearer $accessToken")
+                                conn.connectTimeout = 15_000
+                                conn.readTimeout    = 15_000
+                                conn.doOutput = true
+
+                                conn.outputStream.use { os ->
+                                    os.write(payload.toString().toByteArray(Charsets.UTF_8))
+                                }
+
+                                val code = conn.responseCode
+                                conn.disconnect()
+
+                                VpnLogger.log(TAG, "📤 Diagnostic report sent — HTTP $code")
+
+                                // Return result on main thread
+                                Handler(Looper.getMainLooper()).post {
+                                    if (code in 200..299) {
+                                        result.success("sent")
+                                    } else {
+                                        result.success("failed:$code")
+                                    }
+                                }
+
+                            } catch (e: Exception) {
+                                VpnLogger.error(TAG, "Failed to send diagnostic report", e)
+                                Handler(Looper.getMainLooper()).post {
+                                    result.success("error:${e.message}")
+                                }
+                            }
+                        }.start()
                     }
                     else -> {
                         VpnLogger.log(TAG, "⚠️ Unknown method: ${call.method}")

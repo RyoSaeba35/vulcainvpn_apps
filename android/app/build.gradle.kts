@@ -24,8 +24,8 @@ android {
         applicationId = "com.vulcainvpn.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.1.1"
+        versionCode = flutter.versionCode
+        versionName = "flutter.versionName"
 
         ndk {
             abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))

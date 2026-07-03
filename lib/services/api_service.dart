@@ -222,6 +222,13 @@ class ApiService {
         }
       } else {
         await _log('   ❌ [$requestId] Refresh failed, logging out...');
+        // ✅ Mark the reset reason BEFORE clearing the session flag,
+        // so auth_gate can show the banner explaining why the user
+        // was logged out (instead of silently redirecting to login).
+        await AuthService.markSessionResetPublic(
+          'Your session expired and could not be renewed automatically. '
+          'Please log in again.',
+        );
         await AuthService.logout();
         throw Exception('Session expired - please login again');
       }

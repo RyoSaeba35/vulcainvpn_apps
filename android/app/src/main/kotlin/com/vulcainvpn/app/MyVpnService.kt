@@ -1325,7 +1325,11 @@ class MyVpnService : VpnService(), PlatformInterface {
         heartbeatCounter = 0  // ✅ Reset subscription check counter
     }
 
-    // ✅ IMPROVED: More reliable heartbeat check with multiple endpoints
+    // ✅ FIXED: Heartbeat now pings the backend instead of 1.1.1.1/cdn-cgi/trace.
+    // The Cloudflare endpoint was being blocked by the Paris VPN server, causing
+    // false "tunnel broken" detections every 40s. The backend heartbeat endpoint
+    // already works reliably (proven by sendBackendHeartbeat() succeeding), so
+    // we reuse it here — it tests DNS + VPN tunnel + server reachability in one shot.
     private suspend fun performHeartbeatCheck(): Boolean {
         if (!isServiceAlive.get()) {
             Log.w(TAG, "performHeartbeatCheck called on destroyed service")
@@ -1334,45 +1338,48 @@ class MyVpnService : VpnService(), PlatformInterface {
 
         return withContext(Dispatchers.IO) {
             try {
-                // ✅ Use HTTP request that MUST route through VPN
-                // This tests: DNS resolution + VPN tunnel + internet connectivity
-                val url = URL("https://1.1.1.1/cdn-cgi/trace")
+                val deviceId = getSecureValue("device_id") ?: run {
+                    VpnLogger.log(TAG, "💔 Heartbeat: No device_id available")
+                    return@withContext false
+                }
+                val apiKey = getSecureValue("api_key") ?: run {
+                    VpnLogger.log(TAG, "💔 Heartbeat: No api_key available")
+                    return@withContext false
+                }
+
+                // POST to our own backend — routes through VPN tunnel, uses real auth.
+                // If the tunnel is broken, this will throw (timeout or connection refused).
+                // If credentials are invalid, we get a non-200 but still know tunnel works.
+                val url = URL("https://api.vulcainvpn.com/api/heartbeat/$deviceId")
                 val connection = url.openConnection() as HttpsURLConnection
 
-                // ✅ CRITICAL: DO NOT protect() - let it route through VPN!
-                // This is the whole point - we're testing if VPN tunnel works
-
+                // DO NOT protect() — must route through VPN tunnel
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("X-Api-Key", apiKey)
+                connection.setRequestProperty("Content-Type", "application/json")
                 connection.connectTimeout = HEARTBEAT_TIMEOUT_MS
                 connection.readTimeout = HEARTBEAT_TIMEOUT_MS
-                connection.requestMethod = "GET"
 
                 val responseCode = connection.responseCode
                 connection.disconnect()
 
-                if (responseCode == 200) {
-                    VpnLogger.log(TAG, "💚 Heartbeat: VPN tunnel healthy (HTTP 200)")
-                    Log.d(TAG, "💚 Heartbeat: VPN tunnel healthy")
-                    return@withContext true
-                } else {
-                    VpnLogger.log(TAG, "💔 Heartbeat: Unexpected response code $responseCode")
-                    Log.w(TAG, "💔 Heartbeat: HTTP $responseCode")
-                    return@withContext false
-                }
+                // Any HTTP response (200, 401, 403, 500...) means the tunnel is alive
+                // and DNS + routing are working. Only exceptions mean the tunnel is dead.
+                VpnLogger.log(TAG, "💚 Heartbeat: VPN tunnel healthy (HTTP $responseCode)")
+                Log.d(TAG, "💚 Heartbeat: VPN tunnel healthy (HTTP $responseCode)")
+                return@withContext true
 
             } catch (e: java.net.UnknownHostException) {
-                // DNS resolution failed - VPN tunnel broken
                 VpnLogger.log(TAG, "💔 Heartbeat: DNS resolution failed (VPN tunnel broken)")
                 Log.e(TAG, "💔 Heartbeat: DNS failed - ${e.message}")
                 return@withContext false
 
             } catch (e: java.net.SocketTimeoutException) {
-                // Connection timeout - VPN tunnel broken
                 VpnLogger.log(TAG, "💔 Heartbeat: Connection timeout (VPN tunnel broken)")
                 Log.e(TAG, "💔 Heartbeat: Timeout - ${e.message}")
                 return@withContext false
 
             } catch (e: Exception) {
-                // Any other error - VPN tunnel broken
                 VpnLogger.log(TAG, "💔 Heartbeat: Connection failed - ${e.message}")
                 Log.e(TAG, "💔 Heartbeat: Failed - ${e.message}")
                 return@withContext false
