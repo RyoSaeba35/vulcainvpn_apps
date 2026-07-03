@@ -35,18 +35,25 @@ workflows:
 
       - name: Build sing-box iOS framework
         script: |
-          # This is Phase 1 — runs here because it needs macOS/Xcode toolchain
-          # (gomobile bind for iOS requires clang/lipo from Xcode, unavailable on Linux)
-          git clone https://github.com/SagerNet/sing-box.git /tmp/sing-box
+          # Pinned to v1.13.0-rc.1 — same version the Android libbox.aar was built
+          # from (RyoSaeba35/sing-box-for-android fork, version.properties).
+          # Keeping platforms on the same core version avoids config/protocol
+          # mismatches between Android and iOS builds.
+          git clone --branch v1.13.0-rc.1 --depth 1 https://github.com/SagerNet/sing-box.git /tmp/sing-box
           cd /tmp/sing-box
-          go install golang.org/x/mobile/cmd/gomobile@latest
+
+          # IMPORTANT: SagerNet uses their own gomobile fork, not golang.org/x/mobile
+          go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.8
+          go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.8
+          export PATH="$PATH:$(go env GOPATH)/bin"
           gomobile init
+
           gomobile bind -v -target=ios,iossimulator \
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
-          # Adjust the target package path to match your sing-box fork's
-          # mobile bindings — check ~/code/RyoSaeba35/sing-box-for-android
-          # for what you already expose there, and mirror the same API surface.
+          # Same package path (experimental/libbox) that SFA binds for Android
+          # and SagerNet's own SFI client binds for iOS — this is the shared
+          # cross-platform entry point, same Go source either way.
 
       - name: Flutter build ipa
         script: |
