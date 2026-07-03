@@ -84,6 +84,16 @@ workflows:
               rm -rf "$flat_tmp"
               echo "Flattened $framework"
             fi
+            # iOS flat frameworks need Info.plist directly at the framework
+            # root — macOS-style bundles keep it nested in Resources/ instead.
+            if [ -f "$framework/Resources/Info.plist" ] && [ ! -f "$framework/Info.plist" ]; then
+              mv "$framework/Resources/Info.plist" "$framework/Info.plist"
+              echo "Moved Info.plist to framework root in $framework"
+            fi
+            # Clean up now-empty Resources dir if nothing else is in it
+            if [ -d "$framework/Resources" ] && [ -z "$(ls -A "$framework/Resources")" ]; then
+              rmdir "$framework/Resources"
+            fi
           done
           # Same package path (experimental/libbox) that SFA binds for Android
           # and SagerNet's own SFI client binds for iOS — this is the shared
