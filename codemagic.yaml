@@ -1,51 +1,63 @@
-# iOS Network Extension scaffold — VulcainVPN
+workflows:
+  ios-vulcainvpn:
+    name: VulcainVPN iOS
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      # Set this up in Codemagic → Teams → Integrations → Apple Developer Portal
+      # (generate an App Store Connect API key at appstoreconnect.apple.com → Users and Access → Keys)
+      app_store_connect: vulcainvpn_asc_key
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        # Both bundle IDs need to be registered in Apple Developer portal first
+        bundle_identifier: com.vulcainvpn.app
+      vars:
+        BUNDLE_ID: "com.vulcainvpn.app"
+        EXT_BUNDLE_ID: "com.vulcainvpn.app.PacketTunnel"
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Set up code signing (main app + extension)
+        script: |
+          # Fetches/creates provisioning profiles for BOTH bundle IDs automatically
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          app-store-connect fetch-signing-files "$EXT_BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
 
-## What's in here
-- `scaffold_ios_extension.rb` — edits your `ios/Runner.xcodeproj` to add the PacketTunnel extension target, sets the real bundle ID, wires up entitlements and the App Group. Run once, locally, on Linux.
-- `codemagic.yaml` — starter CI config. Put this in your repo root. Builds the sing-box iOS framework, signs both targets, produces an IPA, ships to TestFlight.
+      - name: Flutter pub get
+        script: flutter packages pub get
 
-## Step 1 — run the scaffold script
+      - name: Build sing-box iOS framework
+        script: |
+          # This is Phase 1 — runs here because it needs macOS/Xcode toolchain
+          # (gomobile bind for iOS requires clang/lipo from Xcode, unavailable on Linux)
+          git clone https://github.com/SagerNet/sing-box.git /tmp/sing-box
+          cd /tmp/sing-box
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          gomobile init
+          gomobile bind -v -target=ios,iossimulator \
+            -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
+            ./experimental/libbox
+          # Adjust the target package path to match your sing-box fork's
+          # mobile bindings — check ~/code/RyoSaeba35/sing-box-for-android
+          # for what you already expose there, and mirror the same API surface.
 
-```bash
-cd ~/code/RyoSaeba35/cross_platform_vpn   # your Flutter project root
-gem install xcodeproj
-ruby scaffold_ios_extension.rb
-```
+      - name: Flutter build ipa
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
 
-Check the output — it'll tell you what it did and what's still missing. Then `git diff` to review the pbxproj changes before committing (pbxproj diffs are ugly but should be additive/clean here).
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
 
-## Step 2 — Apple Developer portal setup (needs your account active)
-
-1. **Identifiers → App IDs → +**
-   - Register `com.vulcainvpn.app` (main app)
-   - Register `com.vulcainvpn.app.PacketTunnel` (extension) — when creating it, enable the **Network Extensions** capability (only available once Apple approves your entitlement request)
-2. **Identifiers → App Groups → +**
-   - Register `group.com.vulcainvpn.app`
-   - Attach it to both App IDs above
-3. Submit the **Network Extension entitlement request** if you haven't (Account → More or the entitlement request form) — this is the multi-day Apple review, separate from the App ID setup above.
-
-## Step 3 — fill in PacketTunnelProvider.swift
-
-Currently a stub. Needs:
-- Reading the sing-box JSON config (same shape `vpn_config_service.dart` builds for other platforms) from the shared App Group container
-- Booting sing-box via the framework built in Codemagic's `codemagic.yaml` step
-- Calling `setTunnelNetworkSettings` with the TUN config
-
-This is the part that mirrors your `libbox.aar` integration on Android — worth pulling up `~/code/RyoSaeba35/sing-box-for-android` side by side while writing it, since the config JSON and lifecycle are conceptually the same, just a different native binding.
-
-## Step 4 — vpn_service_ios.dart
-
-Not written yet. Should implement the same `VpnService` abstract class as `vpn_service_android.dart`/`vpn_service_windows.dart`, but talk to `NEVPNManager` via a method channel instead of a raw platform service — starting/stopping the tunnel is done by loading an `NETunnelProviderManager` configuration rather than invoking a background service directly.
-
-## Step 5 — Codemagic
-
-1. Push `codemagic.yaml` to your repo root
-2. Connect the repo in Codemagic
-3. Team settings → Integrations → add your App Store Connect API key
-4. Adjust the `gomobile bind` target package path in the YAML to match whatever your sing-box fork exposes
-5. Trigger a build
-
-## Known gaps / things to sanity check
-- The `codemagic.yaml` `gomobile bind` step is a starting template — the actual package path inside sing-box for the mobile bindings needs to match your fork.
-- `xcodeproj`-generated pbxproj changes are usually clean, but Xcode is the final authority — first real build in Codemagic will surface anything the script got wrong (e.g. missing file in Copy Bundle Resources).
-- You'll eventually want a `PrivacyInfo.xcprivacy` manifest (Apple now requires this) — not included here yet.
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
