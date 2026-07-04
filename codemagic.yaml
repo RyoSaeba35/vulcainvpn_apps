@@ -80,6 +80,8 @@ workflows:
             /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$plist"
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$plist" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :MinimumOSVersion 13.0" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string 13.0" "$plist"
             echo "Patched $plist"
           done
 
