@@ -40,6 +40,17 @@ workflows:
       - name: Flutter pub get
         script: flutter packages pub get
 
+      - name: Strip alpha channel from App Store icon
+        script: |
+          # Apple rejects the 1024x1024 App Store icon if it has transparency.
+          # Flattening onto white background — replace with a proper opaque
+          # icon design when convenient, this is a stopgap.
+          brew list imagemagick &>/dev/null || brew install imagemagick
+          find ios/Runner/Assets.xcassets/AppIcon.appiconset -name "*1024*.png" | while read -r icon; do
+            magick "$icon" -background white -alpha remove -alpha off "$icon"
+            echo "Stripped alpha from $icon"
+          done
+
       - name: Build sing-box iOS framework
         script: |
           # Pinned to v1.13.0-rc.1 — same version the Android libbox.aar was built
@@ -65,6 +76,10 @@ workflows:
           find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Info.plist" -path "*Libbox.framework*" | while read -r plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.vulcainvpn.app.PacketTunnel.Libbox" "$plist" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.vulcainvpn.app.PacketTunnel.Libbox" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$plist"
             echo "Patched $plist"
           done
 
