@@ -70,8 +70,8 @@ workflows:
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
 
-          echo "=== DUMPING GENERATED OBJECTIVE-C HEADER (Libbox.h) ==="
-          find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Libbox.h" | head -1 | xargs cat
+          echo "=== DUMPING GENERATED OBJECTIVE-C HEADER (Libbox.objc.h) ==="
+          find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Libbox.objc.h" | head -1 | xargs cat
           echo "=== END HEADER DUMP ==="
 
           # gomobile bind doesn't set CFBundleIdentifier in the generated
