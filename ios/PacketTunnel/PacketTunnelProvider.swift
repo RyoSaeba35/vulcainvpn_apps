@@ -4,14 +4,16 @@ import os.log
 
 /// PacketTunnelProvider — the iOS equivalent of Android's MyVpnService.kt.
 ///
-/// Swift/ObjC bridging rules that matter here (confirmed via two rounds of
-/// real compiler errors, not guessed up front):
+/// Swift/ObjC bridging rule that matters here (confirmed via three rounds
+/// of real compiler errors — this genuinely can't be known in advance
+/// without seeing gomobile's specific output compile):
 ///   - Methods whose ObjC return is BOOL with NSError** (void-like, no
 ///     other meaningful return) bridge to Swift `throws` (Void return).
 ///   - Methods whose ObjC return is a NULLABLE OBJECT with NSError**
-///     do NOT bridge to throws — Swift keeps them as plain functions
-///     returning the optional directly (nil already signals failure to
-///     ObjC callers; combining that with throws would be ambiguous).
+///     bridge to `throws -> T` where T is NON-optional — the nullability
+///     is fully absorbed into the throws mechanism, not kept as Optional.
+///     (Writing `throws -> T?` or plain non-throwing `-> T?` both fail —
+///     it must be exactly `throws -> T`.)
 ///   - Free C functions (FOUNDATION_EXPORT) with NSError** do NOT get
 ///     auto-bridged to throws at all — the NSErrorPointer stays a real,
 ///     literal parameter you must pass explicitly.
@@ -177,18 +179,20 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         // NotificationService. Not critical for a first working tunnel.
     }
 
-    // Nullable-object return + error -> does NOT bridge to throws, plain optional.
-    func getInterfaces() -> LibboxNetworkInterfaceIteratorProtocol? {
+    // Nullable-object return + error bridges to throws -> NON-optional T
+    // (the nullability is absorbed into the throws mechanism itself).
+    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
         // TODO: mirror Android's buildInterfaceCacheForNetwork.
-        return nil
+        throw NSError(domain: "VulcainVPN", code: 4,
+            userInfo: [NSLocalizedDescriptionKey: "getInterfaces not implemented"])
     }
 
     func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {}
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {}
 
-    // Nullable-object return + error -> plain optional, no throws.
-    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32) -> LibboxConnectionOwner? {
-        return nil
+    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32) throws -> LibboxConnectionOwner {
+        throw NSError(domain: "VulcainVPN", code: 5,
+            userInfo: [NSLocalizedDescriptionKey: "findConnectionOwner not implemented"])
     }
 }
 
@@ -199,8 +203,8 @@ private class VulcainCommandServerHandler: NSObject, LibboxCommandServerHandlerP
         os_log("libbox: %{public}@", message ?? "")
     }
 
-    // Nullable-object return + error -> plain optional, no throws.
-    func getSystemProxyStatus() -> LibboxSystemProxyStatus? {
+    // Same rule: nullable-object return + error -> throws with non-optional T.
+    func getSystemProxyStatus() throws -> LibboxSystemProxyStatus {
         let status = LibboxSystemProxyStatus()
         status.available = false
         status.enabled = false
