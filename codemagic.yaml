@@ -70,6 +70,10 @@ workflows:
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
 
+          echo "=== DUMPING GENERATED OBJECTIVE-C HEADER (Libbox.h) ==="
+          find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Libbox.h" | head -1 | xargs cat
+          echo "=== END HEADER DUMP ==="
+
           # gomobile bind doesn't set CFBundleIdentifier in the generated
           # framework's Info.plist — Apple's validator rejects empty/missing
           # bundle IDs on upload. Patch every platform slice's Info.plist.
@@ -128,4 +132,9 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        submit_to_testflight: true
+        submit_to_testflight: false
+        # Internal testing (just you) doesn't need beta review at all — the
+        # build becomes available to internal testers as soon as Apple
+        # finishes processing it. submit_to_testflight only matters for
+        # EXTERNAL testers, which needs extra metadata (feedback email,
+        # reviewer contact info) we haven't filled in yet.
