@@ -16,6 +16,7 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		A0E779856A9172FF4662F31E /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 91FF3E5DE2420D1AE6BBF876 /* NetworkExtension.framework */; };
+		AB50C76C26BAAB4EEF3DDBAC /* VpnManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41FAABC16A99DC4ACA5B33FE /* VpnManager.swift */; };
 		AE80635BE36CA882467154BD /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75ED71DC6158E9BA465B45A9 /* PacketTunnelProvider.swift */; };
 		FB806392A7DEB76279FDF884 /* PacketTunnel.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A5A37DC215116688E0048796 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeaderOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -59,6 +60,7 @@
 		331C8081294A63A400263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = AppFrameworkInfo.plist; path = Flutter/AppFrameworkInfo.plist; sourceTree = "<group>"; };
 		3EC303B5F6DAFE138D0D916C /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = Info.plist; sourceTree = "<group>"; };
+		41FAABC16A99DC4ACA5B33FE /* VpnManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = VpnManager.swift; path = Runner/VpnManager.swift; sourceTree = "<group>"; };
 		6974E950E2C8D932A5A6AB58 /* PacketTunnel.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = PacketTunnel.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
 		74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Runner-Bridging-Header.h"; sourceTree = "<group>"; };
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -158,6 +160,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				B973FD36B91748B63CDA5D49 /* Runner.entitlements */,
+				41FAABC16A99DC4ACA5B33FE /* VpnManager.swift */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -348,6 +351,7 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
+				AB50C76C26BAAB4EEF3DDBAC /* VpnManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
