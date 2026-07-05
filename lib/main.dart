@@ -12,6 +12,7 @@ import 'services/notification_service.dart';
 import 'services/windows_notification_service.dart';
 import 'services/macos_notification_service.dart';
 import 'services/auth_service.dart';
+import 'services/vpn_service_ios.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
