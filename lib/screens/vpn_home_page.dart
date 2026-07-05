@@ -12,6 +12,7 @@ import '../services/vpn_service_android.dart';
 import '../services/vpn_service_windows.dart';
 import '../services/settings_service.dart';
 import '../services/notification_service.dart';
+import '../services/vpn_service_ios.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
@@ -113,6 +114,11 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       });
     } else if (Platform.isWindows) {
       _eventSubscription = WindowsVpnService.eventStream.listen((event) {
+        print('📡 Flutter received VPN event: $event');
+        _handleVpnEvent(event);
+      });
+    } else if (Platform.isIOS) {
+      _eventSubscription = IosVpnService.eventStream.listen((event) {
         print('📡 Flutter received VPN event: $event');
         _handleVpnEvent(event);
       });

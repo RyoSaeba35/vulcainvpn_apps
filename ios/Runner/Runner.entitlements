@@ -6,9 +6,9 @@
   <array>
     <string>group.com.vulcainvpn.app</string>
   </array>
-  <key>com.apple.developer.networking.networkextension</key>
+  <key>com.apple.developer.networking.vpn.api</key>
   <array>
-    <string>packet-tunnel-provider</string>
+    <string>allow-vpn</string>
   </array>
 </dict>
 </plist>

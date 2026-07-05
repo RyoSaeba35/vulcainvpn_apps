@@ -37,6 +37,10 @@ void main() async {
     await NotificationService.initialize();
   }
 
+  if (Platform.isIOS) {
+    IosVpnService.setupEventListener();
+  }
+
   // Handle security check result
   if (securityAction == SecurityAction.block) {
     runApp(const SecurityBlockedApp());
