@@ -4,12 +4,17 @@ import os.log
 
 /// PacketTunnelProvider — the iOS equivalent of Android's MyVpnService.kt.
 ///
-/// Swift bridging note: Objective-C methods ending in `error:(NSError**)`
-/// get imported into Swift as `throws` functions — the BOOL/NSError**
-/// mechanics are stripped from the Swift-visible signature, and any OTHER
-/// genuine out-parameter (like openTun's fd) becomes the throwing
-/// function's actual return value. This file was corrected after the
-/// first build attempt wrote literal ObjC-style signatures instead.
+/// Swift/ObjC bridging rules that matter here (confirmed via two rounds of
+/// real compiler errors, not guessed up front):
+///   - Methods whose ObjC return is BOOL with NSError** (void-like, no
+///     other meaningful return) bridge to Swift `throws` (Void return).
+///   - Methods whose ObjC return is a NULLABLE OBJECT with NSError**
+///     do NOT bridge to throws — Swift keeps them as plain functions
+///     returning the optional directly (nil already signals failure to
+///     ObjC callers; combining that with throws would be ambiguous).
+///   - Free C functions (FOUNDATION_EXPORT) with NSError** do NOT get
+///     auto-bridged to throws at all — the NSErrorPointer stays a real,
+///     literal parameter you must pass explicitly.
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var commandServer: LibboxCommandServer?
@@ -96,16 +101,19 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let platformInterface = VulcainPlatformInterface(tunnelProvider: self)
         let handler = VulcainCommandServerHandler()
 
-        // LibboxNewCommandServer's trailing NSError** also bridges to throws.
-        let server = try LibboxNewCommandServer(handler, platformInterface)
-        guard let server = server else {
-            throw NSError(domain: "VulcainVPN", code: 3,
+        // Free C function returning a nullable object + NSError** does NOT
+        // bridge to throws — the error param stays literal.
+        var createError: NSError?
+        guard let server = LibboxNewCommandServer(handler, platformInterface, &createError) else {
+            throw createError ?? NSError(domain: "VulcainVPN", code: 3,
                 userInfo: [NSLocalizedDescriptionKey: "LibboxNewCommandServer returned nil"])
         }
 
-        // startOrReloadService's BOOL+error also bridges to a plain throws
-        // call — the BOOL is dropped since throws already signals failure.
-        try server.startOrReloadService(config, options: nil)
+        // startOrReloadService returns BOOL (void-like) — this one does
+        // bridge to throws. Passing an explicit LibboxOverrideOptions
+        // instead of nil avoids Swift overload-resolution ambiguity.
+        let overrideOptions = LibboxOverrideOptions()
+        try server.startOrReloadService(config, options: overrideOptions)
 
         commandServer = server
     }
@@ -126,10 +134,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 }
 
-/// Implements LibboxPlatformInterfaceProtocol. Every method ending in
-/// `error:` in the ObjC header below is written here as `throws` per
-/// Swift's automatic NSError** bridging — this is why these signatures
-/// look different from the raw Objective-C declarations.
+/// Implements LibboxPlatformInterfaceProtocol.
 private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtocol {
 
     private weak var tunnelProvider: PacketTunnelProvider?
@@ -138,8 +143,7 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         self.tunnelProvider = tunnelProvider
     }
 
-    // ObjC: - (BOOL)openTun:options: ret0_:(int32_t*) error:(NSError**)
-    // The ret0_ out-param becomes the throws function's return value.
+    // BOOL + separate real out-param (ret0_) -> bridges to throws -> Int32.
     func openTun(_ options: LibboxTunOptionsProtocol?) throws -> Int32 {
         guard let fd = tunnelProvider?.extractTunnelFileDescriptor() else {
             throw NSError(domain: "VulcainVPN", code: 2,
@@ -148,10 +152,11 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         return fd
     }
 
-    // Exact rename per Xcode's compiler diagnostic.
     func usePlatformAutoDetectControl() -> Bool { true }
 
-    func autoDetectInterfaceControl(_ fd: Int32) throws {
+    // Renamed per second round of compiler diagnostics.
+    // BOOL, void-like -> still bridges to throws.
+    func autoDetectControl(_ fd: Int32) throws {
         // No-op on iOS — setTunnelNetworkSettings + the NE entitlement
         // already handle routing exclusion, unlike Android's protect(fd).
     }
@@ -161,16 +166,19 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
     func useProcFS() -> Bool { false }
     func clearDNSCache() {}
 
+    // No error param in the ObjC header at all for these two — plain optional.
     func localDNSTransport() -> LibboxLocalDNSTransportProtocol? { nil }
     func readWIFIState() -> LibboxWIFIState? { nil }
     func systemCertificates() -> LibboxStringIteratorProtocol? { nil }
 
-    func sendNotification(_ notification: LibboxNotification?) throws {
+    // Renamed to send(_:) — BOOL, void-like -> still bridges to throws.
+    func send(_ notification: LibboxNotification?) throws {
         // TODO: bridge to UNUserNotificationCenter, mirroring Android's
         // NotificationService. Not critical for a first working tunnel.
     }
 
-    func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol? {
+    // Nullable-object return + error -> does NOT bridge to throws, plain optional.
+    func getInterfaces() -> LibboxNetworkInterfaceIteratorProtocol? {
         // TODO: mirror Android's buildInterfaceCacheForNetwork.
         return nil
     }
@@ -178,20 +186,21 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
     func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {}
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {}
 
-    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32) throws -> LibboxConnectionOwner? {
+    // Nullable-object return + error -> plain optional, no throws.
+    func findConnectionOwner(_ ipProtocol: Int32, sourceAddress: String?, sourcePort: Int32, destinationAddress: String?, destinationPort: Int32) -> LibboxConnectionOwner? {
         return nil
     }
 }
 
-/// Implements LibboxCommandServerHandlerProtocol — mostly stubs for a
-/// first working version. Same throws-bridging convention applies.
+/// Implements LibboxCommandServerHandlerProtocol.
 private class VulcainCommandServerHandler: NSObject, LibboxCommandServerHandlerProtocol {
 
     func writeDebugMessage(_ message: String?) {
         os_log("libbox: %{public}@", message ?? "")
     }
 
-    func getSystemProxyStatus() throws -> LibboxSystemProxyStatus? {
+    // Nullable-object return + error -> plain optional, no throws.
+    func getSystemProxyStatus() -> LibboxSystemProxyStatus? {
         let status = LibboxSystemProxyStatus()
         status.available = false
         status.enabled = false
