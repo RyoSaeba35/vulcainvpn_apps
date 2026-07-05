@@ -146,12 +146,12 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
     }
 
     // BOOL + separate real out-param (ret0_) -> bridges to throws -> Int32.
-    func openTun(_ options: any LibboxTunOptionsProtocol) throws -> Int32 {
+    func openTun(_ options: (any LibboxTunOptionsProtocol)?, ret0_: UnsafeMutablePointer<Int32>?) throws {
         guard let fd = tunnelProvider?.extractTunnelFileDescriptor() else {
             throw NSError(domain: "VulcainVPN", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Could not find tunnel file descriptor"])
         }
-        return fd
+        ret0_?.pointee = fd
     }
 
     func usePlatformAutoDetectControl() -> Bool { true }
