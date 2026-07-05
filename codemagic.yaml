@@ -120,6 +120,11 @@ workflows:
           # and SagerNet's own SFI client binds for iOS — this is the shared
           # cross-platform entry point, same Go source either way.
 
+      - name: Fix resolv linking (Go/gomobile cgo resolver symbols)
+        script: |
+          cd $CM_BUILD_DIR
+          ruby fix_add_resolv_lib.rb
+
       - name: Flutter build ipa
         script: |
           flutter build ipa --release --verbose \
