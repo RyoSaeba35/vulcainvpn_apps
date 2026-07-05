@@ -123,6 +123,7 @@ workflows:
       - name: Flutter build ipa
         script: |
           flutter build ipa --release \
+            --build-number=$(date +%s) \
             --export-options-plist=/Users/builder/export_options.plist
 
     artifacts:
