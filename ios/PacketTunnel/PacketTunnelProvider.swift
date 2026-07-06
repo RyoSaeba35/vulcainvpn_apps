@@ -260,9 +260,15 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
 
     private weak var tunnelProvider: PacketTunnelProvider?
     private var pathMonitor: NWPathMonitor?
+    private var currentInterfaceIndex: Int32 = 0
 
     init(tunnelProvider: PacketTunnelProvider) {
         self.tunnelProvider = tunnelProvider
+        super.init()
+        if let initialInterface = firstUsableInterfaceName() {
+            currentInterfaceIndex = Int32(if_nametoindex(initialInterface))
+            VulcainLogger.log("Extension", "initial default interface (at init): \(initialInterface) (index \(currentInterfaceIndex))")
+        }
     }
 
     func openTun(_ options: (any LibboxTunOptionsProtocol)?, ret0_: UnsafeMutablePointer<Int32>?) throws {
@@ -286,9 +292,32 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
 
     // Real Swift-facing name is autoDetectControl, not
     // autoDetectInterfaceControl (same swift_name situation as above).
+    //
+    // This is likely the actual root cause of "tunnel connects but no
+    // traffic flows": sing-box calls this for its OWN outbound connections
+    // (to the real WireGuard/Hysteria2/Shadowsocks server), expecting the
+    // platform to bind that socket to the physical interface, bypassing
+    // our own 0.0.0.0/0 tunnel route. Without this, those outbound sockets
+    // get captured by our own tunnel — a routing loop that means sing-box
+    // can never actually reach the real remote server, so no traffic ever
+    // flows, and iOS's reachability watchdog kills the extension after
+    // ~5s of apparent inactivity (matches the exact timing observed).
     func autoDetectControl(_ fd: Int32) throws {
-        // No-op on iOS — setTunnelNetworkSettings + the NE entitlement
-        // already handle routing exclusion, unlike Android's protect(fd).
+        guard currentInterfaceIndex > 0 else {
+            VulcainLogger.error("Extension", "autoDetectControl called but no default interface index known yet")
+            return
+        }
+
+        var index = currentInterfaceIndex
+        let ipv4Result = setsockopt(fd, IPPROTO_IP, IP_BOUND_IF, &index, socklen_t(MemoryLayout<Int32>.size))
+        var index6 = currentInterfaceIndex
+        let ipv6Result = setsockopt(fd, IPPROTO_IPV6, IPV6_BOUND_IF, &index6, socklen_t(MemoryLayout<Int32>.size))
+
+        if ipv4Result != 0 && ipv6Result != 0 {
+            VulcainLogger.error("Extension", "autoDetectControl: setsockopt failed for fd \(fd), interface index \(currentInterfaceIndex) (errno \(errno))")
+        } else {
+            VulcainLogger.log("Extension", "autoDetectControl: bound fd \(fd) to interface index \(currentInterfaceIndex)")
+        }
     }
 
     func underNetworkExtension() -> Bool { true }
@@ -386,11 +415,20 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
     }
 
     func startDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
+        // Initial synchronous best-effort lookup so currentInterfaceIndex
+        // isn't 0 if autoDetectControl gets called before NWPathMonitor's
+        // first async callback fires.
+        if let initialInterface = firstUsableInterfaceName() {
+            currentInterfaceIndex = Int32(if_nametoindex(initialInterface))
+            VulcainLogger.log("Extension", "initial default interface: \(initialInterface) (index \(currentInterfaceIndex))")
+        }
+
         let monitor = NWPathMonitor()
-        monitor.pathUpdateHandler = { path in
+        monitor.pathUpdateHandler = { [weak self] path in
             guard path.status == .satisfied else { return }
             let interfaceName = path.availableInterfaces.first?.name ?? ""
             let interfaceIndex = Int32(if_nametoindex(interfaceName))
+            self?.currentInterfaceIndex = interfaceIndex
             listener?.updateDefaultInterface(
                 interfaceName,
                 interfaceIndex: interfaceIndex,
@@ -401,6 +439,25 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         }
         monitor.start(queue: DispatchQueue.global(qos: .utility))
         pathMonitor = monitor
+    }
+
+    /// Best-effort synchronous interface pick for the initial value —
+    /// prefers en0 (Wi-Fi) or pdp_ip* (cellular) over utun/ipsec/etc.
+    private func firstUsableInterfaceName() -> String? {
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddrPtr) == 0, let firstAddr = ifaddrPtr else { return nil }
+        defer { freeifaddrs(ifaddrPtr) }
+
+        var candidates: [String] = []
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let name = String(cString: ptr.pointee.ifa_name)
+            let flags = Int32(ptr.pointee.ifa_flags)
+            guard (flags & IFF_UP) != 0, (flags & IFF_LOOPBACK) == 0 else { continue }
+            if name.hasPrefix("en") || name.hasPrefix("pdp_ip") {
+                candidates.append(name)
+            }
+        }
+        return candidates.first
     }
 
     func closeDefaultInterfaceMonitor(_ listener: LibboxInterfaceUpdateListenerProtocol?) throws {
