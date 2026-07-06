@@ -22,6 +22,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var commandServer: LibboxCommandServer?
     private let appGroup = "group.com.vulcainvpn.app"
+    private var heartbeatTimer: DispatchSourceTimer?
+    private var heartbeatCount = 0
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         VulcainLogger.log("Extension", "startTunnel called")
@@ -48,6 +50,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             do {
                 try self.startLibbox(config: config)
                 VulcainLogger.log("Extension", "libbox started successfully — tunnel should be up")
+                self.startHeartbeat()
                 completionHandler(nil)
             } catch {
                 VulcainLogger.error("Extension", "libbox failed to start: \(error.localizedDescription)")
@@ -58,6 +61,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         VulcainLogger.log("Extension", "stopTunnel reason=\(String(describing: reason))")
+        stopHeartbeat()
 
         let serverToClose = commandServer
         commandServer = nil
@@ -158,6 +162,25 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             throw setupError
         }
         VulcainLogger.log("Extension", "LibboxSetup succeeded, basePath=\(basePath)")
+    }
+
+    // MARK: - Heartbeat (diagnostic only — measures exact survival time)
+
+    private func startHeartbeat() {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            self.heartbeatCount += 1
+            VulcainLogger.log("Extension", "heartbeat #\(self.heartbeatCount) — still alive")
+        }
+        timer.resume()
+        heartbeatTimer = timer
+    }
+
+    private func stopHeartbeat() {
+        heartbeatTimer?.cancel()
+        heartbeatTimer = nil
     }
 }
 
