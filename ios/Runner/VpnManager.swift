@@ -1,6 +1,7 @@
 import Foundation
 import NetworkExtension
 import Flutter
+import UIKit
 
 // Runs in the MAIN APP process (not the PacketTunnel extension).
 // This is the iOS equivalent of your Android MethodChannel handler —
@@ -25,6 +26,9 @@ class VpnManager: NSObject {
     // Must match the App Group registered in both targets' entitlements
     // AND PacketTunnelProvider's `appGroup` constant.
     private let appGroup = "group.com.vulcainvpn.app"
+
+    // Debounce, matching Android's 5-second window exactly.
+    private var lastDiagnosticReportMs: Int64 = 0
 
     // MARK: - Public entry points, called from AppDelegate's channel setup
 
@@ -72,6 +76,9 @@ class VpnManager: NSObject {
         case "clearLogs":
             VulcainLogger.clear()
             result(nil)
+
+        case "sendDiagnosticReport":
+            sendDiagnosticReport(call: call, result: result)
 
         default:
             result(FlutterMethodNotImplemented)
@@ -173,6 +180,83 @@ class VpnManager: NSObject {
             }
             manager.connection.stopVPNTunnel()
             result(nil)
+        }
+    }
+
+    // MARK: - Diagnostic report (mirrors Android's MainActivity.kt exactly)
+
+    /// Same debounce, same JSON payload shape, same endpoint, same response
+    /// strings ("sent" / "debounced" / "failed:$code" / "error:$message")
+    /// as Android's Kotlin implementation — so the Dart side needs zero
+    /// changes to work identically on both platforms.
+    private func sendDiagnosticReport(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        if now - lastDiagnosticReportMs < 5000 {
+            VulcainLogger.log("MainApp", "Diagnostic report debounced")
+            result("debounced")
+            return
+        }
+        lastDiagnosticReportMs = now
+
+        let args = call.arguments as? [String: Any] ?? [:]
+        let accessToken = args["access_token"] as? String ?? ""
+        let deviceInfo = args["device"] as? String ?? "Unknown"
+        let osVersion = args["os_version"] as? String ?? "Unknown"
+        let appVersion = args["app_version"] as? String ?? "Unknown"
+        let userMessage = args["message"] as? String ?? ""
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let logContent = VulcainLogger.readAll() ?? "Logger not initialized"
+
+            // Same 100KB trim as Android.
+            let trimmed: String
+            if logContent.count > 100_000 {
+                let tail = String(logContent.suffix(100_000))
+                trimmed = "[Log trimmed — showing last 100KB]\n\n" + tail
+            } else {
+                trimmed = logContent
+            }
+
+            let payload: [String: Any] = [
+                "device": deviceInfo,
+                "os_version": osVersion,
+                "app_version": appVersion,
+                "message": userMessage,
+                "log": trimmed,
+            ]
+
+            guard let url = URL(string: "https://api.vulcainvpn.com/api/diagnostic_report"),
+                  let body = try? JSONSerialization.data(withJSONObject: payload) else {
+                DispatchQueue.main.async { result("error:invalid_payload") }
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 15
+            request.httpBody = body
+
+            let task = URLSession.shared.dataTask(with: request) { _, response, error in
+                if let error = error {
+                    VulcainLogger.error("MainApp", "Failed to send diagnostic report: \(error.localizedDescription)")
+                    DispatchQueue.main.async { result("error:\(error.localizedDescription)") }
+                    return
+                }
+
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                VulcainLogger.log("MainApp", "Diagnostic report sent — HTTP \(statusCode)")
+
+                DispatchQueue.main.async {
+                    if (200...299).contains(statusCode) {
+                        result("sent")
+                    } else {
+                        result("failed:\(statusCode)")
+                    }
+                }
+            }
+            task.resume()
         }
     }
 

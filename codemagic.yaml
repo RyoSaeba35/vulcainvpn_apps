@@ -67,8 +67,18 @@ workflows:
           gomobile init
 
           gomobile bind -v -target=ios,iossimulator \
+            -tags "with_wireguard,with_quic,with_utls,with_dhcp" \
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
+          # sing-box compiles protocols conditionally via build tags to
+          # save binary size — without these, outbounds silently aren't
+          # included. with_wireguard: WireGuard outbound (confirmed needed
+          # via runtime error "WireGuard is not included in this build").
+          # with_quic: Hysteria2 is QUIC-based, needs this too. with_utls,
+          # with_dhcp: commonly needed alongside for full protocol support.
+          # If Android's libbox.aar build script (sing-box-for-android)
+          # used a different/larger tag set, match that instead for
+          # feature parity across platforms.
 
           echo "=== DUMPING GENERATED OBJECTIVE-C HEADER (Libbox.objc.h) ==="
           find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Libbox.objc.h" | head -1 | xargs cat
@@ -119,11 +129,6 @@ workflows:
           # Same package path (experimental/libbox) that SFA binds for Android
           # and SagerNet's own SFI client binds for iOS — this is the shared
           # cross-platform entry point, same Go source either way.
-
-      - name: Fix resolv linking (Go/gomobile cgo resolver symbols)
-        script: |
-          cd $CM_BUILD_DIR
-          ruby fix_add_resolv_lib.rb
 
       - name: Flutter build ipa
         script: |
