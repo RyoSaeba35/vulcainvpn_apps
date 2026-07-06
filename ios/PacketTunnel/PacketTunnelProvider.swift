@@ -4,18 +4,20 @@ import Libbox
 
 /// PacketTunnelProvider — the iOS equivalent of Android's MyVpnService.kt.
 ///
-/// This version is aligned against the REAL, complete Libbox.objc.h header
-/// (captured from a build log), not guesses. Previous versions had several
-/// method names wrong (autoDetectControl vs autoDetectInterfaceControl,
-/// usePlatformAutoDetectControl vs usePlatformAutoDetectInterfaceControl,
-/// send vs sendNotification) that evidently didn't block compilation for
-/// reasons not fully understood — but are now corrected to match ground
-/// truth. Also replaces the fragile getpeername/AF_SYSTEM fd-scanning hack
-/// with the official LibboxGetTunnelFileDescriptor() function, and adds a
-/// real getInterfaces() implementation (previously a stub throwing "not
-/// implemented" — a likely root cause of "tunnel connects but no traffic
-/// flows", since the config's auto_detect_interface:true setting depends
-/// on this to know which physical interface to bind outbound connections to).
+/// IMPORTANT LEARNING: gomobile/gobind attaches hidden Swift-name-rename
+/// annotations to some ObjC methods that do NOT show up in the plain
+/// Libbox.objc.h header text. The header shows e.g.
+/// "autoDetectInterfaceControl:error:", but Swift actually requires
+/// "autoDetectControl(_:)" — confirmed via compiler diagnostics like
+/// "'autoDetectInterfaceControl' has been renamed to 'autoDetectControl(_:)'".
+/// So for THESE THREE methods specifically, the correct Swift names are
+/// shorter than what the raw header suggests: autoDetectControl (not
+/// autoDetectInterfaceControl), usePlatformAutoDetectControl (not
+/// usePlatformAutoDetectInterfaceControl), send (not sendNotification).
+/// LibboxSetup, by contrast, is a free/global function and does NOT bridge
+/// to throws at all (needs the explicit NSError** form) — free functions
+/// don't get the throws-bridging treatment regardless of BOOL vs nullable-
+/// object return shape, only protocol/class methods do.
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var commandServer: LibboxCommandServer?
@@ -149,7 +151,12 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         options.workingPath = workingPath
         options.tempPath = tempPath
 
-        try LibboxSetup(options)
+        var setupError: NSError?
+        LibboxSetup(options, &setupError)
+        if let setupError = setupError {
+            VulcainLogger.error("Extension", "LibboxSetup failed: \(setupError.localizedDescription)")
+            throw setupError
+        }
         VulcainLogger.log("Extension", "LibboxSetup succeeded, basePath=\(basePath)")
     }
 }
@@ -218,13 +225,15 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         ret0_?.pointee = fd
     }
 
-    // NOTE: real header name is usePlatformAutoDetectInterfaceControl, not
-    // usePlatformAutoDetectControl (an earlier, incorrect rename).
-    func usePlatformAutoDetectInterfaceControl() -> Bool { true }
+    // gomobile adds hidden swift_name annotations that don't appear in the
+    // plain ObjC header text — the real Swift-facing name is
+    // usePlatformAutoDetectControl, confirmed by compiler diagnostic
+    // ("has been renamed to usePlatformAutoDetectControl()").
+    func usePlatformAutoDetectControl() -> Bool { true }
 
-    // NOTE: real header name is autoDetectInterfaceControl, not
-    // autoDetectControl (an earlier, incorrect rename).
-    func autoDetectInterfaceControl(_ fd: Int32) throws {
+    // Real Swift-facing name is autoDetectControl, not
+    // autoDetectInterfaceControl (same swift_name situation as above).
+    func autoDetectControl(_ fd: Int32) throws {
         // No-op on iOS — setTunnelNetworkSettings + the NE entitlement
         // already handle routing exclusion, unlike Android's protect(fd).
     }
@@ -238,9 +247,9 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
     func readWIFIState() -> LibboxWIFIState? { nil }
     func systemCertificates() -> LibboxStringIteratorProtocol? { nil }
 
-    // NOTE: real header name is sendNotification, not send (an earlier,
-    // incorrect rename).
-    func sendNotification(_ notification: LibboxNotification?) throws {
+    // Real Swift-facing name is send, not sendNotification (same
+    // swift_name situation — confirmed by compiler diagnostic).
+    func send(_ notification: LibboxNotification?) throws {
         // TODO: bridge to UNUserNotificationCenter, mirroring Android's
         // NotificationService. Not critical for a working tunnel.
     }
