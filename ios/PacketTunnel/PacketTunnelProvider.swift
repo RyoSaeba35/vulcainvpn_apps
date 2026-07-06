@@ -91,6 +91,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     // MARK: - Libbox lifecycle
 
     private func startLibbox(config: String) throws {
+        try setupLibboxPaths()
         LibboxSetMemoryLimit(true)
 
         let platformInterface = VulcainPlatformInterface(tunnelProvider: self)
@@ -109,6 +110,47 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         VulcainLogger.log("Extension", "startOrReloadService succeeded")
 
         commandServer = server
+    }
+
+    /// sing-box tries to write a cache database (cache.db) and other state
+    /// to its default working directory, but that default location isn't
+    /// writable from inside the Network Extension sandbox ("operation not
+    /// permitted"). LibboxSetup tells it to use the shared App Group
+    /// container instead, which we DO have write access to.
+    ///
+    /// NOTE: exact parameter names/bridging are a best-effort guess based
+    /// on the standard sing-box mobile setup pattern (matches the official
+    /// sing-box-for-apple client) — if this doesn't compile, the compiler
+    /// error will show the real signature, same as it did for openTun
+    /// earlier in this file.
+    private func setupLibboxPaths() throws {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroup
+        ) else {
+            throw NSError(domain: "VulcainVPN", code: 6,
+                userInfo: [NSLocalizedDescriptionKey: "Could not access App Group container for Libbox setup"])
+        }
+
+        let basePath = containerURL.appendingPathComponent("sing-box").path
+        let workingPath = containerURL.appendingPathComponent("sing-box/working").path
+        let tempPath = containerURL.appendingPathComponent("sing-box/temp").path
+
+        for path in [basePath, workingPath, tempPath] {
+            try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        }
+
+        let options = LibboxSetupOptions()
+        options.basePath = basePath
+        options.workingPath = workingPath
+        options.tempPath = tempPath
+
+        var setupError: NSError?
+        LibboxSetup(options, &setupError)
+        if let setupError = setupError {
+            VulcainLogger.error("Extension", "LibboxSetup failed: \(setupError.localizedDescription)")
+            throw setupError
+        }
+        VulcainLogger.log("Extension", "LibboxSetup succeeded, basePath=\(basePath)")
     }
 
     /// WireGuard's proven technique for extracting a raw fd from
