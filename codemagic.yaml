@@ -67,7 +67,7 @@ workflows:
           gomobile init
 
           gomobile bind -v -target=ios,iossimulator \
-            -tags "with_wireguard,with_quic,with_utls,with_dhcp" \
+            -tags "with_wireguard,with_quic,with_utls,with_dhcp,with_gvisor" \
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
           # sing-box compiles protocols conditionally via build tags to
