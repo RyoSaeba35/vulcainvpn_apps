@@ -37,7 +37,9 @@ class _SettingsTabState extends State<SettingsTab> {
   // ── Diagnostic report state ───────────────────────────────────────────────
   bool _isSendingReport = false;
   int _logSizeKB = 0;
-  static const _platform = MethodChannel('com.vulcain.vpn/control');
+  static final MethodChannel _platform = MethodChannel(
+    Platform.isIOS ? 'com.vulcain.vpn/ios_control' : 'com.vulcain.vpn/control',
+  );
 
   @override
   void initState() {
@@ -50,7 +52,7 @@ class _SettingsTabState extends State<SettingsTab> {
     final connectionMode = await SettingsService.getConnectionMode();
 
     int logSize = 0;
-    if (Platform.isAndroid) {
+    if (Platform.isAndroid || Platform.isIOS) {
       try {
         final raw = await _platform.invokeMethod('getLogSizeKB');
         logSize = (raw as num).toInt();
@@ -305,7 +307,7 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   Future<void> _clearLogs() async {
-    if (!Platform.isAndroid) return;
+    if (!Platform.isAndroid && !Platform.isIOS) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -350,6 +352,41 @@ class _SettingsTabState extends State<SettingsTab> {
         }
       }
     }
+  }
+
+  // ── View raw logs directly (iOS-first: no backend needed to debug) ──────
+  Future<void> _viewLogs() async {
+    String logs = '';
+    try {
+      logs = await _platform.invokeMethod('getLogs') as String? ?? '';
+    } catch (e) {
+      logs = 'Failed to read logs: $e';
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Diagnostic Logs'),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 400,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              logs.isEmpty ? 'No logs yet.' : logs,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Legal links ───────────────────────────────────────────────────────────
@@ -611,7 +648,7 @@ class _SettingsTabState extends State<SettingsTab> {
         const SizedBox(height: 32),
 
         // ── Support & Diagnostics ─────────────────────────────────────────
-        if (Platform.isAndroid)
+        if (Platform.isAndroid || Platform.isIOS)
           InfoCard(
             title: 'Support & Diagnostics',
             icon: Icons.bug_report_outlined,
@@ -623,24 +660,15 @@ class _SettingsTabState extends State<SettingsTab> {
               ),
               const SizedBox(height: 12),
 
-              // Send report button
+              // View logs button (works on both platforms — no backend needed)
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: _isSendingReport ? null : _sendDiagnosticReport,
-                  icon: _isSendingReport
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: MyColors.myOrange,
-                          ),
-                        )
-                      : const Icon(Icons.email_outlined, color: MyColors.myOrange),
-                  label: Text(
-                    _isSendingReport ? 'Sending report...' : 'Send Diagnostic Report',
-                    style: const TextStyle(color: MyColors.myOrange),
+                  onPressed: _viewLogs,
+                  icon: const Icon(Icons.visibility_outlined, color: MyColors.myOrange),
+                  label: const Text(
+                    'View Diagnostic Logs',
+                    style: TextStyle(color: MyColors.myOrange),
                   ),
                   style: OutlinedButton.styleFrom(
                     side: const BorderSide(color: MyColors.myOrange),
@@ -651,6 +679,38 @@ class _SettingsTabState extends State<SettingsTab> {
                 ),
               ),
               const SizedBox(height: 8),
+
+              // Send report button — Android only for now; iOS backend
+              // contract for report upload isn't wired up yet, so this
+              // stays hidden until that's built to avoid a broken button.
+              if (Platform.isAndroid)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isSendingReport ? null : _sendDiagnosticReport,
+                    icon: _isSendingReport
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: MyColors.myOrange,
+                            ),
+                          )
+                        : const Icon(Icons.email_outlined, color: MyColors.myOrange),
+                    label: Text(
+                      _isSendingReport ? 'Sending report...' : 'Send Diagnostic Report',
+                      style: const TextStyle(color: MyColors.myOrange),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: MyColors.myOrange),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              if (Platform.isAndroid) const SizedBox(height: 8),
 
               // Clear logs button
               SizedBox(

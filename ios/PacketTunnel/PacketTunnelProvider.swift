@@ -1,60 +1,53 @@
 import NetworkExtension
 import Libbox
-import os.log
 
 /// PacketTunnelProvider — the iOS equivalent of Android's MyVpnService.kt.
 ///
-/// Swift/ObjC bridging rule that matters here (confirmed via three rounds
-/// of real compiler errors — this genuinely can't be known in advance
-/// without seeing gomobile's specific output compile):
-///   - Methods whose ObjC return is BOOL with NSError** (void-like, no
-///     other meaningful return) bridge to Swift `throws` (Void return).
-///   - Methods whose ObjC return is a NULLABLE OBJECT with NSError**
-///     bridge to `throws -> T` where T is NON-optional — the nullability
-///     is fully absorbed into the throws mechanism, not kept as Optional.
-///     (Writing `throws -> T?` or plain non-throwing `-> T?` both fail —
-///     it must be exactly `throws -> T`.)
-///   - Free C functions (FOUNDATION_EXPORT) with NSError** do NOT get
-///     auto-bridged to throws at all — the NSErrorPointer stays a real,
-///     literal parameter you must pass explicitly.
+/// NOTE: if your current project already has a more complete/updated
+/// version of this file (matching a newer VpnManager.swift), merge these
+/// VulcainLogger.log(...) calls into YOUR current version rather than
+/// overwriting it wholesale — the logging additions are what matters here,
+/// not this specific structure.
 class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private var commandServer: LibboxCommandServer?
     private let appGroup = "group.com.vulcainvpn.app"
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        os_log("PacketTunnelProvider: startTunnel")
+        VulcainLogger.log("Extension", "startTunnel called")
 
         guard let config = readConfigFromAppGroup() else {
-            os_log("PacketTunnelProvider: no config found in shared App Group container")
+            VulcainLogger.error("Extension", "no config found in shared App Group container — check App Group entitlement on BOTH targets, and that VpnManager wrote vpn_config.json before calling startVPNTunnel()")
             completionHandler(NSError(domain: "VulcainVPN", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "No VPN configuration found"]))
             return
         }
+        VulcainLogger.log("Extension", "config read successfully (\(config.count) chars)")
 
         let settings = buildTunnelNetworkSettings()
 
         setTunnelNetworkSettings(settings) { [weak self] error in
             guard let self = self else { return }
             if let error = error {
-                os_log("PacketTunnelProvider: setTunnelNetworkSettings failed: %{public}@", error.localizedDescription)
+                VulcainLogger.error("Extension", "setTunnelNetworkSettings failed: \(error.localizedDescription)")
                 completionHandler(error)
                 return
             }
+            VulcainLogger.log("Extension", "setTunnelNetworkSettings succeeded")
 
             do {
                 try self.startLibbox(config: config)
-                os_log("PacketTunnelProvider: libbox started successfully")
+                VulcainLogger.log("Extension", "libbox started successfully — tunnel should be up")
                 completionHandler(nil)
             } catch {
-                os_log("PacketTunnelProvider: libbox failed to start: %{public}@", error.localizedDescription)
+                VulcainLogger.error("Extension", "libbox failed to start: \(error.localizedDescription)")
                 completionHandler(error)
             }
         }
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
-        os_log("PacketTunnelProvider: stopTunnel reason=%{public}@", String(describing: reason))
+        VulcainLogger.log("Extension", "stopTunnel reason=\(String(describing: reason))")
         commandServer?.close()
         commandServer = nil
         completionHandler()
@@ -70,7 +63,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroup
         ) else {
-            os_log("PacketTunnelProvider: could not access App Group container")
+            VulcainLogger.error("Extension", "could not access App Group container \(appGroup)")
             return nil
         }
 
@@ -103,35 +96,35 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         let platformInterface = VulcainPlatformInterface(tunnelProvider: self)
         let handler = VulcainCommandServerHandler()
 
-        // Free C function returning a nullable object + NSError** does NOT
-        // bridge to throws — the error param stays literal.
         var createError: NSError?
         guard let server = LibboxNewCommandServer(handler, platformInterface, &createError) else {
+            VulcainLogger.error("Extension", "LibboxNewCommandServer returned nil: \(createError?.localizedDescription ?? "no error detail")")
             throw createError ?? NSError(domain: "VulcainVPN", code: 3,
                 userInfo: [NSLocalizedDescriptionKey: "LibboxNewCommandServer returned nil"])
         }
+        VulcainLogger.log("Extension", "LibboxNewCommandServer created")
 
-        // startOrReloadService returns BOOL (void-like) — this one does
-        // bridge to throws. Passing an explicit LibboxOverrideOptions
-        // instead of nil avoids Swift overload-resolution ambiguity.
         let overrideOptions = LibboxOverrideOptions()
         try server.startOrReloadService(config, options: overrideOptions)
+        VulcainLogger.log("Extension", "startOrReloadService succeeded")
 
         commandServer = server
     }
 
     /// WireGuard's proven technique for extracting a raw fd from
-    /// NEPacketTunnelProvider's packetFlow — no public API exposes it, but
-    /// every packet tunnel extension process has exactly one open socket
-    /// with address family AF_SYSTEM.
+    /// NEPacketTunnelProvider's packetFlow. Logged explicitly since this is
+    /// the single most likely point of silent failure — if this returns
+    /// nil, sing-box never gets a real interface to read/write packets.
     fileprivate func extractTunnelFileDescriptor() -> Int32? {
         for fd: Int32 in 0...1024 {
             var addrLen = socklen_t(MemoryLayout<sockaddr>.size)
             var addr = sockaddr()
             if getpeername(fd, &addr, &addrLen) == 0 && addr.sa_family == AF_SYSTEM {
+                VulcainLogger.log("Extension", "found tunnel fd: \(fd)")
                 return fd
             }
         }
+        VulcainLogger.error("Extension", "extractTunnelFileDescriptor found NO matching fd in range 0...1024 — this is likely why the tunnel fails")
         return nil
     }
 }
@@ -145,8 +138,8 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
         self.tunnelProvider = tunnelProvider
     }
 
-    // BOOL + separate real out-param (ret0_) -> bridges to throws -> Int32.
     func openTun(_ options: (any LibboxTunOptionsProtocol)?, ret0_: UnsafeMutablePointer<Int32>?) throws {
+        VulcainLogger.log("Extension", "libbox called openTun")
         guard let fd = tunnelProvider?.extractTunnelFileDescriptor() else {
             throw NSError(domain: "VulcainVPN", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "Could not find tunnel file descriptor"])
@@ -156,8 +149,6 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
 
     func usePlatformAutoDetectControl() -> Bool { true }
 
-    // Renamed per second round of compiler diagnostics.
-    // BOOL, void-like -> still bridges to throws.
     func autoDetectControl(_ fd: Int32) throws {
         // No-op on iOS — setTunnelNetworkSettings + the NE entitlement
         // already handle routing exclusion, unlike Android's protect(fd).
@@ -168,21 +159,16 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
     func useProcFS() -> Bool { false }
     func clearDNSCache() {}
 
-    // No error param in the ObjC header at all for these two — plain optional.
     func localDNSTransport() -> LibboxLocalDNSTransportProtocol? { nil }
     func readWIFIState() -> LibboxWIFIState? { nil }
     func systemCertificates() -> LibboxStringIteratorProtocol? { nil }
 
-    // Renamed to send(_:) — BOOL, void-like -> still bridges to throws.
     func send(_ notification: LibboxNotification?) throws {
         // TODO: bridge to UNUserNotificationCenter, mirroring Android's
         // NotificationService. Not critical for a first working tunnel.
     }
 
-    // Nullable-object return + error bridges to throws -> NON-optional T
-    // (the nullability is absorbed into the throws mechanism itself).
     func getInterfaces() throws -> LibboxNetworkInterfaceIteratorProtocol {
-        // TODO: mirror Android's buildInterfaceCacheForNetwork.
         throw NSError(domain: "VulcainVPN", code: 4,
             userInfo: [NSLocalizedDescriptionKey: "getInterfaces not implemented"])
     }
@@ -200,10 +186,9 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
 private class VulcainCommandServerHandler: NSObject, LibboxCommandServerHandlerProtocol {
 
     func writeDebugMessage(_ message: String?) {
-        os_log("libbox: %{public}@", message ?? "")
+        VulcainLogger.log("libbox", message ?? "")
     }
 
-    // Same rule: nullable-object return + error -> throws with non-optional T.
     func getSystemProxyStatus() throws -> LibboxSystemProxyStatus {
         let status = LibboxSystemProxyStatus()
         status.available = false

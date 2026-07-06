@@ -63,6 +63,16 @@ class VpnManager: NSObject {
             // live via the event channel instead — see emitStatus.
             result(nil)
 
+        case "getLogSizeKB":
+            result(VulcainLogger.sizeKB())
+
+        case "getLogs":
+            result(VulcainLogger.readAll() ?? "")
+
+        case "clearLogs":
+            VulcainLogger.clear()
+            result(nil)
+
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -89,9 +99,12 @@ class VpnManager: NSObject {
     // MARK: - Start
 
     private func startVpn(config: String, accessToken: String, serverAddress: String, result: @escaping FlutterResult) {
+        VulcainLogger.log("MainApp", "startVpn called, config \(config.count) chars")
         do {
             try writeConfigToAppGroup(config: config)
+            VulcainLogger.log("MainApp", "config written to App Group container")
         } catch {
+            VulcainLogger.error("MainApp", "writeConfigToAppGroup failed: \(error.localizedDescription)")
             result(FlutterError(code: "CONFIG_WRITE_FAILED", message: error.localizedDescription, details: nil))
             return
         }
@@ -139,8 +152,10 @@ class VpnManager: NSObject {
 
                     do {
                         try manager.connection.startVPNTunnel()
+                        VulcainLogger.log("MainApp", "startVPNTunnel() called successfully")
                         result(true)
                     } catch {
+                        VulcainLogger.error("MainApp", "startVPNTunnel() threw: \(error.localizedDescription)")
                         result(FlutterError(code: "START_FAILED", message: error.localizedDescription, details: nil))
                     }
                 }
@@ -178,6 +193,7 @@ class VpnManager: NSObject {
     }
 
     private func emitStatus(_ status: NEVPNStatus) {
+        VulcainLogger.log("MainApp", "NEVPNStatus changed: \(status.rawValue)")
         guard let sink = eventSink else { return }
 
         switch status {
