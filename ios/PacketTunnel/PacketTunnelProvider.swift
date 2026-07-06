@@ -24,6 +24,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private let appGroup = "group.com.vulcainvpn.app"
     private var heartbeatTimer: DispatchSourceTimer?
     private var heartbeatCount = 0
+    private var packetFlowLoopActive = false
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         VulcainLogger.log("Extension", "startTunnel called")
@@ -51,6 +52,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 try self.startLibbox(config: config)
                 VulcainLogger.log("Extension", "libbox started successfully — tunnel should be up")
                 self.startHeartbeat()
+                self.startPacketFlowLoop()
                 completionHandler(nil)
             } catch {
                 VulcainLogger.error("Extension", "libbox failed to start: \(error.localizedDescription)")
@@ -62,6 +64,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         VulcainLogger.log("Extension", "stopTunnel reason=\(String(describing: reason))")
         stopHeartbeat()
+        packetFlowLoopActive = false
 
         let serverToClose = commandServer
         commandServer = nil
@@ -181,6 +184,33 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
     private func stopHeartbeat() {
         heartbeatTimer?.cancel()
         heartbeatTimer = nil
+    }
+
+    // MARK: - Packet flow liveness loop
+    //
+    // libbox reads/writes the tunnel's raw fd directly via POSIX calls
+    // (that's what LibboxGetTunnelFileDescriptor() + openTun hands it) —
+    // so this loop does NOT process any actual packet data. Its only job
+    // is calling packetFlow.readPackets() so iOS's own liveness/activity
+    // tracking for the extension sees Swift-side engagement with the
+    // NEPacketTunnelFlow API. Hypothesis: without this, iOS may treat the
+    // extension as idle and terminate it after a few seconds — which
+    // matches the observed ~5s survival time with zero heartbeats firing.
+    private func startPacketFlowLoop() {
+        packetFlowLoopActive = true
+        VulcainLogger.log("Extension", "starting packetFlow.readPackets() liveness loop")
+        pumpPacketFlow()
+    }
+
+    private func pumpPacketFlow() {
+        guard packetFlowLoopActive else { return }
+        packetFlow.readPackets { [weak self] packets, protocols in
+            guard let self = self, self.packetFlowLoopActive else { return }
+            // Not forwarding these anywhere — libbox already has the raw
+            // fd and handles the actual data path itself. This call's
+            // purpose is purely to keep iOS's liveness tracking satisfied.
+            self.pumpPacketFlow()
+        }
     }
 }
 
