@@ -4,8 +4,6 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     integrations:
-      # Set this up in Codemagic → Teams → Integrations → Apple Developer Portal
-      # (generate an App Store Connect API key at appstoreconnect.apple.com → Users and Access → Keys)
       app_store_connect: vulcainvpn_asc_key
     environment:
       groups:
@@ -19,10 +17,6 @@ workflows:
     scripts:
       - name: Set up code signing (main app + extension)
         script: |
-          # Uses a PERSISTENT certificate key stored as the CERTIFICATE_PRIVATE_KEY
-          # env var (group: ios_signing) — NOT regenerated each build. Generating
-          # a fresh random key per run was creating a new Distribution cert every
-          # time, silently exhausting Apple's per-account certificate limit.
           echo "$CERTIFICATE_PRIVATE_KEY" > /tmp/cert_key.pem
 
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
@@ -42,9 +36,6 @@ workflows:
 
       - name: Strip alpha channel from App Store icon
         script: |
-          # Apple rejects the 1024x1024 App Store icon if it has transparency.
-          # Flattening onto white background — replace with a proper opaque
-          # icon design when convenient, this is a stopgap.
           brew list imagemagick &>/dev/null || brew install imagemagick
           find ios/Runner/Assets.xcassets/AppIcon.appiconset -name "*1024*.png" | while read -r icon; do
             magick "$icon" -background white -alpha remove -alpha off "$icon"
@@ -53,40 +44,23 @@ workflows:
 
       - name: Build sing-box iOS framework
         script: |
-          # Pinned to v1.13.0-rc.1 — same version the Android libbox.aar was built
-          # from (RyoSaeba35/sing-box-for-android fork, version.properties).
-          # Keeping platforms on the same core version avoids config/protocol
-          # mismatches between Android and iOS builds.
           git clone --branch v1.13.0-rc.1 --depth 1 https://github.com/SagerNet/sing-box.git /tmp/sing-box
           cd /tmp/sing-box
 
-          # IMPORTANT: SagerNet uses their own gomobile fork, not golang.org/x/mobile
           go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.8
           go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.8
           export PATH="$PATH:$(go env GOPATH)/bin"
           gomobile init
 
           gomobile bind -v -target=ios,iossimulator \
-            -tags "with_wireguard,with_quic,with_utls,with_dhcp,with_gvisor" \
+            -tags "with_wireguard,with_quic,with_utls,with_dhcp,with_gvisor,with_clash_api" \
             -o "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" \
             ./experimental/libbox
-          # sing-box compiles protocols conditionally via build tags to
-          # save binary size — without these, outbounds silently aren't
-          # included. with_wireguard: WireGuard outbound (confirmed needed
-          # via runtime error "WireGuard is not included in this build").
-          # with_quic: Hysteria2 is QUIC-based, needs this too. with_utls,
-          # with_dhcp: commonly needed alongside for full protocol support.
-          # If Android's libbox.aar build script (sing-box-for-android)
-          # used a different/larger tag set, match that instead for
-          # feature parity across platforms.
 
           echo "=== DUMPING GENERATED OBJECTIVE-C HEADER (Libbox.objc.h) ==="
           find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Libbox.objc.h" | head -1 | xargs cat
           echo "=== END HEADER DUMP ==="
 
-          # gomobile bind doesn't set CFBundleIdentifier in the generated
-          # framework's Info.plist — Apple's validator rejects empty/missing
-          # bundle IDs on upload. Patch every platform slice's Info.plist.
           find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -name "Info.plist" -path "*Libbox.framework*" | while read -r plist; do
             /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.vulcainvpn.app.PacketTunnel.Libbox" "$plist" 2>/dev/null || \
             /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.vulcainvpn.app.PacketTunnel.Libbox" "$plist"
@@ -99,11 +73,6 @@ workflows:
             echo "Patched $plist"
           done
 
-          # Known gomobile bug: it generates iOS frameworks using the macOS-style
-          # VERSIONED bundle layout (Framework/Versions/A/...), which Xcode links
-          # fine but Apple's App Store validator rejects on upload ("binary file
-          # is not permitted"). Flatten every Libbox.framework slice to the
-          # unversioned layout iOS actually requires.
           find "$CM_BUILD_DIR/ios/Frameworks/Libbox.xcframework" -type d -name "Libbox.framework" | while read -r framework; do
             if [ -d "$framework/Versions" ]; then
               echo "Flattening versioned bundle: $framework"
@@ -115,20 +84,14 @@ workflows:
               rm -rf "$flat_tmp"
               echo "Flattened $framework"
             fi
-            # iOS flat frameworks need Info.plist directly at the framework
-            # root — macOS-style bundles keep it nested in Resources/ instead.
             if [ -f "$framework/Resources/Info.plist" ] && [ ! -f "$framework/Info.plist" ]; then
               mv "$framework/Resources/Info.plist" "$framework/Info.plist"
               echo "Moved Info.plist to framework root in $framework"
             fi
-            # Clean up now-empty Resources dir if nothing else is in it
             if [ -d "$framework/Resources" ] && [ -z "$(ls -A "$framework/Resources")" ]; then
               rmdir "$framework/Resources"
             fi
           done
-          # Same package path (experimental/libbox) that SFA binds for Android
-          # and SagerNet's own SFI client binds for iOS — this is the shared
-          # cross-platform entry point, same Go source either way.
 
       - name: Flutter build ipa
         script: |
@@ -144,8 +107,3 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: false
-        # Internal testing (just you) doesn't need beta review at all — the
-        # build becomes available to internal testers as soon as Apple
-        # finishes processing it. submit_to_testflight only matters for
-        # EXTERNAL testers, which needs extra metadata (feedback email,
-        # reviewer contact info) we haven't filled in yet.
