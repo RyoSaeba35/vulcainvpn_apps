@@ -408,8 +408,36 @@ private class VulcainPlatformInterface: NSObject, LibboxPlatformInterfaceProtoco
                     nil, 0, NI_NUMERICHOST
                 )
                 if result == 0 {
-                    let address = String(cString: hostBuffer)
-                    addressesByName[name, default: []].append(address)
+                    var address = String(cString: hostBuffer)
+
+                    // Skip link-local addresses (fe80::/10, 169.254.0.0/16)
+                    // — not useful for sing-box's outbound-interface
+                    // detection, and IPv6 link-local addresses carry a
+                    // %zone-id suffix (e.g. "fe80::...%utun1") that
+                    // complicates CIDR formatting further.
+                    if address.hasPrefix("fe80:") || address.hasPrefix("169.254.") {
+                        continue
+                    }
+
+                    // Defensive: strip any zone-id suffix if present
+                    // regardless (getnameinfo can include it for some
+                    // link-local-adjacent cases).
+                    if let percentIndex = address.firstIndex(of: "%") {
+                        address = String(address[address.startIndex..<percentIndex])
+                    }
+
+                    // ROOT CAUSE OF THE 5s SIGABRT CRASH: sing-box's
+                    // NetworkInterfaces() calls netip.ParsePrefix on each
+                    // address, which panics fatally (uncaught, kills the
+                    // whole process) if there's no "/prefixlen" suffix.
+                    // We don't have the real subnet prefix length handy
+                    // here, so use a single-host CIDR (/32 or /128) —
+                    // sing-box only uses this for interface identification,
+                    // not for actual route computation on these addresses.
+                    let prefixLength = family == UInt8(AF_INET) ? "32" : "128"
+                    let addressWithPrefix = "\(address)/\(prefixLength)"
+
+                    addressesByName[name, default: []].append(addressWithPrefix)
                 }
             }
         }
