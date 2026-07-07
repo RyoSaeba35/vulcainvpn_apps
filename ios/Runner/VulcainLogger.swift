@@ -10,6 +10,7 @@ import Foundation
 struct VulcainLogger {
     private static let appGroup = "group.com.vulcainvpn.app"
     private static let logFileName = "vulcain_diagnostic.log"
+    private static let stderrFileName = "libbox_stderr.log"
     private static let maxLogSizeBytes = 2 * 1024 * 1024 // 2MB safety cap
     private static let retentionHours: Double = 48
 
@@ -24,6 +25,12 @@ struct VulcainLogger {
         FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
             .appendingPathComponent(logFileName)
+    }
+
+    private static var stderrFileURL: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
+            .appendingPathComponent(stderrFileName)
     }
 
     /// Log a message. `source` distinguishes which process wrote it —
@@ -69,10 +76,24 @@ struct VulcainLogger {
         try? keep.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 
-    /// Returns the full log content, or nil if nothing logged yet.
+    /// Returns the full log content, or nil if nothing logged yet. Appends
+    /// libbox's redirected stderr (Go panic traces, if any occurred) at
+    /// the end — this is normally discarded/invisible in an extension
+    /// process, so surfacing it here is the only way to see a Go-level
+    /// fatal error that Apple's own crash reporter can't show.
     static func readAll() -> String? {
         guard let url = logFileURL else { return nil }
-        return try? String(contentsOf: url, encoding: .utf8)
+        let mainLog = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+
+        var stderrSection = ""
+        if let stderrURL = stderrFileURL,
+           let stderrContent = try? String(contentsOf: stderrURL, encoding: .utf8),
+           !stderrContent.isEmpty {
+            stderrSection = "\n\n--- libbox stderr (Go runtime output, incl. panic traces) ---\n\(stderrContent)"
+        }
+
+        let combined = mainLog + stderrSection
+        return combined.isEmpty ? nil : combined
     }
 
     static func sizeKB() -> Int {

@@ -114,6 +114,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private func startLibbox(config: String) throws {
         try setupLibboxPaths()
+        redirectGoStderr()
         LibboxSetMemoryLimit(true)
 
         let platformInterface = VulcainPlatformInterface(tunnelProvider: self)
@@ -165,6 +166,30 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             throw setupError
         }
         VulcainLogger.log("Extension", "LibboxSetup succeeded, basePath=\(basePath)")
+    }
+
+    /// Go panics/fatal errors call abort() (producing exactly the SIGABRT
+    /// we've been seeing, with no useful native stack — Apple's crash
+    /// reporter can't see into Go's runtime). The actual panic message
+    /// normally goes to stderr, which is otherwise discarded in an
+    /// extension. Redirecting it to a file in the App Group container
+    /// means we can read it back afterward via the diagnostic logs.
+    private func redirectGoStderr() {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroup
+        ) else {
+            VulcainLogger.error("Extension", "could not access App Group container for stderr redirect")
+            return
+        }
+
+        let stderrPath = containerURL.appendingPathComponent("libbox_stderr.log").path
+        var redirectError: NSError?
+        LibboxRedirectStderr(stderrPath, &redirectError)
+        if let redirectError = redirectError {
+            VulcainLogger.error("Extension", "LibboxRedirectStderr failed: \(redirectError.localizedDescription)")
+        } else {
+            VulcainLogger.log("Extension", "Go stderr redirected to \(stderrPath)")
+        }
     }
 
     // MARK: - Heartbeat (diagnostic only — measures exact survival time)
