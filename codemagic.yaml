@@ -107,3 +107,104 @@ workflows:
       app_store_connect:
         auth: integration
         submit_to_testflight: false
+
+  macos-vulcainvpn:
+      name: VulcainVPN macOS
+      max_build_duration: 60
+      instance_type: mac_mini_m2
+      integrations:
+        app_store_connect: vulcainvpn_asc_key
+      environment:
+        groups:
+          - macos_signing
+        vars:
+          BUNDLE_ID: "com.vulcainvpn.app.macos"
+          SING_BOX_VERSION: "1.13.0"
+        flutter: stable
+        xcode: latest
+        cocoapods: default
+      scripts:
+        - name: Set up Developer ID signing
+          script: |
+            keychain initialize
+            keychain add-certificates
+
+        - name: Flutter pub get
+          script: flutter packages pub get
+
+        - name: Download and stage sing-box binaries
+          script: |
+            cd /tmp
+            curl -L -o singbox-arm64.tar.gz \
+              "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz"
+            curl -L -o singbox-amd64.tar.gz \
+              "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz"
+
+            tar -xzf singbox-arm64.tar.gz
+            tar -xzf singbox-amd64.tar.gz
+
+            mkdir -p /tmp/singbox_staging
+            cp "sing-box-${SING_BOX_VERSION}-darwin-arm64/sing-box" /tmp/singbox_staging/sing-box-arm64
+            cp "sing-box-${SING_BOX_VERSION}-darwin-amd64/sing-box" /tmp/singbox_staging/sing-box-amd64
+            chmod +x /tmp/singbox_staging/sing-box-arm64 /tmp/singbox_staging/sing-box-amd64
+
+        - name: Flutter build macos
+          script: |
+            flutter build macos --release
+
+        - name: Copy sing-box binaries into app bundle Resources
+          script: |
+            APP_PATH=$(find "$CM_BUILD_DIR/build/macos/Build/Products/Release" -maxdepth 1 -name "*.app")
+            cp /tmp/singbox_staging/sing-box-arm64 "$APP_PATH/Contents/Resources/"
+            cp /tmp/singbox_staging/sing-box-amd64 "$APP_PATH/Contents/Resources/"
+            echo "APP_PATH=$APP_PATH" >> $CM_ENV
+
+        - name: Codesign sing-box binaries and app (hardened runtime)
+          script: |
+            CERT_NAME=$(keychain list-certificates | jq -r '.[0].common_name')
+            echo "Signing with: $CERT_NAME"
+
+            codesign --force --options runtime --timestamp \
+              --sign "$CERT_NAME" \
+              "$APP_PATH/Contents/Resources/sing-box-arm64"
+            codesign --force --options runtime --timestamp \
+              --sign "$CERT_NAME" \
+              "$APP_PATH/Contents/Resources/sing-box-amd64"
+
+            codesign --force --deep --options runtime --timestamp \
+              --entitlements macos/Runner/Release.entitlements \
+              --sign "$CERT_NAME" \
+              "$APP_PATH"
+
+            codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+        - name: Create DMG
+          script: |
+            mkdir -p /tmp/dmg_staging
+            cp -R "$APP_PATH" /tmp/dmg_staging/
+            ln -s /Applications /tmp/dmg_staging/Applications
+            hdiutil create -volname "VulcainVPN" \
+              -srcfolder /tmp/dmg_staging \
+              -ov -format UDZO \
+              "$CM_BUILD_DIR/VulcainVPN.dmg"
+
+        - name: Notarize DMG
+          script: |
+            echo "$APP_STORE_CONNECT_PRIVATE_KEY" > /tmp/asc_key.p8
+
+            xcrun notarytool submit "$CM_BUILD_DIR/VulcainVPN.dmg" \
+              --key /tmp/asc_key.p8 \
+              --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
+              --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+              --wait
+
+            xcrun stapler staple "$CM_BUILD_DIR/VulcainVPN.dmg"
+            rm -f /tmp/asc_key.p8
+
+      artifacts:
+        - "*.dmg"
+
+      publishing:
+        email:
+          recipients:
+            - pierre.webdev@gmail.com
