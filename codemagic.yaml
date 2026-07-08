@@ -119,7 +119,6 @@ workflows:
         - macos_signing
       vars:
         BUNDLE_ID: "com.vulcainvpn.app.macos"
-        SING_BOX_VERSION: "1.13.0"
       flutter: stable
       xcode: latest
       cocoapods: default
@@ -132,24 +131,36 @@ workflows:
             --certificate /tmp/cert.p12 \
             --certificate-password "$CM_CERTIFICATE_PASSWORD"
 
+          # The p12 was built manually via openssl (no local Mac), so the
+          # Developer ID G2 intermediate never got installed the way
+          # Keychain Access normally does it automatically. Without it,
+          # codesign can't build the trust chain and fails with
+          # errSecInternalComponent. Fetch and install it explicitly.
+          curl -sSL -o /tmp/DeveloperIDG2CA.cer \
+            "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer"
+          DEFAULT_KEYCHAIN=$(security default-keychain -d user | tr -d '"' | xargs)
+          security import /tmp/DeveloperIDG2CA.cer -k "$DEFAULT_KEYCHAIN" -A
+
       - name: Flutter pub get
         script: flutter packages pub get
 
-      - name: Download and stage sing-box binaries
+      - name: Verify checked-in sing-box binaries
         script: |
-          cd /tmp
-          curl -L -o singbox-arm64.tar.gz \
-            "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-arm64.tar.gz"
-          curl -L -o singbox-amd64.tar.gz \
-            "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-darwin-amd64.tar.gz"
+          SB_DIR="$CM_BUILD_DIR/macos/Runner/Resources"
 
-          tar -xzf singbox-arm64.tar.gz
-          tar -xzf singbox-amd64.tar.gz
+          if [ ! -f "$SB_DIR/sing-box-arm64" ] || [ ! -f "$SB_DIR/sing-box-amd64" ]; then
+            echo "❌ Expected sing-box-arm64 and sing-box-amd64 in $SB_DIR — not found."
+            echo "Contents of $SB_DIR:"
+            ls -la "$SB_DIR" || echo "(directory does not exist)"
+            exit 1
+          fi
 
-          mkdir -p /tmp/singbox_staging
-          cp "sing-box-${SING_BOX_VERSION}-darwin-arm64/sing-box" /tmp/singbox_staging/sing-box-arm64
-          cp "sing-box-${SING_BOX_VERSION}-darwin-amd64/sing-box" /tmp/singbox_staging/sing-box-amd64
-          chmod +x /tmp/singbox_staging/sing-box-arm64 /tmp/singbox_staging/sing-box-amd64
+          chmod +x "$SB_DIR/sing-box-arm64" "$SB_DIR/sing-box-amd64"
+
+          echo "✅ Found both binaries:"
+          file "$SB_DIR/sing-box-arm64" "$SB_DIR/sing-box-amd64"
+          "$SB_DIR/sing-box-arm64" version || true
+          "$SB_DIR/sing-box-amd64" version || true
 
       - name: Flutter build macos
         script: |
@@ -158,8 +169,9 @@ workflows:
       - name: Copy sing-box binaries into app bundle Resources
         script: |
           APP_PATH=$(find "$CM_BUILD_DIR/build/macos/Build/Products/Release" -maxdepth 1 -name "*.app")
-          cp /tmp/singbox_staging/sing-box-arm64 "$APP_PATH/Contents/Resources/"
-          cp /tmp/singbox_staging/sing-box-amd64 "$APP_PATH/Contents/Resources/"
+          SB_DIR="$CM_BUILD_DIR/macos/Runner/Resources"
+          cp "$SB_DIR/sing-box-arm64" "$APP_PATH/Contents/Resources/"
+          cp "$SB_DIR/sing-box-amd64" "$APP_PATH/Contents/Resources/"
           echo "APP_PATH=$APP_PATH" >> $CM_ENV
 
       - name: Codesign sing-box binaries and app (hardened runtime)
