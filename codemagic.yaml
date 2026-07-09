@@ -205,21 +205,38 @@ workflows:
 
       - name: Notarize DMG
         script: |
-          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > /tmp/asc_key.p8
+          # When the app_store_connect integration is active, Codemagic points
+          # APP_STORE_CONNECT_PRIVATE_KEY at an already-staged file on disk
+          # using an "@file:/path" convention, rather than raw PEM content.
+          # Handle both forms so this works whichever way it's provided.
+          RAW_KEY="$APP_STORE_CONNECT_PRIVATE_KEY"
+
+          if [[ "$RAW_KEY" == @file:* ]]; then
+            KEY_PATH="${RAW_KEY#@file:}"
+            echo "Using key file staged by Codemagic integration: $KEY_PATH"
+          else
+            KEY_PATH="/tmp/asc_key.p8"
+            printf '%s' "$RAW_KEY" > "$KEY_PATH"
+            echo "Wrote raw PEM content to $KEY_PATH"
+          fi
+
+          if [ ! -f "$KEY_PATH" ]; then
+            echo "❌ Key file not found at $KEY_PATH"
+            exit 1
+          fi
 
           echo "=== Verifying key file format ==="
-          head -1 /tmp/asc_key.p8
-          tail -1 /tmp/asc_key.p8
-          wc -l /tmp/asc_key.p8
+          head -1 "$KEY_PATH"
+          echo ""
+          wc -l "$KEY_PATH"
 
-          if ! grep -q "BEGIN PRIVATE KEY" /tmp/asc_key.p8; then
-            echo "❌ APP_STORE_CONNECT_PRIVATE_KEY does not look like a valid PEM file."
-            echo "Check the macos_signing group has this variable set correctly."
+          if ! grep -q "BEGIN PRIVATE KEY" "$KEY_PATH"; then
+            echo "❌ Key file does not look like a valid PEM file."
             exit 1
           fi
 
           xcrun notarytool submit "$CM_BUILD_DIR/VulcainVPN.dmg" \
-            --key /tmp/asc_key.p8 \
+            --key "$KEY_PATH" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
             --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
             --wait
