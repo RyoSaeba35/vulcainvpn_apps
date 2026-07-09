@@ -144,47 +144,48 @@ workflows:
       - name: Flutter pub get
         script: flutter packages pub get
 
-      - name: Verify checked-in sing-box binaries
+      - name: Build sing-box macOS framework (Libbox.xcframework)
         script: |
-          SB_DIR="$CM_BUILD_DIR/macos/Runner/Resources"
+          git clone --branch v1.13.0-rc.1 --depth 1 https://github.com/SagerNet/sing-box.git /tmp/sing-box
+          cd /tmp/sing-box
 
-          if [ ! -f "$SB_DIR/sing-box-arm64" ] || [ ! -f "$SB_DIR/sing-box-amd64" ]; then
-            echo "❌ Expected sing-box-arm64 and sing-box-amd64 in $SB_DIR — not found."
-            echo "Contents of $SB_DIR:"
-            ls -la "$SB_DIR" || echo "(directory does not exist)"
-            exit 1
-          fi
+          go install -v github.com/sagernet/gomobile/cmd/gomobile@v0.1.8
+          go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.8
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          gomobile init
 
-          chmod +x "$SB_DIR/sing-box-arm64" "$SB_DIR/sing-box-amd64"
+          gomobile bind -v -target=macos \
+            -tags "with_wireguard,with_quic,with_utls,with_dhcp,with_gvisor,with_clash_api" \
+            -o "$CM_BUILD_DIR/macos/Frameworks/Libbox.xcframework" \
+            ./experimental/libbox
 
-          echo "✅ Found both binaries:"
-          file "$SB_DIR/sing-box-arm64" "$SB_DIR/sing-box-amd64"
-          "$SB_DIR/sing-box-arm64" version || true
-          "$SB_DIR/sing-box-amd64" version || true
+          # NOTE: unlike the iOS build, we do NOT flatten the
+          # Versions/Current bundle structure here. That flattening was
+          # required on iOS because iOS frameworks must be unversioned —
+          # but this framework is being built FOR macOS, where the
+          # classic versioned bundle layout is the correct, expected one.
+          # Flattening it here would likely break codesigning.
+
+          find "$CM_BUILD_DIR/macos/Frameworks/Libbox.xcframework" -name "Info.plist" -path "*Libbox.framework*" | while read -r plist; do
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.vulcainvpn.app.macos.PacketTunnel.Libbox" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string com.vulcainvpn.app.macos.PacketTunnel.Libbox" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string 1" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$plist" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string 1.0" "$plist"
+            echo "Patched $plist"
+          done
 
       - name: Flutter build macos
         script: |
           flutter build macos --release
-
-      - name: Copy sing-box binaries into app bundle Resources
-        script: |
           APP_PATH=$(find "$CM_BUILD_DIR/build/macos/Build/Products/Release" -maxdepth 1 -name "*.app")
-          SB_DIR="$CM_BUILD_DIR/macos/Runner/Resources"
-          cp "$SB_DIR/sing-box-arm64" "$APP_PATH/Contents/Resources/"
-          cp "$SB_DIR/sing-box-amd64" "$APP_PATH/Contents/Resources/"
           echo "APP_PATH=$APP_PATH" >> $CM_ENV
 
-      - name: Codesign sing-box binaries and app (hardened runtime)
+      - name: Codesign app (hardened runtime)
         script: |
           CERT_NAME=$(keychain list-certificates | jq -r '.[0].common_name')
           echo "Signing with: $CERT_NAME"
-
-          codesign --force --options runtime --timestamp \
-            --sign "$CERT_NAME" \
-            "$APP_PATH/Contents/Resources/sing-box-arm64"
-          codesign --force --options runtime --timestamp \
-            --sign "$CERT_NAME" \
-            "$APP_PATH/Contents/Resources/sing-box-amd64"
 
           codesign --force --deep --options runtime --timestamp \
             --entitlements macos/Runner/Release.entitlements \

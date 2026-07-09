@@ -10,6 +10,11 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    // Registers com.vulcain.vpn/macos_control (MethodChannel) and
+    // com.vulcain.vpn/macos_status (EventChannel) — see VpnManager.swift.
+    let registrar = flutterViewController.registrar(forPlugin: "VpnManager")
+    VpnManager.register(with: registrar)
+
     super.awakeFromNib()
   }
 }

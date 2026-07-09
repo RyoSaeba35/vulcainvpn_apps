@@ -21,15 +21,40 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		0454668379A9555FCD67E621 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24148BD0C828CEE43500FC28 /* PacketTunnelProvider.swift */; };
+		13043396F6DABF1A3DB61A67 /* PacketTunnelMac in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 49FF81D75E6FF666D5CF07AA /* PacketTunnelMac */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		21DF4017C8630D3657BD6ADD /* VulcainLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C05775FCD52414365CC750 /* VulcainLogger.swift */; };
 		331C80D8294CF71000263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C80D7294CF71000263BE5 /* RunnerTests.swift */; };
 		335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */ = {isa = PBXBuildFile; fileRef = 335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */; };
+		33924433D9212D79C55A5630 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A18D715608D4A05844182F24 /* PacketTunnelProvider.swift */; };
 		33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC10F02044A3C60003C045 /* AppDelegate.swift */; };
 		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
 		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
+		56F03B3F0581D6761B64FF23 /* PacketTunnelMac in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F1640DC3A6F37031AD7C5E87 /* PacketTunnelMac */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		780FFB3021378982A3C9B055 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BB8FA26E44544AAE086198F7 /* Cocoa.framework */; };
+		90301FDC45CDB1E4AC62ACEA /* VpnManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF48DE73A14625A403CA0F45 /* VpnManager.swift */; };
+		9FFBB99F4A6B308A4FFBD801 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BB8FA26E44544AAE086198F7 /* Cocoa.framework */; };
+		AE86F6F4BC1C275ED13561AD /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BB8FA26E44544AAE086198F7 /* Cocoa.framework */; };
+		B085ACDB977360E9410E956A /* Libbox.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D713FC327FF6C4519AF83BFB /* Libbox.xcframework */; };
+		B62DD8F1585963E0B1340A8A /* Libbox.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = D713FC327FF6C4519AF83BFB /* Libbox.xcframework */; };
+		C79160DC08213D117D9D69F9 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67AC243FA576F50D62334F16 /* PacketTunnelProvider.swift */; };
+		C7DD4E127029A36331A3B6F4 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4F7FED2AF1A44C390933CB /* PacketTunnelProvider.swift */; };
+		D0BC692B604EC46E11D631F1 /* VulcainLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93C05775FCD52414365CC750 /* VulcainLogger.swift */; };
+		E55302E62C1552A3C5433DB8 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BB8FA26E44544AAE086198F7 /* Cocoa.framework */; };
+		ECCC1BBE6A8211C4E389B338 /* PacketTunnelMac in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 6981DE983837F49A8C4972DF /* PacketTunnelMac */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		EF63535F3B14650F2273F907 /* Libbox.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = D713FC327FF6C4519AF83BFB /* Libbox.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		F0B48784AD8F7F6EB5BA849F /* PacketTunnelMac in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 5347974A3BD358FE3D393F54 /* PacketTunnelMac */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		052C617D68CF9279715A5BA7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AD6C7B265F9ED6625B92CF21;
+			remoteInfo = PacketTunnelMac;
+		};
 		331C80D9294CF71000263BE5 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
@@ -44,9 +69,52 @@
 			remoteGlobalIDString = 33CC111A2044C6BA0003C045;
 			remoteInfo = FLX;
 		};
+		8686F88670F989C40D9E862A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 957C7D1EE2C3318D638BB58C;
+			remoteInfo = PacketTunnelMac;
+		};
+		87F0C329CBE33406C21560C7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 064FCA1A37708BC94D077313;
+			remoteInfo = PacketTunnelMac;
+		};
+		F76C1B659D9E45FC0B05CEC3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 33CC10E52044A3C60003C045 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 013092BCB73FD99795AC31C1;
+			remoteInfo = PacketTunnelMac;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		1024DCEE9B0B973FF87A9019 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				EF63535F3B14650F2273F907 /* Libbox.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		32E427F0E6C9F3368448D47A /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/SystemExtensions";
+			dstSubfolderSpec = 16;
+			files = (
+				F0B48784AD8F7F6EB5BA849F /* PacketTunnelMac in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		33CC110E2044A8840003C045 /* Bundle Framework */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -57,14 +125,51 @@
 			name = "Bundle Framework";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		3D27D64DD1F09198F71DA8CD /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/SystemExtensions";
+			dstSubfolderSpec = 16;
+			files = (
+				56F03B3F0581D6761B64FF23 /* PacketTunnelMac in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8A7BAA10D46912A423317CD5 /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/SystemExtensions";
+			dstSubfolderSpec = 16;
+			files = (
+				13043396F6DABF1A3DB61A67 /* PacketTunnelMac in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8B16663F9DCFDBB37488A95A /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Library/SystemExtensions";
+			dstSubfolderSpec = 16;
+			files = (
+				ECCC1BBE6A8211C4E389B338 /* PacketTunnelMac in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		22552FD9340219AE976C4ED3 /* PacketTunnelMac.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = PacketTunnelMac.entitlements; path = PacketTunnelMac/PacketTunnelMac.entitlements; sourceTree = "<group>"; };
+		24148BD0C828CEE43500FC28 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PacketTunnelProvider.swift; path = PacketTunnelMac/PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		25EDEC1630FD27262CE25D94 /* PacketTunnelMac.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = PacketTunnelMac.entitlements; path = PacketTunnelMac/PacketTunnelMac.entitlements; sourceTree = "<group>"; };
 		331C80D5294CF71000263BE5 /* RunnerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunnerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		331C80D7294CF71000263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
 		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
+		33453A50DEB1F0463578D961 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = PacketTunnelMac/Info.plist; sourceTree = "<group>"; };
 		335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneratedPluginRegistrant.swift; sourceTree = "<group>"; };
-		33CC10ED2044A3C60003C045 /* cross_platform_vpn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "cross_platform_vpn.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		33CC10ED2044A3C60003C045 /* cross_platform_vpn.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cross_platform_vpn.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		33CC10F02044A3C60003C045 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		33CC10F22044A3C60003C045 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Runner/Assets.xcassets; sourceTree = "<group>"; };
 		33CC10F52044A3C60003C045 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
@@ -76,11 +181,44 @@
 		33E51913231747F40026EE4D /* DebugProfile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DebugProfile.entitlements; sourceTree = "<group>"; };
 		33E51914231749380026EE4D /* Release.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = Release.entitlements; sourceTree = "<group>"; };
 		33E5194F232828860026EE4D /* AppInfo.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppInfo.xcconfig; sourceTree = "<group>"; };
+		49FF81D75E6FF666D5CF07AA /* PacketTunnelMac */ = {isa = PBXFileReference; includeInIndex = 0; path = PacketTunnelMac; sourceTree = BUILT_PRODUCTS_DIR; };
+		5347974A3BD358FE3D393F54 /* PacketTunnelMac */ = {isa = PBXFileReference; includeInIndex = 0; path = PacketTunnelMac; sourceTree = BUILT_PRODUCTS_DIR; };
+		5AF5D874276FD352506F2F27 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = PacketTunnelMac/Info.plist; sourceTree = "<group>"; };
+		67AC243FA576F50D62334F16 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PacketTunnelProvider.swift; path = PacketTunnelMac/PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		6981DE983837F49A8C4972DF /* PacketTunnelMac */ = {isa = PBXFileReference; includeInIndex = 0; path = PacketTunnelMac; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B4F7FED2AF1A44C390933CB /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PacketTunnelProvider.swift; path = PacketTunnelMac/PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		6E16CB01D8F9D4441BE7BF28 /* PacketTunnelMac.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = PacketTunnelMac.entitlements; path = PacketTunnelMac/PacketTunnelMac.entitlements; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		7BC6C3A4F178FC871453A7A2 /* PacketTunnelMac.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; name = PacketTunnelMac.entitlements; path = PacketTunnelMac/PacketTunnelMac.entitlements; sourceTree = "<group>"; };
+		876BFC002C4A48DE8E286B8C /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = PacketTunnelMac/Info.plist; sourceTree = "<group>"; };
+		93C05775FCD52414365CC750 /* VulcainLogger.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VulcainLogger.swift; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		A18D715608D4A05844182F24 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = PacketTunnelProvider.swift; path = PacketTunnelMac/PacketTunnelProvider.swift; sourceTree = "<group>"; };
+		B77E2348B33378C9BCE7591C /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = PacketTunnelMac/Info.plist; sourceTree = "<group>"; };
+		BB8FA26E44544AAE086198F7 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		CF48DE73A14625A403CA0F45 /* VpnManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VpnManager.swift; sourceTree = "<group>"; };
+		D713FC327FF6C4519AF83BFB /* Libbox.xcframework */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = wrapper.xcframework; name = Libbox.xcframework; path = Frameworks/Libbox.xcframework; sourceTree = "<group>"; };
+		F1640DC3A6F37031AD7C5E87 /* PacketTunnelMac */ = {isa = PBXFileReference; includeInIndex = 0; path = PacketTunnelMac; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		05AABADD1C88C4ABBCAADFEB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E55302E62C1552A3C5433DB8 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1D9B8C556B64C6859CCF6559 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AE86F6F4BC1C275ED13561AD /* Cocoa.framework in Frameworks */,
+				B085ACDB977360E9410E956A /* Libbox.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		331C80D2294CF70F00263BE5 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -92,12 +230,40 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B62DD8F1585963E0B1340A8A /* Libbox.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6ADA771F336FD88063842EB4 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				780FFB3021378982A3C9B055 /* Cocoa.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AF9DFCDE15C48033F97B6374 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9FFBB99F4A6B308A4FFBD801 /* Cocoa.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1D002C416957F6BBA19D9DFC /* PacketTunnelMac */ = {
+			isa = PBXGroup;
+			children = (
+				5AF5D874276FD352506F2F27 /* Info.plist */,
+				25EDEC1630FD27262CE25D94 /* PacketTunnelMac.entitlements */,
+				A18D715608D4A05844182F24 /* PacketTunnelProvider.swift */,
+			);
+			name = PacketTunnelMac;
+			path = PacketTunnelMac;
+			sourceTree = "<group>";
+		};
 		331C80D6294CF71000263BE5 /* RunnerTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -125,6 +291,10 @@
 				331C80D6294CF71000263BE5 /* RunnerTests */,
 				33CC10EE2044A3C60003C045 /* Products */,
 				D73912EC22F37F3D000D13A0 /* Frameworks */,
+				1D002C416957F6BBA19D9DFC /* PacketTunnelMac */,
+				F2101E7EDDAD585F46762B89 /* PacketTunnelMac */,
+				40AE162B4253127665296B99 /* PacketTunnelMac */,
+				ACADCD9E3DE37CFC4DEAF9B5 /* PacketTunnelMac */,
 			);
 			sourceTree = "<group>";
 		};
@@ -133,6 +303,10 @@
 			children = (
 				33CC10ED2044A3C60003C045 /* cross_platform_vpn.app */,
 				331C80D5294CF71000263BE5 /* RunnerTests.xctest */,
+				5347974A3BD358FE3D393F54 /* PacketTunnelMac */,
+				F1640DC3A6F37031AD7C5E87 /* PacketTunnelMac */,
+				49FF81D75E6FF666D5CF07AA /* PacketTunnelMac */,
+				6981DE983837F49A8C4972DF /* PacketTunnelMac */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -168,20 +342,99 @@
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
 				33BA886A226E78AF003329D5 /* Configs */,
+				93C05775FCD52414365CC750 /* VulcainLogger.swift */,
+				CF48DE73A14625A403CA0F45 /* VpnManager.swift */,
 			);
 			path = Runner;
+			sourceTree = "<group>";
+		};
+		40AE162B4253127665296B99 /* PacketTunnelMac */ = {
+			isa = PBXGroup;
+			children = (
+				B77E2348B33378C9BCE7591C /* Info.plist */,
+				7BC6C3A4F178FC871453A7A2 /* PacketTunnelMac.entitlements */,
+				6B4F7FED2AF1A44C390933CB /* PacketTunnelProvider.swift */,
+			);
+			name = PacketTunnelMac;
+			path = PacketTunnelMac;
+			sourceTree = "<group>";
+		};
+		ACADCD9E3DE37CFC4DEAF9B5 /* PacketTunnelMac */ = {
+			isa = PBXGroup;
+			children = (
+				33453A50DEB1F0463578D961 /* Info.plist */,
+				6E16CB01D8F9D4441BE7BF28 /* PacketTunnelMac.entitlements */,
+				24148BD0C828CEE43500FC28 /* PacketTunnelProvider.swift */,
+			);
+			name = PacketTunnelMac;
+			path = PacketTunnelMac;
+			sourceTree = "<group>";
+		};
+		D662F6FF6B4AF21BB82CE8A2 /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				BB8FA26E44544AAE086198F7 /* Cocoa.framework */,
+			);
+			name = "OS X";
 			sourceTree = "<group>";
 		};
 		D73912EC22F37F3D000D13A0 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				D662F6FF6B4AF21BB82CE8A2 /* OS X */,
+				D713FC327FF6C4519AF83BFB /* Libbox.xcframework */,
 			);
 			name = Frameworks;
+			sourceTree = SOURCE_ROOT;
+		};
+		F2101E7EDDAD585F46762B89 /* PacketTunnelMac */ = {
+			isa = PBXGroup;
+			children = (
+				876BFC002C4A48DE8E286B8C /* Info.plist */,
+				22552FD9340219AE976C4ED3 /* PacketTunnelMac.entitlements */,
+				67AC243FA576F50D62334F16 /* PacketTunnelProvider.swift */,
+			);
+			name = PacketTunnelMac;
+			path = PacketTunnelMac;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		013092BCB73FD99795AC31C1 /* PacketTunnelMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8FBDEBAC3A573F17DA6F4ECD /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */;
+			buildPhases = (
+				93E1683B34EF9394B07DB107 /* Sources */,
+				05AABADD1C88C4ABBCAADFEB /* Frameworks */,
+				043B644D1EDF56B3D4E30217 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PacketTunnelMac;
+			productName = PacketTunnelMac;
+			productReference = F1640DC3A6F37031AD7C5E87 /* PacketTunnelMac */;
+			productType = "com.apple.product-type.system-extension";
+		};
+		064FCA1A37708BC94D077313 /* PacketTunnelMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E4AD0F0EC41D1B9EC37DB1D9 /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */;
+			buildPhases = (
+				9721BF50A90A733D1417985D /* Sources */,
+				6ADA771F336FD88063842EB4 /* Frameworks */,
+				F63037711FB326AA2656B382 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PacketTunnelMac;
+			productName = PacketTunnelMac;
+			productReference = 49FF81D75E6FF666D5CF07AA /* PacketTunnelMac */;
+			productType = "com.apple.product-type.system-extension";
+		};
 		331C80D4294CF70F00263BE5 /* RunnerTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 331C80DE294CF71000263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */;
@@ -209,16 +462,59 @@
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
+				32E427F0E6C9F3368448D47A /* Embed System Extensions */,
+				3D27D64DD1F09198F71DA8CD /* Embed System Extensions */,
+				8A7BAA10D46912A423317CD5 /* Embed System Extensions */,
+				8B16663F9DCFDBB37488A95A /* Embed System Extensions */,
+				1024DCEE9B0B973FF87A9019 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				33CC11202044C79F0003C045 /* PBXTargetDependency */,
+				27F705D34FF2B3E114387D1A /* PBXTargetDependency */,
+				910AA809662409AD92A55283 /* PBXTargetDependency */,
+				50EF216D0B0D25ACEA28C371 /* PBXTargetDependency */,
+				DE508A91B459494926055438 /* PBXTargetDependency */,
 			);
 			name = Runner;
 			productName = Runner;
 			productReference = 33CC10ED2044A3C60003C045 /* cross_platform_vpn.app */;
 			productType = "com.apple.product-type.application";
+		};
+		957C7D1EE2C3318D638BB58C /* PacketTunnelMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 11DA7952FD08F87243F1FB17 /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */;
+			buildPhases = (
+				44A62797E264FEA2FAD84AF9 /* Sources */,
+				1D9B8C556B64C6859CCF6559 /* Frameworks */,
+				FEAC77E83BE72A6D66171B11 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PacketTunnelMac;
+			productName = PacketTunnelMac;
+			productReference = 5347974A3BD358FE3D393F54 /* PacketTunnelMac */;
+			productType = "com.apple.product-type.system-extension";
+		};
+		AD6C7B265F9ED6625B92CF21 /* PacketTunnelMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 855EC2033B2B69C3B576D96F /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */;
+			buildPhases = (
+				56F4BBB77443B7D6817EEA21 /* Sources */,
+				AF9DFCDE15C48033F97B6374 /* Frameworks */,
+				47B625F7359EE4A46EB16625 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PacketTunnelMac;
+			productName = PacketTunnelMac;
+			productReference = 6981DE983837F49A8C4972DF /* PacketTunnelMac */;
+			productType = "com.apple.product-type.system-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -267,11 +563,22 @@
 				33CC10EC2044A3C60003C045 /* Runner */,
 				331C80D4294CF70F00263BE5 /* RunnerTests */,
 				33CC111A2044C6BA0003C045 /* Flutter Assemble */,
+				957C7D1EE2C3318D638BB58C /* PacketTunnelMac */,
+				013092BCB73FD99795AC31C1 /* PacketTunnelMac */,
+				064FCA1A37708BC94D077313 /* PacketTunnelMac */,
+				AD6C7B265F9ED6625B92CF21 /* PacketTunnelMac */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		043B644D1EDF56B3D4E30217 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		331C80D3294CF70F00263BE5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -285,6 +592,27 @@
 			files = (
 				33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */,
 				33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		47B625F7359EE4A46EB16625 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F63037711FB326AA2656B382 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FEAC77E83BE72A6D66171B11 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -347,12 +675,53 @@
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
+				21DF4017C8630D3657BD6ADD /* VulcainLogger.swift in Sources */,
+				90301FDC45CDB1E4AC62ACEA /* VpnManager.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		44A62797E264FEA2FAD84AF9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				33924433D9212D79C55A5630 /* PacketTunnelProvider.swift in Sources */,
+				D0BC692B604EC46E11D631F1 /* VulcainLogger.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		56F4BBB77443B7D6817EEA21 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0454668379A9555FCD67E621 /* PacketTunnelProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		93E1683B34EF9394B07DB107 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C79160DC08213D117D9D69F9 /* PacketTunnelProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9721BF50A90A733D1417985D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C7DD4E127029A36331A3B6F4 /* PacketTunnelProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		27F705D34FF2B3E114387D1A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PacketTunnelMac;
+			target = 957C7D1EE2C3318D638BB58C /* PacketTunnelMac */;
+			targetProxy = 8686F88670F989C40D9E862A /* PBXContainerItemProxy */;
+		};
 		331C80DA294CF71000263BE5 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 33CC10EC2044A3C60003C045 /* Runner */;
@@ -362,6 +731,24 @@
 			isa = PBXTargetDependency;
 			target = 33CC111A2044C6BA0003C045 /* Flutter Assemble */;
 			targetProxy = 33CC111F2044C79F0003C045 /* PBXContainerItemProxy */;
+		};
+		50EF216D0B0D25ACEA28C371 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PacketTunnelMac;
+			target = 064FCA1A37708BC94D077313 /* PacketTunnelMac */;
+			targetProxy = 87F0C329CBE33406C21560C7 /* PBXContainerItemProxy */;
+		};
+		910AA809662409AD92A55283 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PacketTunnelMac;
+			target = 013092BCB73FD99795AC31C1 /* PacketTunnelMac */;
+			targetProxy = F76C1B659D9E45FC0B05CEC3 /* PBXContainerItemProxy */;
+		};
+		DE508A91B459494926055438 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PacketTunnelMac;
+			target = AD6C7B265F9ED6625B92CF21 /* PacketTunnelMac */;
+			targetProxy = 052C617D68CF9279715A5BA7 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -378,6 +765,60 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		2FC1A5C1126313FE8E378F68 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
+		309C8AC64F523F329B1778D1 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Profile;
+		};
 		331C80DB294CF71000263BE5 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -478,6 +919,10 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -610,6 +1055,10 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -630,6 +1079,10 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -656,9 +1109,277 @@
 			};
 			name = Release;
 		};
+		3DFB49CD9E63709827202B9D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
+		53F24B199C808862EF19186D /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Profile;
+		};
+		935F61883A126DD2B9F14208 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Profile;
+		};
+		9FC4B0B076C24F6A40064BC4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		B7CCDD8548BF3FB96B066D5C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		BCEAC5E4525089510209EDAD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		BE90F890EF173A2C79CB019C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
+		D0A9DB551A6C674609D66A9B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		F39FD0FD15678D4A03FD8630 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Frameworks",
+				);
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
+		F55B29EB2951C8BA960D2635 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = PacketTunnelMac/PacketTunnelMac.entitlements;
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = PacketTunnelMac/Info.plist;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Bundles";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.15;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vulcainvpn.app.macos.PacketTunnel;
+				PRODUCT_NAME = PacketTunnelMac;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Profile;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		11DA7952FD08F87243F1FB17 /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F39FD0FD15678D4A03FD8630 /* Release */,
+				BCEAC5E4525089510209EDAD /* Debug */,
+				309C8AC64F523F329B1778D1 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		331C80DE294CF71000263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -695,6 +1416,36 @@
 				33CC111C2044C6BA0003C045 /* Debug */,
 				33CC111D2044C6BA0003C045 /* Release */,
 				338D0CEB231458BD00FA5F75 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		855EC2033B2B69C3B576D96F /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BE90F890EF173A2C79CB019C /* Release */,
+				B7CCDD8548BF3FB96B066D5C /* Debug */,
+				F55B29EB2951C8BA960D2635 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8FBDEBAC3A573F17DA6F4ECD /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3DFB49CD9E63709827202B9D /* Release */,
+				9FC4B0B076C24F6A40064BC4 /* Debug */,
+				935F61883A126DD2B9F14208 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E4AD0F0EC41D1B9EC37DB1D9 /* Build configuration list for PBXNativeTarget "PacketTunnelMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2FC1A5C1126313FE8E378F68 /* Release */,
+				D0A9DB551A6C674609D66A9B /* Debug */,
+				53F24B199C808862EF19186D /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
