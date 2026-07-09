@@ -205,7 +205,18 @@ workflows:
 
       - name: Notarize DMG
         script: |
-          echo "$APP_STORE_CONNECT_PRIVATE_KEY" > /tmp/asc_key.p8
+          printf '%s' "$APP_STORE_CONNECT_PRIVATE_KEY" > /tmp/asc_key.p8
+
+          echo "=== Verifying key file format ==="
+          head -1 /tmp/asc_key.p8
+          tail -1 /tmp/asc_key.p8
+          wc -l /tmp/asc_key.p8
+
+          if ! grep -q "BEGIN PRIVATE KEY" /tmp/asc_key.p8; then
+            echo "❌ APP_STORE_CONNECT_PRIVATE_KEY does not look like a valid PEM file."
+            echo "Check the macos_signing group has this variable set correctly."
+            exit 1
+          fi
 
           xcrun notarytool submit "$CM_BUILD_DIR/VulcainVPN.dmg" \
             --key /tmp/asc_key.p8 \
@@ -213,6 +224,8 @@ workflows:
             --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
             --wait
 
+          # notarytool exits non-zero on rejection, so if we're still here
+          # the submission was genuinely accepted — safe to staple.
           xcrun stapler staple "$CM_BUILD_DIR/VulcainVPN.dmg"
           rm -f /tmp/asc_key.p8
 
@@ -223,3 +236,4 @@ workflows:
       email:
         recipients:
           - pierre.webdev@gmail.com
+ 
