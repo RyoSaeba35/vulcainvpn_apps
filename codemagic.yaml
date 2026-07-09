@@ -235,15 +235,36 @@ workflows:
             exit 1
           fi
 
-          xcrun notarytool submit "$CM_BUILD_DIR/VulcainVPN.dmg" \
+          echo "=== Submitting for notarization (async — not waiting) ==="
+          SUBMIT_OUTPUT=$(xcrun notarytool submit "$CM_BUILD_DIR/VulcainVPN.dmg" \
             --key "$KEY_PATH" \
             --key-id "$APP_STORE_CONNECT_KEY_IDENTIFIER" \
-            --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
-            --wait
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID")
 
-          # notarytool exits non-zero on rejection, so if we're still here
-          # the submission was genuinely accepted — safe to staple.
-          xcrun stapler staple "$CM_BUILD_DIR/VulcainVPN.dmg"
+          echo "$SUBMIT_OUTPUT"
+
+          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep "  id:" | head -1 | awk '{print $2}')
+
+          echo ""
+          echo "=================================================================="
+          echo "✅ Submitted to Apple's notary service (not waiting for result)."
+          echo "   Submission ID: $SUBMISSION_ID"
+          echo ""
+          echo "   This build is DONE — Apple will process it in the background."
+          echo "   The DMG in this build's artifacts is signed but NOT YET"
+          echo "   notarized/stapled. Once Apple finishes (check from your own"
+          echo "   Mac, no CI cost), run:"
+          echo ""
+          echo "     xcrun notarytool wait $SUBMISSION_ID \\"
+          echo "       --key /path/to/AuthKey_${APP_STORE_CONNECT_KEY_IDENTIFIER}.p8 \\"
+          echo "       --key-id $APP_STORE_CONNECT_KEY_IDENTIFIER \\"
+          echo "       --issuer $APP_STORE_CONNECT_ISSUER_ID"
+          echo ""
+          echo "   Then, once that reports 'status: Accepted':"
+          echo ""
+          echo "     xcrun stapler staple VulcainVPN.dmg"
+          echo "=================================================================="
+
           rm -f /tmp/asc_key.p8
 
     artifacts:
@@ -253,4 +274,3 @@ workflows:
       email:
         recipients:
           - pierre.webdev@gmail.com
- 
