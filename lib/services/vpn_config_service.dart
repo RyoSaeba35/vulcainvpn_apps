@@ -223,7 +223,7 @@ class VpnConfigService {
     ConnectionMode mode,
   ) {
     return {
-      "log": {"level": "error", "timestamp": true},
+      "log": {"level": "debug", "output": "sing-box.log", "timestamp": true},
       "dns": {
         "servers": [
           {"type": "udp", "tag": "dns-direct", "server": "223.5.5.5"},

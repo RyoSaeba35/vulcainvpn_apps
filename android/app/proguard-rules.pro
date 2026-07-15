@@ -31,3 +31,12 @@
 # Flutter Play Store Split
 -keep class io.flutter.embedding.android.FlutterPlayStoreSplitApplication { *; }
 -keep class io.flutter.embedding.engine.deferredcomponents.** { *; }
+
+# Keep gomobile runtime (Seq, Proxy, Universe) - invoked from Go via JNI,
+# never referenced from Kotlin, so R8 cannot see these uses.
+-keep class go.** { *; }
+-dontwarn go.**
+
+# Inner classes are separate from the outer -keep above.
+# VulcainCommandServerHandler / StringArray / InterfaceArray are all called from Go.
+-keep class com.vulcainvpn.app.MyVpnService$** { *; }

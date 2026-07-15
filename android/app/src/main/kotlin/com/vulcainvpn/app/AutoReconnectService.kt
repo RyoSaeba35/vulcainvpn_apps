@@ -485,7 +485,7 @@ class AutoReconnectService : Service() {
                 .edit()
                 .putInt(KEY_RETRY_COUNT, 0)
                 .putInt(KEY_RETRY_BATCH, 1)
-                .putLong(KEY_LAST_RETRY_TIME, 0)
+                .putLong(KEY_LAST_RETRY_TIME, System.currentTimeMillis())
                 .apply()
             VpnLogger.log(TAG, "🔄 Retry state reset")
         } catch (e: Exception) {
@@ -608,18 +608,32 @@ class AutoReconnectService : Service() {
         }
     }
 
-    private fun isVpnRunning(): Boolean {
-        return try {
-            VpnLogger.log(TAG, "🔍 Checking VPN via network capabilities...")
-            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val activeNetwork = cm.activeNetwork ?: return false
-            val caps = cm.getNetworkCapabilities(activeNetwork)
-            val isVpn = caps?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
-            VpnLogger.log(TAG, "✅ VPN running check: $isVpn")
-            isVpn
-        } catch (e: Exception) {
-            VpnLogger.error(TAG, "VPN check error", e)
-            false
+    private suspend fun isVpnRunning(): Boolean {
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = cm.activeNetwork ?: return false
+        val hasVpn = cm.getNetworkCapabilities(activeNetwork)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+        if (!hasVpn) return false
+
+        // Interface up != tunnel working. Prove it carries traffic.
+        return withContext(Dispatchers.IO) {
+            try {
+                val deviceId = getSecureValue("device_id") ?: return@withContext false
+                val apiKey = getSecureValue("api_key") ?: return@withContext false
+                val conn = URL("https://api.vulcainvpn.com/api/heartbeat/$deviceId")
+                    .openConnection() as HttpsURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("X-Api-Key", apiKey)
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                conn.responseCode
+                conn.disconnect()
+                VpnLogger.log(TAG, "✅ VPN verified: tunnel carries traffic")
+                true
+            } catch (e: Exception) {
+                VpnLogger.log(TAG, "❌ VPN transport up but no traffic: ${e.message}")
+                false
+            }
         }
     }
 

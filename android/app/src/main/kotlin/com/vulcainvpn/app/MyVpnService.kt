@@ -545,7 +545,7 @@ class MyVpnService : VpnService(), PlatformInterface {
 
             // ⭐ STEP 5: DEFENSIVE - Detect stale state
             val vpnPrefs = getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
-            val storedVpnRunning = vpnPrefs.getBoolean("vpn_running", false)
+            val storedVpnRunning = vpnPrefs.getBoolean(KEY_IS_RUNNING, false)
             val actuallyRunning = isVpnActive() // Check actual VPN state
 
             if (storedVpnRunning && !actuallyRunning) {
@@ -556,8 +556,7 @@ class MyVpnService : VpnService(), PlatformInterface {
 
                 // Clear stale state
                 vpnPrefs.edit()
-                    .putBoolean("vpn_running", false)
-                    .putBoolean("vpn_was_running", false)
+                    .putBoolean(KEY_IS_RUNNING, false)
                     .apply()
 
                 VpnLogger.log(TAG, "✅ Stale state cleared - will start fresh")
@@ -2118,7 +2117,10 @@ class MyVpnService : VpnService(), PlatformInterface {
 
     private fun setVpnState(running: Boolean) {
         synchronized(prefsLock) {
-            prefs.edit().putBoolean(KEY_IS_RUNNING, running).apply()
+            // commit(), not apply(): VpnWatchdogService runs in a separate process and
+            // reads this from disk. apply() writes asynchronously, so the watchdog can
+            // read a stale false right after we start.
+            prefs.edit().putBoolean(KEY_IS_RUNNING, running).commit()
         }
         Log.d(TAG, "✅ VPN state set to: $running")
     }
