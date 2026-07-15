@@ -206,7 +206,16 @@ class VpnConfigService {
     };
   }
 
-  // ✅ UPDATED: Add mode parameter
+  // ✅ MIGRATED to libbox 1.13.14 schema (was sing-box 1.8 format).
+  // Changes vs 1.8:
+  //   - WireGuard moved from "outbounds" to "endpoints" (server/server_port/
+  //     peer_public_key/local_address -> address/peers[].address/peers[].port/
+  //     peers[].public_key). This is what checkConfig rejected first.
+  //   - tun inbound: inet4_address -> address (list); interface_name dropped.
+  //   - sniff/sniff_override_destination -> {"action": "sniff"} route rule.
+  //   - dns servers: {tag, address} -> {type, tag, server}.
+  //   - "block" / "dns" outbound types removed -> route actions (hijack-dns).
+  //   - route needs default_domain_resolver.
   static Map<String, dynamic> _buildMobileConfig(
     Map<String, dynamic> wg,
     Map<String, dynamic>? hy2,
@@ -217,12 +226,16 @@ class VpnConfigService {
       "log": {"level": "error", "timestamp": true},
       "dns": {
         "servers": [
-          {"tag": "dns-direct", "address": "223.5.5.5", "detour": "direct"},
-          {"tag": "dns-proxy", "address": "https://1.1.1.1/dns-query", "detour": "proxy"},
-          {"tag": "dns-block", "address": "rcode://success"}
+          {"type": "udp", "tag": "dns-direct", "server": "223.5.5.5"},
+          {
+            "type": "https",
+            "tag": "dns-proxy",
+            "server": "1.1.1.1",
+            "path": "/dns-query",
+            "detour": "proxy"
+          }
         ],
         "rules": [
-          {"outbound": "any", "server": "dns-direct"},
           {"clash_mode": "direct", "server": "dns-direct"},
           {"clash_mode": "global", "server": "dns-proxy"}
         ],
@@ -236,14 +249,29 @@ class VpnConfigService {
         {
           "type": "tun",
           "tag": "tun-in",
-          "interface_name": "tun0",
-          "inet4_address": "172.19.0.1/30",
+          "address": ["172.19.0.1/30"],
           "mtu": 1420,
           "auto_route": true,
           "strict_route": true,
-          "stack": "mixed",
-          "sniff": true,
-          "sniff_override_destination": true
+          "stack": "mixed"
+        }
+      ],
+      "endpoints": [
+        {
+          "type": "wireguard",
+          "tag": "wireguard_1",
+          "address": ["${wg['client_ip']}/32"],
+          "private_key": wg['client_private_key'].toString(),
+          "mtu": 1420,
+          "peers": [
+            {
+              "address": wg['server_ip'].toString(),
+              "port": int.parse(wg['server_port'].toString()),
+              "public_key": wg['server_public_key'].toString(),
+              "pre_shared_key": wg['client_preshared_key'].toString(),
+              "allowed_ips": ["0.0.0.0/0", "::/0"]
+            }
+          ]
         }
       ],
       "outbounds": [
@@ -260,19 +288,6 @@ class VpnConfigService {
           "url": "https://www.gstatic.com/generate_204",
           "interval": "10m",
           "tolerance": 50
-        },
-        {
-          "type": "wireguard",
-          "tag": "wireguard_1",
-          "server": wg['server_ip'].toString(),
-          "server_port": int.parse(wg['server_port'].toString()),
-          "system_interface": false,
-          "interface_name": "wg0",
-          "local_address": ["${wg['client_ip']}/32"],
-          "private_key": wg['client_private_key'].toString(),
-          "peer_public_key": wg['server_public_key'].toString(),
-          "pre_shared_key": wg['client_preshared_key'].toString(),
-          "mtu": 1420,
         },
         if (ss != null) {
           "type": "shadowsocks",
@@ -309,14 +324,14 @@ class VpnConfigService {
             "password": hy2['obfs_password'].toString()
           }
         },
-        {"type": "direct", "tag": "direct"},
-        {"type": "block", "tag": "block"},
-        {"type": "dns", "tag": "dns-out"}
+        {"type": "direct", "tag": "direct"}
       ],
       "route": {
+        "default_domain_resolver": "dns-direct",
         "rules": [
-          {"protocol": "dns", "outbound": "dns-out"},
-          {"ip_is_private": true, "outbound": "direct"}
+          {"action": "sniff"},
+          {"protocol": "dns", "action": "hijack-dns"},
+          {"ip_is_private": true, "action": "route", "outbound": "direct"}
         ],
         "auto_detect_interface": true,
         "final": "proxy"

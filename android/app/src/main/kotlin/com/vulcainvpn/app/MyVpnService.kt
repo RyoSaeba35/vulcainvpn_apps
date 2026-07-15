@@ -1875,13 +1875,17 @@ class MyVpnService : VpnService(), PlatformInterface {
     // both of which no longer exist on PlatformInterface). Was stubbed at -1 before, so
     // null is the equivalent. If libbox NPEs on this, return
     // ConnectionOwner().apply { setUserId(-1) } instead.
-    override fun findConnectionOwner(
+     override fun findConnectionOwner(
         ipProtocol: Int,
         sourceAddress: String,
         sourcePort: Int,
         destinationAddress: String,
         destinationPort: Int
-    ): ConnectionOwner? = null
+    ): ConnectionOwner = ConnectionOwner().apply {
+        setUserId(-1)
+        setUserName("")
+        setProcessPath("")
+    }
 
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
         DefaultNetworkMonitor.onInterfaceCacheRequest = { network ->
