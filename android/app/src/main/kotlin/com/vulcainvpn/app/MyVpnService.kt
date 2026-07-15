@@ -17,7 +17,11 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.nekohasekai.libbox.Libbox
-import io.nekohasekai.libbox.BoxService as LibboxService
+import io.nekohasekai.libbox.CommandServer
+import io.nekohasekai.libbox.CommandServerHandler
+import io.nekohasekai.libbox.ConnectionOwner
+import io.nekohasekai.libbox.OverrideOptions
+import io.nekohasekai.libbox.SystemProxyStatus
 import io.nekohasekai.libbox.TunOptions
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -72,7 +76,7 @@ class MyVpnService : VpnService(), PlatformInterface {
         private var isStarting = false
     }
 
-    private var boxService: LibboxService? = null
+    private var commandServer: CommandServer? = null
     private var fileDescriptor: ParcelFileDescriptor? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -703,15 +707,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                 // ⭐ NEW: Clean up any existing instances before starting
                 try {
                     VpnLogger.log(TAG, "🧹 Ensuring clean state before start...")
-                    boxService?.let {
-                        try {
-                            it.close()
-                            VpnLogger.log(TAG, "✅ Closed existing boxService")
-                        } catch (e: Exception) {
-                            VpnLogger.log(TAG, "⚠️ Error closing existing boxService: ${e.message}")
-                        }
-                    }
-                    boxService = null
+                    closeCommandServer()
 
                     // Small delay to ensure port is released
                     Thread.sleep(500)
@@ -731,13 +727,29 @@ class MyVpnService : VpnService(), PlatformInterface {
                 }
                 VpnLogger.log(TAG, "✅ Network monitor started")
 
-                VpnLogger.log(TAG, "🚀 Creating libbox service...")
+                VpnLogger.log(TAG, "🚀 Creating libbox command server...")
                 Libbox.setMemoryLimit(true)
-                val service = Libbox.newService(config, this)
-                VpnLogger.log(TAG, "✅ Libbox service created, starting...")
 
-                service.start()
-                boxService = service
+                // Validate before handing the config to libbox. Without this a schema
+                // problem surfaces as an opaque failure inside startOrReloadService.
+                try {
+                    Libbox.checkConfig(config)
+                    VpnLogger.log(TAG, "✅ Config validated by libbox")
+                } catch (e: Exception) {
+                    VpnLogger.error(TAG, "❌ Config REJECTED by libbox: ${e.message}", e)
+                    throw e
+                }
+
+                val server = Libbox.newCommandServer(VulcainCommandServerHandler(), this)
+                // Assign before start(): libbox callbacks can fire during startup.
+                commandServer = server
+
+                // start() brings up the IPC socket only - it does NOT start the tunnel.
+                server.start()
+                VpnLogger.log(TAG, "✅ Command server started")
+
+                // startOrReloadService() is what actually starts the tunnel.
+                server.startOrReloadService(config, OverrideOptions())
                 VpnLogger.log(TAG, "✅ Libbox service started successfully")
 
                 setVpnState(true)
@@ -817,8 +829,7 @@ class MyVpnService : VpnService(), PlatformInterface {
         stopHeartbeatMonitoring()
 
         try {
-            boxService?.close()
-            boxService = null
+            closeCommandServer()
             fileDescriptor?.close()
             fileDescriptor = null
         } catch (e: Exception) {
@@ -1238,8 +1249,7 @@ class MyVpnService : VpnService(), PlatformInterface {
                                     stopHeartbeatMonitoring()
 
                                     try {
-                                        boxService?.close()
-                                        boxService = null
+                                        closeCommandServer()
                                         fileDescriptor?.close()
                                         fileDescriptor = null
                                     } catch (e: Exception) {
@@ -1567,8 +1577,7 @@ class MyVpnService : VpnService(), PlatformInterface {
             cachedInterfaces = null
             fileDescriptor?.close()
             fileDescriptor = null
-            boxService?.close()
-            boxService = null
+            closeCommandServer()
 
             // Stop watchdog service
             stopWatchdogService()
@@ -1737,6 +1746,64 @@ class MyVpnService : VpnService(), PlatformInterface {
         }
     }
 
+    // ---- libbox 1.13 CommandServerHandler -------------------------------------
+    // Required by Libbox.newCommandServer(). libbox invokes these from its own
+    // (Go-owned) threads, so nothing here may block or re-enter libbox.
+    private inner class VulcainCommandServerHandler : CommandServerHandler {
+
+        override fun serviceReload() {
+            VpnLogger.log(TAG, "📡 serviceReload requested by libbox")
+            // Not supported: reconnects are driven by Flutter / AutoReconnectService.
+        }
+
+        override fun serviceStop() {
+            VpnLogger.log(TAG, "📡 serviceStop requested by libbox")
+            // CRITICAL: we are on a libbox-owned thread. Tearing down inline would
+            // re-enter the caller (closeService -> back into libbox). Post and return.
+            mainHandler.post {
+                isNormalStop = true      // otherwise VpnDeathReceiver treats this as a
+                deathEventSent = true    // death and starts AutoReconnectService.
+                stopVpnService()
+            }
+        }
+
+        override fun getSystemProxyStatus(): SystemProxyStatus =
+            SystemProxyStatus().apply {
+                setAvailable(false)
+                setEnabled(false)
+            }
+
+        override fun setSystemProxyEnabled(isEnabled: Boolean) {
+            // n/a: system proxy is not applicable to an Android VpnService tunnel.
+        }
+
+        override fun writeDebugMessage(message: String) {
+            if (!message.contains("http2: client connection force closed") &&
+                !message.contains("operation was canceled")) {
+                Log.d(TAG, "libbox: $message")
+            }
+        }
+    }
+
+    // Close order matters: closeService() stops the box, close() tears down the server.
+    private fun closeCommandServer() {
+        val server = commandServer ?: return
+        commandServer = null
+        try {
+            server.closeService()
+            VpnLogger.log(TAG, "✅ box service closed")
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Error closing box service", e)
+        }
+        try {
+            server.close()
+            VpnLogger.log(TAG, "✅ command server closed")
+        } catch (e: Exception) {
+            VpnLogger.error(TAG, "Error closing command server", e)
+        }
+    }
+    // ---------------------------------------------------------------------------
+
     override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
     override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
     override fun autoDetectInterfaceControl(fd: Int) {
@@ -1795,62 +1862,26 @@ class MyVpnService : VpnService(), PlatformInterface {
 
     override fun localDNSTransport(): io.nekohasekai.libbox.LocalDNSTransport? = null
 
-    // ✅ NEW: 403 error detection in writeLog
-    override fun writeLog(message: String) {
-        if (!message.contains("http2: client connection force closed") &&
-            !message.contains("operation was canceled")) {
-            Log.d(TAG, "libbox: $message")
-        }
-
-        // ✅ FIXED: Thread-safe 403 authentication failure detection
-        if (message.contains("authentication failed, status code: 403") ||
-            (message.contains("authentication failed") && message.contains("403"))) {
-
-            // ⭐ CRITICAL: Synchronize to prevent race conditions
-            synchronized(auth403Lock) {
-                val now = System.currentTimeMillis()
-                val lastTime = last403Time.get()
-
-                // Reset counter if outside time window
-                if (now - lastTime > AUTH_403_WINDOW_MS) {
-                    auth403Count.set(0)
-                }
-
-                // Increment counter and update timestamp
-                val currentCount = auth403Count.incrementAndGet()
-                last403Time.set(now)
-
-                Log.w(TAG, "🚨 403 authentication error detected (attempt $currentCount)")
-                VpnLogger.log(TAG, "🚨 403 authentication error detected (attempt $currentCount)")
-
-                // Check threshold
-                if (currentCount >= AUTH_403_THRESHOLD) {
-                    Log.e(TAG, "🔴 SUBSCRIPTION FAILED - $currentCount consecutive 403 errors in ${AUTH_403_WINDOW_MS/1000}s")
-                    VpnLogger.critical(TAG, "🔴 SUBSCRIPTION EXPIRED - $currentCount consecutive 403 errors in ${AUTH_403_WINDOW_MS/1000}s")
-
-                    // ⭐ Prevent duplicate calls to handleSubscriptionExpired
-                    if (isHandlingSubscriptionExpired.compareAndSet(false, true)) {
-                        mainHandler.post {
-                            handle403Errors()
-                        }
-                    } else {
-                        Log.w(TAG, "⚠️ Already handling subscription expiry - ignoring duplicate")
-                    }
-                }
-            }
-        }
-    }
+    // NOTE: PlatformInterface.writeLog() no longer exists in libbox 1.13.
+    // The 403-sniffing subscription check that used to live here is gone. Subscription
+    // expiry is still covered by checkSubscriptionStatus() in the heartbeat loop.
+    // handle403Errors()/handleCredentialsExpired()/handleAuthenticationFailure() below
+    // are now unreachable - kept for reference. The real fix for credential rotation is
+    // to have AutoReconnectService fetch fresh credentials from /api/connect instead of
+    // replaying the stored config.
 
     override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
-    override fun findConnectionOwner(ipProtocol: Int, sourceAddress: String, sourcePort: Int, destinationAddress: String, destinationPort: Int): Int = -1
-    override fun packageNameByUid(uid: Int): String = packageManager.getPackagesForUid(uid)?.first() ?: "unknown"
-    override fun uidByPackageName(packageName: String): Int =
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                packageManager.getPackageUid(packageName, PackageManager.PackageInfoFlags.of(0))
-            else
-                @Suppress("DEPRECATION") packageManager.getApplicationInfo(packageName, 0).uid
-        } catch (_: PackageManager.NameNotFoundException) { -1 }
+    // libbox 1.13: returns ConnectionOwner (absorbed packageNameByUid/uidByPackageName,
+    // both of which no longer exist on PlatformInterface). Was stubbed at -1 before, so
+    // null is the equivalent. If libbox NPEs on this, return
+    // ConnectionOwner().apply { setUserId(-1) } instead.
+    override fun findConnectionOwner(
+        ipProtocol: Int,
+        sourceAddress: String,
+        sourcePort: Int,
+        destinationAddress: String,
+        destinationPort: Int
+    ): ConnectionOwner? = null
 
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
         DefaultNetworkMonitor.onInterfaceCacheRequest = { network ->
@@ -2167,17 +2198,8 @@ class MyVpnService : VpnService(), PlatformInterface {
             // Stop heartbeat first
             stopHeartbeatMonitoring()
 
-            // Close services in correct order
-            boxService?.let { service ->
-                try {
-                    VpnLogger.log(TAG, "Closing boxService...")
-                    service.close()
-                    VpnLogger.log(TAG, "✅ boxService closed")
-                } catch (e: Exception) {
-                    VpnLogger.error(TAG, "Error closing boxService", e)
-                }
-            }
-            boxService = null
+            // Close services in correct order: box first, then the command server.
+            closeCommandServer()
 
             // ⭐ CRITICAL: Wait for port 9090 to be fully released
             delay(500)
