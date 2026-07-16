@@ -46,3 +46,5 @@ app.*.map.json
 
 vpn_log.txt
 cache.db
+android/key.properties
+android/keystore.jks
