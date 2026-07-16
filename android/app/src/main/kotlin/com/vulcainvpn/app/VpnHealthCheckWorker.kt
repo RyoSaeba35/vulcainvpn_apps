@@ -68,9 +68,17 @@ class VpnHealthCheckWorker(
             VpnLogger.log(TAG, "🔍 WorkManager: underlying=true, transport=$hasTransport, ping=$pingOk")
 
             if (!pingOk) {
-                // Underlying network exists, ping through tunnel failed.
-                // Whether or not transport is present, traffic isn't flowing — VPN is dead.
-                VpnLogger.critical(TAG, "🚨 VPN DEATH DETECTED BY WORKMANAGER (BACKUP LAYER)!")
+                            // Re-check intended state before declaring death.
+                            // The VPN may have been intentionally stopped between our
+                            // transport check and the ping — avoid false death events
+                            // after manual disconnects.
+                            val stillShouldBeRunning = getVpnExpectedState()
+                            if (!stillShouldBeRunning) {
+                                VpnLogger.log(TAG, "⏹️ VPN stopped intentionally — WorkManager skipping death event")
+                                return Result.success()
+                            }
+
+                            VpnLogger.critical(TAG, "🚨 VPN DEATH DETECTED BY WORKMANAGER (BACKUP LAYER)!")
                 Log.e(TAG, "🚨 WORKMANAGER DETECTED VPN DEATH (Watchdog missed it)!")
 
                 val prefs = applicationContext.getSharedPreferences("vpn_state", Context.MODE_PRIVATE)

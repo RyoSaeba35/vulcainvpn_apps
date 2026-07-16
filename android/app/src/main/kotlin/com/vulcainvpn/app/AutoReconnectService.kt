@@ -722,7 +722,7 @@ class AutoReconnectService : Service() {
         VpnLogger.log(TAG, "🧹 Cleaning up existing VPN")
         try {
             startService(Intent(this, MyVpnService::class.java).apply {
-                action = "STOP_VPN"
+                action = "STOP_VPN_FOR_RECONNECT"
             })
             delay(2000)
             VpnLogger.log(TAG, "✅ Cleanup complete")

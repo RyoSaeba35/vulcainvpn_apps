@@ -469,16 +469,15 @@ class MyVpnService : VpnService(), PlatformInterface {
 
                 notifyFlutterVpnDeath(reason, message)
 
+                // Deliberately NOT calling notifyBackendDisconnect(). Both vpn_broken and
+                // network_lost are reconnectable — AutoReconnectService is about to bring the
+                // tunnel back. /api/disconnect would set device.active=false and release the
+                // config set, after which ClashApiMonitorJob sees "no active devices on
+                // server" and kills the reconnected tunnel. If the reconnect never succeeds,
+                // the backend deactivates us on its own once last_seen_at goes stale.
                 Thread {
-                    try {
-                        notifyBackendDisconnect()
-                        Log.d(TAG, "✅ Backend notified of disconnect")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to notify backend: ${e.message}")
-                    }
-
                     Thread.sleep(1000)
-                    releaseWakeLock("vpn_death_handled")
+                    releaseWakeLock("heartbeat_failure_handled")
                     stopSelf()
                 }.start()
             }
@@ -508,6 +507,18 @@ class MyVpnService : VpnService(), PlatformInterface {
                     VpnLogger.log(TAG, "🛑 STOP_VPN action received")
                     isNormalStop = true
                     stopVpnService()
+                    return START_NOT_STICKY
+                }
+                "STOP_VPN_FOR_RECONNECT" -> {
+                    // Tear down the tunnel but do NOT call /api/disconnect. Doing so sets
+                    // device.active=false and releases the config set, after which
+                    // ClashApiMonitorJob sees "no active devices on server" and kills the
+                    // reconnected tunnel. Keeping the session alive lets the job's
+                    // recent-heartbeat match (Strategy 3) recognise us.
+                    VpnLogger.log(TAG, "🛑 STOP_VPN_FOR_RECONNECT — keeping backend session alive")
+                    isNormalStop = true      // suppress the death broadcast
+                    deathEventSent = true
+                    stopVpnServiceKeepingSession()
                     return START_NOT_STICKY
                 }
             }
@@ -1503,16 +1514,13 @@ class MyVpnService : VpnService(), PlatformInterface {
 
             notifyFlutterVpnDeath(reason, message)
 
-            // Move backend notification to separate thread
+            // Deliberately NOT calling notifyBackendDisconnect(). Both vpn_broken and
+            // network_lost are reconnectable — AutoReconnectService is about to bring the
+            // tunnel back. /api/disconnect would set device.active=false and release the
+            // config set, after which ClashApiMonitorJob sees "no active devices on
+            // server" and kills the reconnected tunnel. If the reconnect never succeeds,
+            // the backend deactivates us on its own once last_seen_at goes stale.
             Thread {
-                try {
-                    notifyBackendDisconnect()
-                    Log.d(TAG, "✅ Backend notified of disconnect")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to notify backend: ${e.message}")
-                }
-
-                // Final delay before stopping service
                 Thread.sleep(1000)
                 releaseWakeLock("heartbeat_failure_handled")
                 stopSelf()
@@ -1610,6 +1618,39 @@ class MyVpnService : VpnService(), PlatformInterface {
             stopSelf()
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping VPN", e)
+        }
+    }
+
+    private fun stopVpnServiceKeepingSession() {
+        Log.d(TAG, "Stopping VPN service for reconnect (backend session preserved)")
+
+        stopHeartbeatMonitoring()
+
+        try {
+            runBlocking {
+                try {
+                    DefaultNetworkMonitor.stop()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping network monitor: ${e.message}")
+                }
+            }
+            cachedInterfaces = null
+            fileDescriptor?.close()
+            fileDescriptor = null
+            closeCommandServer()
+
+            stopWatchdogService()
+            setVpnState(false)
+
+            synchronized(prefsLock) {
+                prefs.edit().remove(KEY_START_TIME).apply()
+            }
+
+            releaseWakeLock("vpn_stop_for_reconnect")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping VPN for reconnect", e)
         }
     }
 
