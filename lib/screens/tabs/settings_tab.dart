@@ -6,7 +6,7 @@ import '../../main.dart';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
-import '../../services/account_service.dart';
+import '../delete_account_screen.dart';
 import '../../services/vpn_service.dart';
 import '../../services/settings_service.dart';
 import '../../widgets/info_card.dart';
@@ -541,97 +541,22 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   // Google Play requires in-app account deletion for apps with sign up
-  Future<void> _showDeleteAccountDialog(BuildContext context) async {
-    final passwordController = TextEditingController();
-
-    final deleted = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        bool deleting = false;
-        String? error;
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) => AlertDialog(
-            title: const Text('Delete account'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'This permanently deletes your account, your devices and your '
-                  'connection history. Any remaining subscription time is lost. '
-                  'This cannot be undone.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'A subscription bought on Google Play must also be cancelled in '
-                  'Google Play > Payments & subscriptions.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: passwordController,
-                  obscureText: true,
-                  enabled: !deleting,
-                  decoration: InputDecoration(
-                    labelText: 'Confirm with your password',
-                    errorText: error,
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: deleting ? null : () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: deleting
-                    ? null
-                    : () async {
-                        setDialogState(() {
-                          deleting = true;
-                          error = null;
-                        });
-                        final result =
-                            await AccountService.deleteAccount(passwordController.text);
-                        if (!dialogContext.mounted) return;
-                        if (result.ok) {
-                          Navigator.pop(dialogContext, true);
-                        } else {
-                          setDialogState(() {
-                            deleting = false;
-                            error = result.message;
-                          });
-                        }
-                      },
-                child: deleting
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text(
-                        'Delete permanently',
-                        style: TextStyle(color: Colors.red),
-                      ),
-              ),
-            ],
-          ),
-        );
-      },
+  Future<void> _openDeleteAccount() async {
+    final deleted = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
     );
-
-    passwordController.dispose();
 
     if (deleted == true) {
       if (widget.connectionState == 'connected') {
         await widget.vpnService.stopVpn();
       }
       if (mounted) {
-        ScaffoldMessenger.of(this.context).showSnackBar(
-          const SnackBar(content: Text('Your account has been deleted.')),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Your account has been deleted.'),
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
       widget.onLogout(); // Clears local tokens and returns to the login screen
@@ -952,7 +877,7 @@ class _SettingsTabState extends State<SettingsTab> {
         // Delete account
         Center(
           child: TextButton(
-            onPressed: () => _showDeleteAccountDialog(context),
+            onPressed: _openDeleteAccount,
             child: Text(
               'Delete account',
               style: TextStyle(color: Colors.grey[500], fontSize: 13),

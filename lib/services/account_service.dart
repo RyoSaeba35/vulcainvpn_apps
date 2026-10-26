@@ -58,6 +58,38 @@ class AccountService {
     return _post('confirmation/resend', {'email': sanitizedEmail});
   }
 
+  /// POST /api/confirmation with the token from the email link (App Links).
+  /// On success, [AccountResult.message] is shown and the returned email is
+  /// available in [lastConfirmedEmail] to prefill the login screen.
+  static String? lastConfirmedEmail;
+
+  static Future<AccountResult> confirmEmail(String token) async {
+    lastConfirmedEmail = null;
+    if (token.isEmpty) {
+      return const AccountResult(false, 'This confirmation link is invalid.');
+    }
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/confirmation'),
+            headers: {'Content-Type': 'application/json'},
+            body: json.encode({'confirmation_token': token}),
+          )
+          .timeout(_timeout);
+
+      try {
+        lastConfirmedEmail = (json.decode(response.body) as Map<String, dynamic>)['email'] as String?;
+      } catch (_) {}
+
+      return _toResult(response, successCodes: const [200]);
+    } catch (e) {
+      print('❌ Confirm email error: $e');
+      return const AccountResult(
+          false, 'Connection error. Check your internet and open the link again.');
+    }
+  }
+
   /// DELETE /api/account. Requires the current password.
   /// On success the caller must clear the local session (AuthService.logout).
   static Future<AccountResult> deleteAccount(String password) async {

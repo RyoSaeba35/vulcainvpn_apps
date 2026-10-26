@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/account_service.dart';
 import '../colors.dart';
 import 'signup_screen.dart';
+import 'forgot_password_screen.dart';
 
 // Only import window_manager on desktop platforms
 import 'package:window_manager/window_manager.dart';
@@ -12,10 +13,18 @@ class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
   final String? sessionResetReason;
 
+  /// Prefill + message, e.g. after confirming the email from the link
+  final String? initialEmail;
+  final String? initialInfoMessage;
+  final bool initialInfoIsError;
+
   const LoginScreen({
     super.key,
     required this.onLoginSuccess,
     this.sessionResetReason,
+    this.initialEmail,
+    this.initialInfoMessage,
+    this.initialInfoIsError = false,
   });
 
   @override
@@ -37,6 +46,15 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
   @override
   void initState() {
     super.initState();
+    if (widget.initialEmail != null) _emailController.text = widget.initialEmail!;
+    if (widget.initialInfoMessage != null) {
+      if (widget.initialInfoIsError) {
+        _errorMessage = widget.initialInfoMessage;
+        _needsConfirmation = true; // invalid/expired link: offer to resend
+      } else {
+        _infoMessage = widget.initialInfoMessage;
+      }
+    }
     if (_isDesktop) {
       windowManager.addListener(this);
       windowManager.setPreventClose(true);
@@ -121,83 +139,13 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
     }
   }
 
-  Future<void> _showForgotPasswordDialog() async {
-    final controller = TextEditingController(text: _emailController.text.trim());
-
-    final message = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        bool sending = false;
-        String? error;
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) => AlertDialog(
-            title: const Text('Reset password'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Enter your account email. We will send you a link to choose a new password.',
-                  style: TextStyle(fontSize: 13),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.emailAddress,
-                  autocorrect: false,
-                  decoration: InputDecoration(
-                    labelText: 'Email',
-                    errorText: error,
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: sending ? null : () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: sending
-                    ? null
-                    : () async {
-                        setDialogState(() {
-                          sending = true;
-                          error = null;
-                        });
-                        final result =
-                            await AccountService.requestPasswordReset(controller.text);
-                        if (!dialogContext.mounted) return;
-                        if (result.ok) {
-                          Navigator.pop(dialogContext, result.message);
-                        } else {
-                          setDialogState(() {
-                            sending = false;
-                            error = result.message;
-                          });
-                        }
-                      },
-                child: sending
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Text('Send link'),
-              ),
-            ],
-          ),
-        );
-      },
+  Future<void> _openForgotPassword() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordScreen(initialEmail: _emailController.text.trim()),
+      ),
     );
-
-    controller.dispose();
-    if (message != null && mounted) {
-      setState(() {
-        _errorMessage = null;
-        _needsConfirmation = false;
-        _infoMessage = message;
-      });
-    }
   }
 
   @override
@@ -343,7 +291,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: _isLoading ? null : _showForgotPasswordDialog,
+                      onPressed: _isLoading ? null : _openForgotPassword,
                       child: const Text(
                         'Forgot password?',
                         style: TextStyle(color: Colors.white60, fontSize: 12),
