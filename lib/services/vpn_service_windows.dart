@@ -7,7 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
-import 'secure_config_service.dart';
 import 'vpn_service_android.dart'; // For VpnEvent types
 import 'windows_notification_service.dart';
 
@@ -17,7 +16,11 @@ class WindowsVpnService extends VpnService {
   static bool _isConnected = false;
   static bool _isNormalStop = false;
 
-  static String? _configPath;
+  // Path of the sing-box config file for the current session.
+  // 🔐 Stored in the app's private support folder (per-user), not in %TEMP%.
+  // The old code also wrote an "encrypted" copy next to it that nothing ever
+  // read (sing-box needs the plaintext), using AES-GCM with a fixed IV, which
+  // is unsafe. That copy and secure_config_service.dart are removed.
   static String? _plaintextPath;
 
   // ✅ PRIORITY 1: Process checker timer
@@ -46,6 +49,43 @@ class WindowsVpnService extends VpnService {
 
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
   static String get _logPath => '$_exeDir\\vpn_log.txt';
+
+
+  // 🔐 Delete the session's sing-box config file (contains VPN credentials).
+  // A plain delete is enough: multi-pass overwrites do nothing useful on SSDs
+  // (wear levelling writes to new blocks), and the credentials are rotated
+  // server-side after the device disconnects anyway.
+  static Future<void> _deleteConfigFile() async {
+    final path = _plaintextPath;
+    _plaintextPath = null;
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      await _log('Config delete error: $e');
+    }
+  }
+
+  // Remove config files left in %TEMP% by versions up to 1.0.23
+  static bool _legacyCleanupDone = false;
+  static Future<void> _cleanupLegacyTempConfigs() async {
+    if (_legacyCleanupDone) return;
+    _legacyCleanupDone = true;
+    try {
+      final tempDir = await getTemporaryDirectory();
+      for (final name in ['config.json', 'config.json.enc']) {
+        final f = File('${tempDir.path}\\$name');
+        if (await f.exists()) {
+          await f.delete();
+        }
+      }
+    } catch (_) {
+      // Best effort only
+    }
+  }
 
   static Future<void> _log(String message) async {
     final logFile = File(_logPath);
@@ -143,16 +183,8 @@ class WindowsVpnService extends VpnService {
 
     // Clean up configs (should work now that process is dead)
     try {
-      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
-        await SecureConfigService.secureDelete(_plaintextPath!);
-        await _log('   Plaintext config deleted');
-      }
-      if (_configPath != null && await File(_configPath!).exists()) {
-        await SecureConfigService.secureDelete(_configPath!);
-        await _log('   Encrypted config deleted');
-      }
-      _plaintextPath = null;
-      _configPath = null;
+      await _deleteConfigFile();
+      await _log('   Config file deleted');
     } catch (e) {
       await _log('Config cleanup error: $e');
     }
@@ -410,14 +442,7 @@ class WindowsVpnService extends VpnService {
     _singBoxProcess = null;
 
     try {
-      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
-        await SecureConfigService.secureDelete(_plaintextPath!);
-      }
-      if (_configPath != null && await File(_configPath!).exists()) {
-        await SecureConfigService.secureDelete(_configPath!);
-      }
-      _plaintextPath = null;
-      _configPath = null;
+      await _deleteConfigFile();
     } catch (e) {
       await _log('Config cleanup error: $e');
     }
@@ -658,7 +683,8 @@ class WindowsVpnService extends VpnService {
         throw Exception('Device not registered. Please login again.');
       }
 
-      await _log('Fetching credentials for device: $deviceId');
+      // Log file exists in release builds too: only a short prefix of the ID
+      await _log('Fetching credentials for device: ${deviceId.length > 8 ? deviceId.substring(0, 8) : deviceId}...');
 
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
@@ -725,14 +751,15 @@ class WindowsVpnService extends VpnService {
       await _log('sing-box path: $_singBoxPath');
       await _log('sing-box exists: ${File(_singBoxPath).existsSync()}');
 
-      final tempDir = await getTemporaryDirectory();
-      _configPath = '${tempDir.path}\\config.json.enc';
-      _plaintextPath = '${tempDir.path}\\config.json';
+      // 🔐 Per-user app folder (%APPDATA%\<company>\<app>) instead of %TEMP%.
+      // Leftovers from older versions are removed once.
+      await _cleanupLegacyTempConfigs();
+      final supportDir = await getApplicationSupportDirectory();
+      await supportDir.create(recursive: true);
+      _plaintextPath = '${supportDir.path}\\config.json';
 
-      await SecureConfigService.writeEncryptedConfig(_configPath!, configJson);
-      await _log('encrypted config written to: $_configPath');
-
-      await File(_plaintextPath!).writeAsString(configJson);
+      await File(_plaintextPath!).writeAsString(configJson, flush: true);
+      await _log('config written to app support folder');
 
       _singBoxProcess = await Process.start(
         _singBoxPath,
@@ -769,15 +796,7 @@ class WindowsVpnService extends VpnService {
       _singBoxProcess!.exitCode.then((code) async {
         _log('sing-box exited with code: $code');
 
-        if (_plaintextPath != null) {
-          await SecureConfigService.secureDelete(_plaintextPath!);
-        }
-        if (_configPath != null) {
-          await SecureConfigService.secureDelete(_configPath!);
-        }
-
-        _plaintextPath = null;
-        _configPath = null;
+        await _deleteConfigFile();
 
         if (_isConnected) {
           _isConnected = false;
@@ -867,16 +886,8 @@ class WindowsVpnService extends VpnService {
 
     // Clean up config files (should work now that process is dead)
     try {
-      if (_plaintextPath != null && await File(_plaintextPath!).exists()) {
-        await SecureConfigService.secureDelete(_plaintextPath!);
-        await _log('Plaintext config deleted');
-      }
-      if (_configPath != null && await File(_configPath!).exists()) {
-        await SecureConfigService.secureDelete(_configPath!);
-        await _log('Encrypted config deleted');
-      }
-      _plaintextPath = null;
-      _configPath = null;
+      await _deleteConfigFile();
+      await _log('Config file deleted');
     } catch (e) {
       await _log('Config cleanup error: $e');
     }

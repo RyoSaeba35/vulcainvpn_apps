@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'settings_service.dart';
 
@@ -164,14 +165,7 @@ class VpnConfigService {
           "server": hy2['server'],
           "server_port": int.parse(hy2['port'].toString()),
           "password": hy2['password'],
-          "tls": {
-            "enabled": true,
-            "server_name": hy2['tls_server_name']?.toString().isNotEmpty == true
-                ? hy2['tls_server_name']
-                : "www.cloudflare.com",
-            "alpn": ["h3"],
-            "insecure": true
-          },
+          "tls": _buildHysteria2Tls(hy2),
           "up_mbps": 100,
           "down_mbps": 100,
           "obfs": {
@@ -199,7 +193,7 @@ class VpnConfigService {
         },
         "clash_api": {
           "external_controller": "127.0.0.1:9090",
-          "secret": "",
+          "secret": _newClashSecret(),
           "default_mode": "rule"
         }
       }
@@ -311,12 +305,7 @@ class VpnConfigService {
           "server": hy2['server'].toString(),
           "server_port": int.parse(hy2['port'].toString()),
           "password": hy2['password'].toString(),
-          "tls": {
-            "enabled": true,
-            "server_name": "www.cloudflare.com",
-            "alpn": ["h3"],
-            "insecure": true
-          },
+          "tls": _buildHysteria2Tls(hy2),
           "up_mbps": 100,
           "down_mbps": 100,
           "obfs": {
@@ -344,10 +333,58 @@ class VpnConfigService {
         },
         "clash_api": {
           "external_controller": "127.0.0.1:9090",
-          "secret": "",
+          "secret": _newClashSecret(),
           "default_mode": "rule"
         }
       }
+    };
+  }
+
+  // 🔐 Password for sing-box's local control panel (Clash API, 127.0.0.1:9090).
+  //
+  // With an empty secret, any other program on the same device could call
+  // the panel and, for example, switch to "direct" mode: traffic would bypass
+  // the VPN while the app still shows "connected". A new random secret per
+  // config closes that. The app itself never calls this panel, and the secret
+  // travels inside the config (Android's auto-reconnect reuses the same saved
+  // config), so nothing else needs to know it.
+  static String _newClashSecret() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    return base64Url.encode(bytes).replaceAll('=', '');
+  }
+
+  // 🔐 Hysteria2 TLS settings, controlled by the backend.
+  //
+  // The backend sends `tls_insecure: false` once the server has a real
+  // certificate for its domain (servers.singbox_tls_verified = true).
+  // Then we verify the certificate against that domain, so a
+  // man-in-the-middle with a fake certificate is rejected.
+  //
+  // If the field is missing (older backend) or true, we keep the previous
+  // behaviour (insecure, decoy SNI) so existing servers keep working.
+  //
+  // Stealth note: with Salamander obfuscation the whole QUIC handshake is
+  // obfuscated, so the SNI is never visible on the wire. Using the real
+  // domain instead of "www.cloudflare.com" costs nothing in stealth.
+  static Map<String, dynamic> _buildHysteria2Tls(Map<String, dynamic> hy2) {
+    final serverName = hy2['tls_server_name']?.toString() ?? '';
+    final verify = hy2['tls_insecure'] == false && serverName.isNotEmpty;
+
+    if (verify) {
+      return {
+        "enabled": true,
+        "server_name": serverName,
+        "alpn": ["h3"],
+        "insecure": false,
+      };
+    }
+
+    return {
+      "enabled": true,
+      "server_name": serverName.isNotEmpty ? serverName : "www.cloudflare.com",
+      "alpn": ["h3"],
+      "insecure": true,
     };
   }
 

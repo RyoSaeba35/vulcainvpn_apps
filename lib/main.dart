@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
@@ -14,7 +16,29 @@ import 'services/macos_notification_service.dart';
 import 'services/auth_service.dart';
 import 'services/vpn_service_ios.dart';
 
-void main() async {
+// 🔐 Release builds must not log personal data. The code has many print()
+// calls (emails, device IDs, even the full API key at registration), and on
+// Android Flutter forwards every print() to the system log (logcat), which
+// other tools and anyone with USB access can read.
+//
+// Instead of editing hundreds of lines, every print() in the app runs inside
+// this zone: debug and profile builds print as before, release builds print
+// nothing. The Android diagnostic report is unaffected: it uses the native
+// VpnLogger file, not print().
+void main() {
+  runZoned(
+    _main,
+    zoneSpecification: ZoneSpecification(
+      print: (self, parent, zone, line) {
+        if (!kReleaseMode) parent.print(zone, line);
+      },
+    ),
+  );
+}
+
+// Everything (including ensureInitialized and runApp) stays inside the same
+// zone, as Flutter requires.
+Future<void> _main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await AuthService.initialize();
