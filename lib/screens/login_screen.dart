@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import '../services/auth_service.dart';
+import '../services/account_service.dart';
 import '../colors.dart';
+import 'signup_screen.dart';
 
 // Only import window_manager on desktop platforms
 import 'package:window_manager/window_manager.dart';
@@ -27,6 +28,8 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
+  String? _infoMessage;
+  bool _needsConfirmation = false;
 
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -68,6 +71,8 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _infoMessage = null;
+      _needsConfirmation = false;
     });
 
     final success = await AuthService.login(email, password);
@@ -79,15 +84,119 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
     } else {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Invalid email or password.';
+        _errorMessage = AuthService.lastLoginError ?? 'Invalid email or password.';
+        _needsConfirmation = AuthService.lastLoginNeedsConfirmation;
       });
     }
   }
 
-  Future<void> _launchWebsite() async {
-    final url = Uri.parse('https://www.vulcainvpn.com');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+  Future<void> _resendConfirmation() async {
+    setState(() => _isLoading = true);
+    final result = await AccountService.resendConfirmation(_emailController.text);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      _errorMessage = null;
+      _needsConfirmation = false;
+      _infoMessage = result.message;
+    });
+  }
+
+  Future<void> _openSignup() async {
+    final createdEmail = await Navigator.push<String?>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SignupScreen(initialEmail: _emailController.text.trim()),
+      ),
+    );
+    if (!mounted) return;
+    if (createdEmail != null && createdEmail.isNotEmpty) {
+      setState(() {
+        _emailController.text = createdEmail;
+        _passwordController.clear();
+        _errorMessage = null;
+        _needsConfirmation = false;
+        _infoMessage = 'Confirm your email, then sign in here.';
+      });
+    }
+  }
+
+  Future<void> _showForgotPasswordDialog() async {
+    final controller = TextEditingController(text: _emailController.text.trim());
+
+    final message = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        bool sending = false;
+        String? error;
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Reset password'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Enter your account email. We will send you a link to choose a new password.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.emailAddress,
+                  autocorrect: false,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    errorText: error,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: sending ? null : () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: sending
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          sending = true;
+                          error = null;
+                        });
+                        final result =
+                            await AccountService.requestPasswordReset(controller.text);
+                        if (!dialogContext.mounted) return;
+                        if (result.ok) {
+                          Navigator.pop(dialogContext, result.message);
+                        } else {
+                          setDialogState(() {
+                            sending = false;
+                            error = result.message;
+                          });
+                        }
+                      },
+                child: sending
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Send link'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    controller.dispose();
+    if (message != null && mounted) {
+      setState(() {
+        _errorMessage = null;
+        _needsConfirmation = false;
+        _infoMessage = message;
+      });
     }
   }
 
@@ -230,7 +339,17 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                       fillColor: Colors.white.withOpacity(0.05),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  // Forgot password
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: _isLoading ? null : _showForgotPasswordDialog,
+                      child: const Text(
+                        'Forgot password?',
+                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                    ),
+                  ),
 
                   // Error message
                   if (_errorMessage != null)
@@ -238,8 +357,40 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Text(
                         _errorMessage!,
+                        textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.redAccent,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+
+                  // Email not confirmed yet: offer to resend the link
+                  if (_needsConfirmation)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: TextButton(
+                        onPressed: _isLoading ? null : _resendConfirmation,
+                        child: const Text(
+                          'Resend confirmation email',
+                          style: TextStyle(
+                            color: MyColors.myOrange,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // Info message (email sent, account created...)
+                  if (_infoMessage != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        _infoMessage!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white70,
                           fontSize: 13,
                         ),
                       ),
@@ -279,23 +430,22 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                   ),
                   const SizedBox(height: 24),
 
-                  // Clickable website link
+                  // Create account
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Text(
-                        'Don\'t have an account? Visit ',
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                        'Don\'t have an account? ',
+                        style: TextStyle(color: Colors.white38, fontSize: 13),
                       ),
                       GestureDetector(
-                        onTap: _launchWebsite,
+                        onTap: _isLoading ? null : _openSignup,
                         child: const Text(
-                          'www.vulcainvpn.com',
+                          'Create one',
                           style: TextStyle(
-                            color: Colors.white60,
-                            fontSize: 12,
-                            decoration: TextDecoration.underline,
-                            decorationColor: Colors.white60,
+                            color: MyColors.myOrange,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),

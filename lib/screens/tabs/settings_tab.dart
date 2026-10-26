@@ -6,6 +6,7 @@ import '../../main.dart';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
 import '../../services/auth_service.dart';
+import '../../services/account_service.dart';
 import '../../services/vpn_service.dart';
 import '../../services/settings_service.dart';
 import '../../widgets/info_card.dart';
@@ -37,6 +38,7 @@ class _SettingsTabState extends State<SettingsTab> {
   // ── Diagnostic report state ───────────────────────────────────────────────
   bool _isSendingReport = false;
   int _logSizeKB = 0;
+  static const int _maxMessageLength = 300;
   static final MethodChannel _platform = MethodChannel(
     Platform.isIOS ? 'com.vulcain.vpn/ios_control' : 'com.vulcain.vpn/control',
   );
@@ -66,6 +68,177 @@ class _SettingsTabState extends State<SettingsTab> {
         _logSizeKB = logSize;
         _isLoadingSettings = false;
       });
+    }
+  }
+
+  // ── Message sanitization ──────────────────────────────────────────────────
+  // Strips control characters, HTML/script tags, code-injection chars.
+  // Only keeps printable text: letters, digits, punctuation, spaces.
+  String _sanitizeMessage(String raw) {
+    // Remove control characters (0x00–0x1F, 0x7F)
+    var s = raw.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '');
+    // Strip anything that could be interpreted as markup or code
+    s = s.replaceAll(RegExp(r'[<>{}\[\]\\`]'), '');
+    // Collapse runs of whitespace to a single space, trim edges
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    // Hard cap — should never exceed since TextField enforces it, but just in case
+    if (s.length > _maxMessageLength) s = s.substring(0, _maxMessageLength);
+    return s;
+  }
+
+  // ── Report dialog ─────────────────────────────────────────────────────────
+  Future<void> _showReportDialog() async {
+    final controller = TextEditingController();
+    // Local char count to rebuild only the counter without a StatefulBuilder
+    // wrapping the whole dialog — keep it simple with StatefulBuilder.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final remaining = _maxMessageLength - controller.text.length;
+            return AlertDialog(
+              title: const Text('Send Diagnostic Report'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Describe what happened (optional):',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: controller,
+                    maxLines: 4,
+                    maxLength: _maxMessageLength,
+                    // Hide the default counter — we draw our own below
+                    buildCounter: (_, {required currentLength, required isFocused, maxLength}) =>
+                        null,
+                    decoration: InputDecoration(
+                      hintText: 'e.g. VPN disconnected after ~30s on mobile data…',
+                      border: const OutlineInputBorder(),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: MyColors.myOrange),
+                      ),
+                    ),
+                    // Block characters that serve no purpose in a bug description
+                    // and could be used for injection
+                    inputFormatters: [
+                      FilteringTextInputFormatter.deny(
+                        RegExp(r'[<>{}\[\]\\`\x00-\x1F\x7F]'),
+                      ),
+                    ],
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Technical logs attached automatically.',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                      ),
+                      Text(
+                        '$remaining left',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: remaining <= 30 ? Colors.orange : Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text(
+                    'Send',
+                    style: TextStyle(color: MyColors.myOrange),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true && mounted) {
+      final message = _sanitizeMessage(controller.text);
+      await _sendDiagnosticReport(message: message);
+    }
+    controller.dispose();
+  }
+
+  // ── Diagnostic report ─────────────────────────────────────────────────────
+  Future<void> _sendDiagnosticReport({String message = ''}) async {
+    if (!Platform.isAndroid && !Platform.isIOS) return;
+
+    if (_isSendingReport) return;
+    setState(() => _isSendingReport = true);
+
+    try {
+      final token = await AuthService.getValidAccessToken();
+      if (token == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Please log in again before sending a report.'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
+      final result = await _platform.invokeMethod('sendDiagnosticReport', {
+        'access_token': token,
+        'device': '${Platform.operatingSystem} device',
+        'os_version': Platform.operatingSystemVersion,
+        'app_version': '1.1.1',
+        'message': message,
+      });
+
+      if (!mounted) return;
+
+      if (result == 'sent') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Diagnostic report sent. Thank you!'),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else if (result == 'debounced') {
+        // Silent — already sending
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to send report ($result). Please try again.'),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error sending report: $e'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingReport = false);
     }
   }
 
@@ -103,7 +276,7 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   void _showConnectionModeDialog(BuildContext context) {
-    final loc = AppLocalizations.of(context)!; // ✅ Add this
+    final loc = AppLocalizations.of(context)!;
 
     showDialog(
       context: context,
@@ -140,7 +313,6 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  // ✅ NEW: Build mode option widget
   Widget _buildModeOption({
     required ConnectionMode mode,
     required String title,
@@ -148,7 +320,7 @@ class _SettingsTabState extends State<SettingsTab> {
     required String emoji,
   }) {
     final isSelected = _connectionMode == mode;
-    final loc = AppLocalizations.of(context)!; // ✅ Add this
+    final loc = AppLocalizations.of(context)!;
 
     return InkWell(
       onTap: () async {
@@ -223,9 +395,8 @@ class _SettingsTabState extends State<SettingsTab> {
     );
   }
 
-  // ✅ NEW: Get readable mode name
   String _getModeName(ConnectionMode mode) {
-    final loc = widget.loc; // ✅ Use widget.loc since we have it
+    final loc = widget.loc;
 
     switch (mode) {
       case ConnectionMode.standard:
@@ -237,75 +408,6 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
-  // ── Diagnostic report ─────────────────────────────────────────────────────
-
-  Future<void> _sendDiagnosticReport() async {
-    if (!Platform.isAndroid && !Platform.isIOS) return;
-
-    // Debounce handled on native side too, but also prevent double-tap in UI
-    if (_isSendingReport) return;
-    setState(() => _isSendingReport = true);
-
-    try {
-      // Get fresh access token — user is logged in so this should always work
-      final token = await AuthService.getValidAccessToken();
-      if (token == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Please log in again before sending a report.'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
-
-      final result = await _platform.invokeMethod('sendDiagnosticReport', {
-        'access_token': token,
-        'device': '${Platform.operatingSystem} device',
-        'os_version': Platform.operatingSystemVersion,
-        'app_version': '1.1.1',
-        'message': '',
-      });
-
-      if (!mounted) return;
-
-      if (result == 'sent') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Diagnostic report sent. Thank you!'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      } else if (result == 'debounced') {
-        // Silent — already sending
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to send report ($result). Please try again.'),
-            backgroundColor: Colors.orange,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error sending report: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSendingReport = false);
-    }
-  }
-
   Future<void> _clearLogs() async {
     if (!Platform.isAndroid && !Platform.isIOS) return;
 
@@ -313,7 +415,8 @@ class _SettingsTabState extends State<SettingsTab> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Clear Diagnostic Logs'),
-        content: const Text('This will permanently delete all diagnostic logs stored on this device. Are you sure?'),
+        content: const Text(
+            'This will permanently delete all diagnostic logs stored on this device. Are you sure?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -375,7 +478,6 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   void _openLicences(BuildContext context) {
-    // Flutter's built-in LicensePage reads all pub.dev package licences automatically
     showLicensePage(
       context: context,
       applicationName: 'Vulcain VPN',
@@ -436,6 +538,104 @@ class _SettingsTabState extends State<SettingsTab> {
         ],
       ),
     );
+  }
+
+  // Google Play requires in-app account deletion for apps with sign up
+  Future<void> _showDeleteAccountDialog(BuildContext context) async {
+    final passwordController = TextEditingController();
+
+    final deleted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        bool deleting = false;
+        String? error;
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AlertDialog(
+            title: const Text('Delete account'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'This permanently deletes your account, your devices and your '
+                  'connection history. Any remaining subscription time is lost. '
+                  'This cannot be undone.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'A subscription bought on Google Play must also be cancelled in '
+                  'Google Play > Payments & subscriptions.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordController,
+                  obscureText: true,
+                  enabled: !deleting,
+                  decoration: InputDecoration(
+                    labelText: 'Confirm with your password',
+                    errorText: error,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: deleting ? null : () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: deleting
+                    ? null
+                    : () async {
+                        setDialogState(() {
+                          deleting = true;
+                          error = null;
+                        });
+                        final result =
+                            await AccountService.deleteAccount(passwordController.text);
+                        if (!dialogContext.mounted) return;
+                        if (result.ok) {
+                          Navigator.pop(dialogContext, true);
+                        } else {
+                          setDialogState(() {
+                            deleting = false;
+                            error = result.message;
+                          });
+                        }
+                      },
+                child: deleting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text(
+                        'Delete permanently',
+                        style: TextStyle(color: Colors.red),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    passwordController.dispose();
+
+    if (deleted == true) {
+      if (widget.connectionState == 'connected') {
+        await widget.vpnService.stopVpn();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(this.context).showSnackBar(
+          const SnackBar(content: Text('Your account has been deleted.')),
+        );
+      }
+      widget.onLogout(); // Clears local tokens and returns to the login screen
+    }
   }
 
   @override
@@ -500,7 +700,7 @@ class _SettingsTabState extends State<SettingsTab> {
 
             const Divider(height: 24),
 
-            // ✅ NEW: Connection Mode selector
+            // Connection Mode selector
             InkWell(
               onTap: _isLoadingSettings ? null : () => _showConnectionModeDialog(context),
               borderRadius: BorderRadius.circular(8),
@@ -517,7 +717,7 @@ class _SettingsTabState extends State<SettingsTab> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              loc.connectionMode, // ✅ Changed
+                              loc.connectionMode,
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
@@ -554,7 +754,7 @@ class _SettingsTabState extends State<SettingsTab> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    loc.autoReconnect, // ✅ Changed
+                    loc.autoReconnect,
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w500,
@@ -566,7 +766,7 @@ class _SettingsTabState extends State<SettingsTab> {
               subtitle: Padding(
                 padding: const EdgeInsets.only(left: 32, top: 4),
                 child: Text(
-                  loc.autoReconnectDesc, // ✅ Changed
+                  loc.autoReconnectDesc,
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey[600],
@@ -594,8 +794,8 @@ class _SettingsTabState extends State<SettingsTab> {
                                 const SizedBox(width: 12),
                                 Text(
                                   value
-                                      ? loc.autoReconnectEnabled // ✅ Changed
-                                      : loc.autoReconnectDisabled, // ✅ Changed
+                                      ? loc.autoReconnectEnabled
+                                      : loc.autoReconnectDisabled,
                                 ),
                               ],
                             ),
@@ -618,18 +818,17 @@ class _SettingsTabState extends State<SettingsTab> {
             title: 'Support & Diagnostics',
             icon: Icons.bug_report_outlined,
             children: [
-              // Log size indicator
               InfoRow(
                 label: 'Diagnostic log size',
                 value: _logSizeKB > 0 ? '$_logSizeKB KB' : 'Empty',
               ),
               const SizedBox(height: 12),
 
-              // Send report button — now works identically on both platforms
+              // Send report button — opens dialog first
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: _isSendingReport ? null : _sendDiagnosticReport,
+                  onPressed: _isSendingReport ? null : _showReportDialog,
                   icon: _isSendingReport
                       ? const SizedBox(
                           width: 16,
@@ -674,7 +873,6 @@ class _SettingsTabState extends State<SettingsTab> {
                 ),
               ),
 
-              // Explanation
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
@@ -703,8 +901,6 @@ class _SettingsTabState extends State<SettingsTab> {
             const Divider(height: 1),
             _buildLegalRow('Logging Policy', 'https://www.vulcainvpn.com/logging'),
             const Divider(height: 1),
-
-            // Open source licences — Flutter built-in LicensePage
             InkWell(
               onTap: () => _openLicences(context),
               borderRadius: BorderRadius.circular(8),
@@ -750,6 +946,20 @@ class _SettingsTabState extends State<SettingsTab> {
             ),
           ),
         ),
+
+        const SizedBox(height: 12),
+
+        // Delete account
+        Center(
+          child: TextButton(
+            onPressed: () => _showDeleteAccountDialog(context),
+            child: Text(
+              'Delete account',
+              style: TextStyle(color: Colors.grey[500], fontSize: 13),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
       ],
     );
   }

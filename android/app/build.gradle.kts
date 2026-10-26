@@ -19,6 +19,7 @@ plugins {
 android {
     namespace = "com.vulcainvpn.app"
     compileSdk = 36
+    ndkVersion = "28.0.12674087"
 
     defaultConfig {
         applicationId = "com.vulcainvpn.app"

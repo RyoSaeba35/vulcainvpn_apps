@@ -217,23 +217,36 @@ class AuthService {
   }
 
   // Login — stores both access and refresh tokens
+  /// Human-readable reason of the last failed login (null on success).
+  static String? lastLoginError;
+
+  /// True when the last login failed because the email is not confirmed yet,
+  /// so the login screen can offer "Resend confirmation email".
+  static bool lastLoginNeedsConfirmation = false;
+
   static Future<bool> login(String email, String password) async {
+    lastLoginError = null;
+    lastLoginNeedsConfirmation = false;
+
     // Validate inputs before sending
     if (email.isEmpty || password.isEmpty) {
       print('❌ Empty credentials');
+      lastLoginError = 'Please enter your email and password.';
       return false;
     }
 
     // Basic email validation
-    final emailRegex = RegExp(r'^[\w\-\.]+@([\w\-]+\.)+[\w\-]{2,4}$');
-    if (!emailRegex.hasMatch(email)) {
+    final emailRegex = RegExp(r'^[\w\-\.+]+@([\w\-]+\.)+[\w\-]{2,}$');
+    if (!emailRegex.hasMatch(email.trim())) {
       print('❌ Invalid email format');
+      lastLoginError = 'Please enter a valid email address.';
       return false;
     }
 
     // Password length check
     if (password.length < 6) {
       print('❌ Password too short (minimum 6 characters)');
+      lastLoginError = 'Invalid email or password.';
       return false;
     }
 
@@ -255,6 +268,20 @@ class AuthService {
 
       if (response.statusCode != 200) {
         print('❌ Login failed: ${response.statusCode}');
+        String? serverError;
+        try {
+          serverError = json.decode(response.body)['error'] as String?;
+        } catch (_) {}
+
+        if (response.statusCode == 403 &&
+            (serverError ?? '').toLowerCase().contains('confirm')) {
+          lastLoginNeedsConfirmation = true;
+          lastLoginError = 'Please confirm your email first. Check your inbox (and spam folder).';
+        } else if (response.statusCode == 429) {
+          lastLoginError = 'Too many attempts. Please wait a moment and try again.';
+        } else {
+          lastLoginError = serverError ?? 'Invalid email or password.';
+        }
         return false;
       }
 
@@ -335,6 +362,7 @@ class AuthService {
       }
     } catch (e) {
       print('❌ Login error: $e');
+      lastLoginError = 'Connection error. Check your internet and try again.';
       return false;
     }
   }
