@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   flutter_secure_storage_windows
   screen_retriever
+  share_plus
   tray_manager
   url_launcher_windows
   win_toast

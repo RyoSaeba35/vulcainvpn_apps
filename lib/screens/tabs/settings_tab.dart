@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
+import '../../l10n/auth_strings.dart';
 import '../../main.dart';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
@@ -477,6 +479,80 @@ class _SettingsTabState extends State<SettingsTab> {
     }
   }
 
+  // ── Support the app ───────────────────────────────────────────────────────
+  static const String _packageName = 'com.vulcainvpn.app';
+  static const String _playUrl = 'https://play.google.com/store/apps/details?id=$_packageName';
+  static const String _siteUrl = 'https://www.vulcainvpn.com';
+
+  /// Opens the app's page in the Play Store app (review section), or the
+  /// Play website if the Store app is missing.
+  Future<void> _openReview() async {
+    final s = AuthStrings.of(context);
+    try {
+      final opened = await launchUrl(
+        Uri.parse('market://details?id=$_packageName&showAllReviews=true'),
+        mode: LaunchMode.externalApplication,
+      );
+      if (opened) return;
+    } catch (_) {}
+    try {
+      await launchUrl(Uri.parse(_playUrl), mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.couldNotOpenStore), behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
+  }
+
+  Future<void> _shareApp(BuildContext buttonContext) async {
+    final s = AuthStrings.of(context);
+    // iPad / desktop need an anchor for the share popup
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    await SharePlus.instance.share(
+      ShareParams(
+        text: s.shareMessage(_playUrl, _siteUrl),
+        subject: s.shareSubject,
+        sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,
+      ),
+    );
+  }
+
+  Widget _buildSupportRow({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required void Function(BuildContext rowContext) onTap,
+  }) {
+    return Builder(
+      builder: (rowContext) => InkWell(
+        onTap: () => onTap(rowContext),
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Row(
+            children: [
+              Icon(icon, color: MyColors.myOrange, size: 22),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 2),
+                    Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.grey[400]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openLicences(BuildContext context) {
     showLicensePage(
       context: context,
@@ -736,6 +812,39 @@ class _SettingsTabState extends State<SettingsTab> {
         ),
 
         const SizedBox(height: 32),
+
+        // ── Support the app ───────────────────────────────────────────────
+        InfoCard(
+          title: AuthStrings.of(context).supportTheApp,
+          icon: Icons.favorite_border,
+          children: [
+            // Reviews only make sense where the app is on Google Play
+            if (Platform.isAndroid) ...[
+              _buildSupportRow(
+                icon: Icons.star_outline,
+                title: AuthStrings.of(context).leaveReview,
+                subtitle: AuthStrings.of(context).leaveReviewDesc,
+                onTap: (_) => _openReview(),
+              ),
+              const Divider(height: 1),
+            ],
+            _buildSupportRow(
+              icon: Icons.share_outlined,
+              title: AuthStrings.of(context).shareApp,
+              subtitle: AuthStrings.of(context).shareAppDesc,
+              onTap: _shareApp,
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                AuthStrings.of(context).supportThanks,
+                style: TextStyle(fontSize: 12, color: Colors.grey[500], height: 1.4),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 16),
 
         // ── Support & Diagnostics ─────────────────────────────────────────
         if (Platform.isAndroid || Platform.isIOS)

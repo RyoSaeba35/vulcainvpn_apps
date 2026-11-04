@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
+import 'language_service.dart';
+import '../l10n/auth_strings.dart';
 
 /// Result of an account API call: [ok] plus a message to show the user.
 class AccountResult {
@@ -26,11 +28,10 @@ class AccountService {
     final sanitizedEmail = email.trim().toLowerCase();
 
     if (!isValidEmail(sanitizedEmail)) {
-      return const AccountResult(false, 'Please enter a valid email address.');
+      return AccountResult(false, AuthStrings.current.invalidEmail);
     }
     if (password.length < minPasswordLength) {
-      return const AccountResult(
-          false, 'Password must be at least $minPasswordLength characters.');
+      return AccountResult(false, AuthStrings.current.passwordTooShort(minPasswordLength));
     }
 
     return _post('signup', {
@@ -44,7 +45,7 @@ class AccountService {
   static Future<AccountResult> requestPasswordReset(String email) async {
     final sanitizedEmail = email.trim().toLowerCase();
     if (!isValidEmail(sanitizedEmail)) {
-      return const AccountResult(false, 'Please enter a valid email address.');
+      return AccountResult(false, AuthStrings.current.invalidEmail);
     }
     return _post('password/reset', {'email': sanitizedEmail});
   }
@@ -53,7 +54,7 @@ class AccountService {
   static Future<AccountResult> resendConfirmation(String email) async {
     final sanitizedEmail = email.trim().toLowerCase();
     if (!isValidEmail(sanitizedEmail)) {
-      return const AccountResult(false, 'Please enter a valid email address.');
+      return AccountResult(false, AuthStrings.current.invalidEmail);
     }
     return _post('confirmation/resend', {'email': sanitizedEmail});
   }
@@ -66,14 +67,14 @@ class AccountService {
   static Future<AccountResult> confirmEmail(String token) async {
     lastConfirmedEmail = null;
     if (token.isEmpty) {
-      return const AccountResult(false, 'This confirmation link is invalid.');
+      return AccountResult(false, AuthStrings.current.invalidLink);
     }
 
     try {
       final response = await http
           .post(
             Uri.parse('$_baseUrl/confirmation'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...LanguageService.headers},
             body: json.encode({'confirmation_token': token}),
           )
           .timeout(_timeout);
@@ -85,22 +86,21 @@ class AccountService {
       return _toResult(response, successCodes: const [200]);
     } catch (e) {
       print('❌ Confirm email error: $e');
-      return const AccountResult(
-          false, 'Connection error. Check your internet and open the link again.');
+      return AccountResult(false, AuthStrings.current.connectionErrorLink);
     }
   }
 
   /// DELETE /api/account. Requires the current password.
   /// On success the caller must clear the local session (AuthService.logout).
-  static Future<AccountResult> deleteAccount(String password) async {
-    if (password.isEmpty) {
-      return const AccountResult(false, 'Please enter your password.');
+  /// For accounts created with Google, pass [googleIdToken] instead of a password.
+  static Future<AccountResult> deleteAccount(String password, {String? googleIdToken}) async {
+    if (password.isEmpty && googleIdToken == null) {
+      return AccountResult(false, AuthStrings.current.enterPassword);
     }
 
     final token = await AuthService.getValidAccessToken();
     if (token == null) {
-      return const AccountResult(
-          false, 'Your session has expired. Please sign in again, then retry.');
+      return AccountResult(false, AuthStrings.current.sessionExpired);
     }
 
     try {
@@ -109,17 +109,19 @@ class AccountService {
             Uri.parse('$_baseUrl/account'),
             headers: {
               'Content-Type': 'application/json',
+              ...LanguageService.headers,
               'Authorization': 'Bearer $token',
             },
-            body: json.encode({'password': password}),
+            body: json.encode(googleIdToken != null
+                ? {'google_id_token': googleIdToken}
+                : {'password': password}),
           )
           .timeout(_timeout);
 
       return _toResult(response, successCodes: const [200]);
     } catch (e) {
       print('❌ Delete account error: $e');
-      return const AccountResult(
-          false, 'Connection error. Check your internet and try again.');
+      return AccountResult(false, AuthStrings.current.connectionError);
     }
   }
 
@@ -132,7 +134,7 @@ class AccountService {
       final response = await http
           .post(
             Uri.parse('$_baseUrl/$endpoint'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...LanguageService.headers},
             body: json.encode(body),
           )
           .timeout(_timeout);
@@ -140,8 +142,7 @@ class AccountService {
       return _toResult(response, successCodes: successCodes);
     } catch (e) {
       print('❌ $endpoint error: $e');
-      return const AccountResult(
-          false, 'Connection error. Check your internet and try again.');
+      return AccountResult(false, AuthStrings.current.connectionError);
     }
   }
 
@@ -153,15 +154,14 @@ class AccountService {
     } catch (_) {}
 
     if (successCodes.contains(response.statusCode)) {
-      return AccountResult(true, (data['message'] as String?) ?? 'Done.');
+      return AccountResult(true, (data['message'] as String?) ?? AuthStrings.current.done);
     }
 
     if (response.statusCode == 429) {
-      return const AccountResult(
-          false, 'Too many attempts. Please wait a moment and try again.');
+      return AccountResult(false, AuthStrings.current.tooManyAttempts);
     }
 
     return AccountResult(
-        false, (data['error'] as String?) ?? 'Something went wrong. Please try again.');
+        false, (data['error'] as String?) ?? AuthStrings.current.somethingWrong);
   }
 }

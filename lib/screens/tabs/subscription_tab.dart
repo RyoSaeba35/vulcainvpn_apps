@@ -9,6 +9,7 @@ import '../../widgets/info_card.dart';
 import '../../widgets/info_row.dart';
 import '../../l10n/app_localizations.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../paywall_screen.dart';
 
 class SubscriptionTab extends StatefulWidget {
   const SubscriptionTab({super.key});
@@ -22,6 +23,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
   Map<String, dynamic>? _subscriptionData;
   bool _isLoading = true;
   String? _error;
+  bool _noSubscription = false; // Signed in but never subscribed (API 404)
 
   // Tracks when we last successfully loaded, to avoid re-fetching on every
   // rebuild triggered by locale/theme changes via didChangeDependencies.
@@ -62,6 +64,7 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     setState(() {
       _isLoading = true;
       _error = null;
+      _noSubscription = false;
     });
 
     try {
@@ -90,6 +93,16 @@ class _SubscriptionTabState extends State<SubscriptionTab>
       print('   Stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
 
       if (!mounted) return;
+
+      // 404 = no subscription yet: not an error, show the subscribe screen
+      if (e.toString().contains('404')) {
+        setState(() {
+          _subscriptionData = null;
+          _noSubscription = true;
+          _isLoading = false;
+        });
+        return;
+      }
 
       final loc = AppLocalizations.of(context)!;
       setState(() {
@@ -134,8 +147,17 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     }
   }
 
-  // ✅ Open renewal page
+  // Android: Google Play subscription screen. Windows/macOS: website.
   Future<void> _openRenewalPage() async {
+    if (Platform.isAndroid) {
+      final subscribed = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => const PaywallScreen()),
+      );
+      if (subscribed == true) await _loadSubscription(force: true);
+      return;
+    }
+
     final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
     try {
       if (await canLaunchUrl(url)) {
@@ -146,6 +168,36 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     } catch (e) {
       print('❌ Error launching URL: $e');
     }
+  }
+
+  // Google Play's own subscription page (cancel, change payment method)
+  Future<void> _openPlaySubscriptions() async {
+    final url = Uri.parse(
+        'https://play.google.com/store/account/subscriptions?sku=vulcain_premium&package=com.vulcainvpn.app');
+    try {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      print('❌ Could not open Google Play subscriptions: $e');
+    }
+  }
+
+  Widget _primaryButton(String label, IconData icon, VoidCallback onPressed) {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, color: Colors.white),
+        label: Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: MyColors.myOrange,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      ),
+    );
   }
 
   @override
@@ -181,10 +233,41 @@ class _SubscriptionTabState extends State<SubscriptionTab>
       );
     }
 
+    if (_noSubscription) {
+      return RefreshIndicator(
+        onRefresh: () => _loadSubscription(force: true),
+        color: MyColors.myOrange,
+        child: ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const SizedBox(height: 40),
+            const Icon(Icons.card_membership, size: 64, color: MyColors.myOrange),
+            const SizedBox(height: 16),
+            const Text(
+              'No active subscription',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              Platform.isAndroid
+                  ? 'Subscribe to protect your connection on up to 3 devices.'
+                  : 'Subscribe on vulcainvpn.com, or on the Android app, then pull to refresh.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 24),
+            _primaryButton('Subscribe', Icons.shopping_cart, _openRenewalPage),
+          ],
+        ),
+      );
+    }
+
     final sub = _subscriptionData?['subscription'];
     if (sub == null) {
       return Center(child: Text(loc.noSubscriptionData));
     }
+    final isGooglePlay = sub['source'] == 'google_play';
 
     final plan = sub['plan'] ?? {};
     final server = sub['server'] ?? {};
@@ -307,6 +390,24 @@ class _SubscriptionTabState extends State<SubscriptionTab>
               ),
             ],
           ),
+
+          // Google Play subscriptions are managed (cancelled) in Google Play
+          if (isGooglePlay && !isExpired) ...[
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _openPlaySubscriptions,
+                icon: const Icon(Icons.open_in_new, color: MyColors.myOrange, size: 18),
+                label: const Text('Manage in Google Play', style: TextStyle(color: MyColors.myOrange)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: MyColors.myOrange),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
 
           // ✅ Renew button if expired
           if (isExpired) ...[

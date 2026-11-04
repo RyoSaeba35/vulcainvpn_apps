@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/account_service.dart';
 import '../services/deep_link_service.dart';
+import '../services/language_service.dart';
+import '../l10n/auth_strings.dart';
+import '../main.dart';
+import '../services/billing_service.dart';
 import '../colors.dart';
 import 'login_screen.dart';
 import 'vpn_home_page.dart';
@@ -30,6 +34,8 @@ class _AuthGateState extends State<AuthGate> {
     super.initState();
     _checkAuth();
     DeepLinkService.listen(_onConfirmationLink);
+    // Google Play purchases finished while the app was closed (Android only)
+    BillingService.instance.start();
   }
 
   @override
@@ -38,7 +44,25 @@ class _AuthGateState extends State<AuthGate> {
     super.dispose();
   }
 
+  bool _languageLoaded = false;
+
+  /// Saves the language whenever it changes (sign in screen picker or
+  /// Settings > Language) so it is kept on the next launch.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final code = Localizations.localeOf(context).languageCode;
+    if (_languageLoaded && code != AuthStrings.code) {
+      LanguageService.save(code);
+    }
+  }
+
   Future<void> _checkAuth() async {
+    // Language first: messages built while checking the session use it
+    final locale = await LanguageService.load();
+    if (mounted) MyApp.setLocale(context, locale);
+    _languageLoaded = true;
+
     final loggedIn = await AuthService.isLoggedIn();
     // Read reset reason AFTER isLoggedIn() — it's set inside that call
     final resetReason = await AuthService.getSessionResetReason();
@@ -123,7 +147,7 @@ class _AuthGateState extends State<AuthGate> {
     if (_isLoading) return _loadingScreen();
 
     if (_isConfirming && !_isLoggedIn) {
-      return _loadingScreen(text: 'Confirming your email...');
+      return _loadingScreen(text: AuthStrings.of(context).confirmingEmail);
     }
 
     if (!_isLoggedIn) {

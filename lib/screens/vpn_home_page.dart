@@ -16,6 +16,7 @@ import '../services/vpn_service_ios.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
+import 'paywall_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:math';
 
@@ -611,21 +612,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           ElevatedButton.icon(
             onPressed: () async {
               Navigator.pop(context);
-              final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
-              try {
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please visit vulcainvpn.com to renew'),
-                      backgroundColor: MyColors.myOrange,
-                    ),
-                  );
-                }
-              }
+              await _openRenewal();
             },
             icon: Icon(Icons.shopping_cart),
             label: Text('Renew'),
@@ -840,21 +827,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           ElevatedButton.icon(
             onPressed: () async {
               Navigator.pop(context);
-              final url = Uri.parse('https://www.vulcainvpn.com/dashboard');
-              try {
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please visit vulcainvpn.com to renew'),
-                      backgroundColor: MyColors.myOrange,
-                    ),
-                  );
-                }
-              }
+              await _openRenewal();
             },
             icon: Icon(Icons.shopping_cart),
             label: Text('Renew'),
@@ -1196,6 +1169,35 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     }
   }
 
+  /// Android: Google Play subscription screen (Play Billing policy).
+  /// Windows/macOS: the website, as before.
+  Future<void> _openRenewal({String websiteUrl = 'https://www.vulcainvpn.com/dashboard'}) async {
+    if (Platform.isAndroid) {
+      await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(builder: (_) => const PaywallScreen()),
+      );
+      return;
+    }
+
+    final url = Uri.parse(websiteUrl);
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Please visit $websiteUrl to renew'),
+            backgroundColor: MyColors.myOrange,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
   void _showSubscriptionExpiredDialog(AppLocalizations loc, String errorString) {
     String renewalUrl = 'https://www.vulcainvpn.com/dashboard';
     if (errorString.contains('renewal_url:')) {
@@ -1231,22 +1233,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           ElevatedButton.icon(
             onPressed: () async {
               Navigator.pop(context);
-              final url = Uri.parse(renewalUrl);
-              try {
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please visit $renewalUrl to renew'),
-                      backgroundColor: MyColors.myOrange,
-                      duration: Duration(seconds: 5),
-                    ),
-                  );
-                }
-              }
+              await _openRenewal(websiteUrl: renewalUrl);
             },
             icon: Icon(Icons.shopping_cart),
             label: Text(loc.renewNow),

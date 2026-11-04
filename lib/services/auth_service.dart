@@ -6,6 +6,9 @@ import 'dart:async';
 import 'dart:math';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'google_auth_service.dart';
+import 'language_service.dart';
+import '../l10n/auth_strings.dart';
 
 class AuthService {
   static const String _baseUrl = 'https://api.vulcainvpn.com/api';
@@ -224,6 +227,10 @@ class AuthService {
   /// so the login screen can offer "Resend confirmation email".
   static bool lastLoginNeedsConfirmation = false;
 
+  /// Set when "Continue with Google" found no Vulcain account for this
+  /// Google account: the login screen asks before creating one.
+  static String? lastGoogleNoAccountEmail;
+
   static Future<bool> login(String email, String password) async {
     lastLoginError = null;
     lastLoginNeedsConfirmation = false;
@@ -231,7 +238,7 @@ class AuthService {
     // Validate inputs before sending
     if (email.isEmpty || password.isEmpty) {
       print('❌ Empty credentials');
-      lastLoginError = 'Please enter your email and password.';
+      lastLoginError = AuthStrings.current.enterEmailAndPassword;
       return false;
     }
 
@@ -239,14 +246,14 @@ class AuthService {
     final emailRegex = RegExp(r'^[\w\-\.+]+@([\w\-]+\.)+[\w\-]{2,}$');
     if (!emailRegex.hasMatch(email.trim())) {
       print('❌ Invalid email format');
-      lastLoginError = 'Please enter a valid email address.';
+      lastLoginError = AuthStrings.current.invalidEmail;
       return false;
     }
 
     // Password length check
     if (password.length < 6) {
       print('❌ Password too short (minimum 6 characters)');
-      lastLoginError = 'Invalid email or password.';
+      lastLoginError = AuthStrings.current.invalidCredentials;
       return false;
     }
 
@@ -259,7 +266,7 @@ class AuthService {
 
       final response = await http.post(
         Uri.parse('$_baseUrl/login'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', ...LanguageService.headers},
         body: json.encode({
           'email': sanitizedEmail,
           'password': password,
@@ -276,18 +283,72 @@ class AuthService {
         if (response.statusCode == 403 &&
             (serverError ?? '').toLowerCase().contains('confirm')) {
           lastLoginNeedsConfirmation = true;
-          lastLoginError = 'Please confirm your email first. Check your inbox (and spam folder).';
+          lastLoginError = AuthStrings.current.confirmEmailFirst;
         } else if (response.statusCode == 429) {
-          lastLoginError = 'Too many attempts. Please wait a moment and try again.';
+          lastLoginError = AuthStrings.current.tooManyAttempts;
+        } else if ((serverError ?? '').toLowerCase().contains('locked')) {
+          lastLoginError = AuthStrings.current.accountLocked;
         } else {
-          lastLoginError = serverError ?? 'Invalid email or password.';
+          lastLoginError = AuthStrings.current.invalidCredentials;
         }
         return false;
       }
 
-      final data = json.decode(response.body);
-
       print('✅ Login successful');
+      return await _completeLogin(json.decode(response.body));
+    } catch (e) {
+      print('❌ Login error: $e');
+      lastLoginError = AuthStrings.current.connectionError;
+      return false;
+    }
+  }
+
+  /// "Continue with Google" (Android). [idToken] comes from google_sign_in;
+  /// the backend verifies it and returns the same tokens as /login.
+  ///
+  /// With [create] false, a Google account that has no Vulcain account yet is
+  /// not created: this returns false with [lastGoogleNoAccountEmail] set, and
+  /// the caller asks the user, then calls again with create: true.
+  static Future<bool> loginWithGoogle(String idToken, {bool create = false}) async {
+    lastLoginError = null;
+    lastLoginNeedsConfirmation = false;
+    lastGoogleNoAccountEmail = null;
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/auth/google'),
+        headers: {'Content-Type': 'application/json', ...LanguageService.headers},
+        body: json.encode({'id_token': idToken, 'create': create}),
+      ).timeout(_authTimeout);
+
+      if (response.statusCode != 200) {
+        Map<String, dynamic> body = {};
+        try {
+          body = json.decode(response.body) as Map<String, dynamic>;
+        } catch (_) {}
+        final serverError = body['error'] as String?;
+
+        if (response.statusCode == 404 && serverError == 'no_account') {
+          lastGoogleNoAccountEmail = (body['email'] as String?) ?? '';
+          return false;
+        }
+        lastLoginError = response.statusCode == 429
+            ? AuthStrings.current.tooManyAttempts
+            : (serverError ?? AuthStrings.current.googleFailed);
+        return false;
+      }
+
+      print('✅ Google login successful');
+      return await _completeLogin(json.decode(response.body));
+    } catch (e) {
+      print('❌ Google login error: $e');
+      lastLoginError = AuthStrings.current.connectionError;
+      return false;
+    }
+  }
+
+  /// Stores the tokens from /login or /auth/google and registers this device.
+  static Future<bool> _completeLogin(Map<String, dynamic> data) async {
 
       // ✅ UPDATED: Use Windows-safe token storage
       await _writeToken(_accessTokenKey, data['access_token']);
@@ -323,6 +384,7 @@ class AuthService {
         Uri.parse('$_baseUrl/devices/register'),
         headers: {
           'Content-Type': 'application/json',
+          ...LanguageService.headers,
           'Authorization': 'Bearer ${data['access_token']}',
         },
         body: json.encode({
@@ -338,7 +400,6 @@ class AuthService {
         final registerData = json.decode(registerResponse.body);
 
         print('🔑 Registration successful!');
-        print('   api_key: ${registerData['api_key']}');
         print('   returned device_id: ${registerData['device_id']}');
 
         await saveApiKey(registerData['api_key']);
@@ -360,11 +421,6 @@ class AuthService {
         // User will see "device not registered" when trying to connect
         return true;
       }
-    } catch (e) {
-      print('❌ Login error: $e');
-      lastLoginError = 'Connection error. Check your internet and try again.';
-      return false;
-    }
   }
 
   // ✅ UPDATED: Refresh the access token with better diagnostics
@@ -404,7 +460,7 @@ class AuthService {
 
           final response = await http.post(
             Uri.parse('$_baseUrl/refresh'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', ...LanguageService.headers},
             body: json.encode({'refresh_token': refreshToken}),
           ).timeout(_authTimeout);
 
@@ -580,6 +636,9 @@ class AuthService {
       print('Logout API call failed: $e');
     }
 
+    // Forget the Google account choice so the picker shows next time
+    await GoogleAuthService.signOut();
+
     // Clear secure storage
     await _storage.deleteAll();
 
@@ -626,11 +685,7 @@ class AuthService {
       // Session flag is set but tokens are gone — keystore was wiped.
       // Record this so the login screen can show a clear explanation.
       print('⚠️ Session flag set but tokens missing — keystore was reset');
-      await _markSessionReset(
-        'Your session was reset automatically (security key changed). '
-        'This can happen after an OS update or device restore. '
-        'Please log in again.',
-      );
+      await _markSessionReset(AuthStrings.current.sessionReset);
     } else {
       print('⚠️ User not logged in — no previous session recorded');
       if (Platform.isWindows) {

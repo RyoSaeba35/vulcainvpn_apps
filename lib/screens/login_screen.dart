@@ -5,6 +5,11 @@ import '../services/account_service.dart';
 import '../colors.dart';
 import 'signup_screen.dart';
 import 'forgot_password_screen.dart';
+import '../services/google_auth_service.dart';
+import '../widgets/auth_ui.dart';
+import '../l10n/auth_strings.dart';
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // Only import window_manager on desktop platforms
 import 'package:window_manager/window_manager.dart';
@@ -39,6 +44,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
   String? _errorMessage;
   String? _infoMessage;
   bool _needsConfirmation = false;
+  bool _isGoogleLoading = false;
 
   bool get _isDesktop =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
@@ -82,7 +88,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
     final password = _passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = 'Please enter your email and password.');
+      setState(() => _errorMessage = AuthStrings.of(context).enterEmailAndPassword);
       return;
     }
 
@@ -102,8 +108,60 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
     } else {
       setState(() {
         _isLoading = false;
-        _errorMessage = AuthService.lastLoginError ?? 'Invalid email or password.';
+        _errorMessage = AuthService.lastLoginError ?? AuthStrings.of(context).invalidCredentials;
         _needsConfirmation = AuthService.lastLoginNeedsConfirmation;
+      });
+    }
+  }
+
+  Future<void> _loginWithGoogle() async {
+    setState(() {
+      _isGoogleLoading = true;
+      _errorMessage = null;
+      _infoMessage = null;
+      _needsConfirmation = false;
+    });
+
+    try {
+      final idToken = await GoogleAuthService.getIdToken();
+      if (idToken == null) {
+        // User closed the Google account picker
+        if (mounted) setState(() => _isGoogleLoading = false);
+        return;
+      }
+
+      var success = await AuthService.loginWithGoogle(idToken);
+      if (!mounted) return;
+
+      // No Vulcain account for this Google account yet: ask before creating
+      // one (e.g. someone who deleted their account must know it's a new one)
+      final newEmail = AuthService.lastGoogleNoAccountEmail;
+      if (!success && newEmail != null) {
+        final create = await _confirmNewGoogleAccount(newEmail);
+        if (!mounted) return;
+        if (create != true) {
+          await GoogleAuthService.signOut();
+          if (mounted) setState(() => _isGoogleLoading = false);
+          return;
+        }
+        success = await AuthService.loginWithGoogle(idToken, create: true);
+        if (!mounted) return;
+      }
+
+      if (success) {
+        widget.onLoginSuccess();
+      } else {
+        setState(() {
+          _isGoogleLoading = false;
+          _errorMessage = AuthService.lastLoginError ?? AuthStrings.of(context).googleFailed;
+        });
+      }
+    } catch (e) {
+      print('❌ Google sign-in error: $e');
+      if (!mounted) return;
+      setState(() {
+        _isGoogleLoading = false;
+        _errorMessage = AuthStrings.of(context).googleUnavailable;
       });
     }
   }
@@ -128,15 +186,96 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
       ),
     );
     if (!mounted) return;
+    if (createdEmail == SignupScreen.googleSignedIn) {
+      widget.onLoginSuccess(); // Signed up with Google: already signed in
+      return;
+    }
     if (createdEmail != null && createdEmail.isNotEmpty) {
       setState(() {
         _emailController.text = createdEmail;
         _passwordController.clear();
         _errorMessage = null;
         _needsConfirmation = false;
-        _infoMessage = 'Confirm your email, then sign in here.';
+        _infoMessage = AuthStrings.of(context).confirmThenSignIn;
       });
     }
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// "Create a Vulcain account?" (styled like the account screens)
+  Future<bool?> _confirmNewGoogleAccount(String email) {
+    final s = AuthStrings.of(context);
+    final linkStyle = const TextStyle(
+      color: Colors.white70,
+      decoration: TextDecoration.underline,
+      decorationColor: Colors.white70,
+    );
+    return showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF4A3530),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          s.googleNewAccountTitle,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              s.googleNewAccountBody(email),
+              style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            RichText(
+              text: TextSpan(
+                style: const TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+                children: [
+                  TextSpan(text: s.googleNewAccountTerms),
+                  const TextSpan(text: '\n'),
+                  TextSpan(
+                    text: s.termsOfService,
+                    style: linkStyle,
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () => _openUrl('https://www.vulcainvpn.com/terms'),
+                  ),
+                  const TextSpan(text: '  ·  '),
+                  TextSpan(
+                    text: s.privacyPolicy,
+                    style: linkStyle,
+                    recognizer: TapGestureRecognizer()
+                      ..onTap = () => _openUrl('https://www.vulcainvpn.com/privacy'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(s.cancel, style: const TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text(s.createMyAccount),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _openForgotPassword() async {
@@ -150,6 +289,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
+    final s = AuthStrings.of(context);
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -161,9 +301,12 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
       child: Scaffold(
         backgroundColor: MyColors.myBrown,
         body: SafeArea(
-          child: Center(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+          Center(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.fromLTRB(32, 56, 32, 24),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -188,9 +331,9 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Sign in to your account',
-                    style: TextStyle(color: Colors.white54, fontSize: 14),
+                  Text(
+                    s.signInSubtitle,
+                    style: const TextStyle(color: Colors.white54, fontSize: 14),
                   ),
                   const SizedBox(height: 40),
 
@@ -224,6 +367,15 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                       ),
                     ),
 
+                  // Continue with Google (Android only)
+                  if (GoogleAuthService.isSupported) ...[
+                    GoogleButton(
+                      onPressed: _isLoading ? null : _loginWithGoogle,
+                      loading: _isGoogleLoading,
+                    ),
+                    const OrDivider(),
+                  ],
+
                   // Email field
                   TextField(
                     controller: _emailController,
@@ -231,7 +383,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                     autocorrect: false,
                     style: const TextStyle(color: Colors.white),
                     decoration: InputDecoration(
-                      labelText: 'Email',
+                      labelText: s.email,
                       labelStyle: const TextStyle(color: Colors.white54),
                       prefixIcon: const Icon(
                         Icons.email_outlined,
@@ -258,7 +410,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                     style: const TextStyle(color: Colors.white),
                     onSubmitted: (_) => _login(),
                     decoration: InputDecoration(
-                      labelText: 'Password',
+                      labelText: s.password,
                       labelStyle: const TextStyle(color: Colors.white54),
                       prefixIcon: const Icon(
                         Icons.lock_outline,
@@ -292,9 +444,9 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: _isLoading ? null : _openForgotPassword,
-                      child: const Text(
-                        'Forgot password?',
-                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                      child: Text(
+                        s.forgotPassword,
+                        style: const TextStyle(color: Colors.white60, fontSize: 12),
                       ),
                     ),
                   ),
@@ -319,9 +471,9 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: TextButton(
                         onPressed: _isLoading ? null : _resendConfirmation,
-                        child: const Text(
-                          'Resend confirmation email',
-                          style: TextStyle(
+                        child: Text(
+                          s.resendConfirmation,
+                          style: const TextStyle(
                             color: MyColors.myOrange,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -367,9 +519,9 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                                 strokeWidth: 2,
                               ),
                             )
-                          : const Text(
-                              'Sign In',
-                              style: TextStyle(
+                          : Text(
+                              s.signIn,
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -382,15 +534,15 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
-                        'Don\'t have an account? ',
-                        style: TextStyle(color: Colors.white38, fontSize: 13),
+                      Text(
+                        s.noAccount,
+                        style: const TextStyle(color: Colors.white38, fontSize: 13),
                       ),
                       GestureDetector(
                         onTap: _isLoading ? null : _openSignup,
-                        child: const Text(
-                          'Create one',
-                          style: TextStyle(
+                        child: Text(
+                          s.createOne,
+                          style: const TextStyle(
                             color: MyColors.myOrange,
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -399,9 +551,23 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                       ),
                     ],
                   ),
+
+                  // Google sign-in exists on Android and the website only
+                  if (_isDesktop) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      s.windowsGoogleHint,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+                    ),
+                  ],
                 ],
               ),
             ),
+          ),
+              // Language (English / Français)
+              const Positioned(top: 12, right: 16, child: LanguagePicker()),
+            ],
           ),
         ),
       ),

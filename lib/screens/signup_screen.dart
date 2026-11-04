@@ -2,7 +2,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/account_service.dart';
+import '../services/auth_service.dart';
+import '../services/google_auth_service.dart';
+import '../widgets/auth_ui.dart';
 import '../colors.dart';
+import '../l10n/auth_strings.dart';
 
 /// Account creation. On success, shows a "check your email" step; the user
 /// confirms by email, then signs in. Pops with the email so the login screen
@@ -11,6 +15,9 @@ class SignupScreen extends StatefulWidget {
   final String? initialEmail;
 
   const SignupScreen({super.key, this.initialEmail});
+
+  /// Pop result meaning "signed in with Google, go straight to the app"
+  static const String googleSignedIn = '__google_signed_in__';
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
@@ -44,26 +51,61 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
+  bool _isGoogleLoading = false;
+
+  Future<void> _signUpWithGoogle() async {
+    setState(() {
+      _isGoogleLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final idToken = await GoogleAuthService.getIdToken();
+      if (idToken == null) {
+        if (mounted) setState(() => _isGoogleLoading = false);
+        return;
+      }
+
+      final success = await AuthService.loginWithGoogle(idToken, create: true);
+      if (!mounted) return;
+
+      if (success) {
+        Navigator.pop(context, SignupScreen.googleSignedIn);
+      } else {
+        setState(() {
+          _isGoogleLoading = false;
+          _errorMessage = AuthService.lastLoginError ?? AuthStrings.of(context).googleFailed;
+        });
+      }
+    } catch (e) {
+      print('❌ Google sign-up error: $e');
+      if (!mounted) return;
+      setState(() {
+        _isGoogleLoading = false;
+        _errorMessage = AuthStrings.of(context).googleSignUpUnavailable;
+      });
+    }
+  }
+
   Future<void> _signUp() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
     if (!AccountService.isValidEmail(email)) {
-      setState(() => _errorMessage = 'Please enter a valid email address.');
+      setState(() => _errorMessage = AuthStrings.of(context).invalidEmail);
       return;
     }
     if (password.length < AccountService.minPasswordLength) {
       setState(() => _errorMessage =
-          'Password must be at least ${AccountService.minPasswordLength} characters.');
+          AuthStrings.of(context).passwordTooShort(AccountService.minPasswordLength));
       return;
     }
     if (password != _confirmController.text) {
-      setState(() => _errorMessage = 'Passwords do not match.');
+      setState(() => _errorMessage = AuthStrings.of(context).passwordsDontMatch);
       return;
     }
     if (!_acceptedTerms) {
-      setState(() => _errorMessage =
-          'Please accept the Terms of Service and Privacy Policy.');
+      setState(() => _errorMessage = AuthStrings.of(context).acceptTerms);
       return;
     }
 
@@ -170,6 +212,12 @@ class _SignupScreenState extends State<SignupScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context, _createdEmail),
         ),
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(right: 16),
+            child: Center(child: LanguagePicker()),
+          ),
+        ],
       ),
       body: SafeArea(
         child: Center(
@@ -183,30 +231,40 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Widget _buildForm() {
+    final s = AuthStrings.of(context);
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text(
-          'Create your account',
-          style: TextStyle(
+        Text(
+          s.createYourAccount,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 26,
             fontWeight: FontWeight.bold,
           ),
         ),
         const SizedBox(height: 8),
-        const Text(
-          'One account for all your devices',
-          style: TextStyle(color: Colors.white54, fontSize: 14),
+        Text(
+          s.oneAccount,
+          style: const TextStyle(color: Colors.white54, fontSize: 14),
         ),
         const SizedBox(height: 32),
+
+        // Continue with Google (Android only): no password, no confirmation email
+        if (GoogleAuthService.isSupported) ...[
+          GoogleButton(
+            onPressed: _isLoading ? null : _signUpWithGoogle,
+            loading: _isGoogleLoading,
+          ),
+          const OrDivider(),
+        ],
 
         TextField(
           controller: _emailController,
           keyboardType: TextInputType.emailAddress,
           autocorrect: false,
           style: const TextStyle(color: Colors.white),
-          decoration: _decoration('Email', Icons.email_outlined),
+          decoration: _decoration(s.email, Icons.email_outlined),
         ),
         const SizedBox(height: 16),
 
@@ -215,7 +273,7 @@ class _SignupScreenState extends State<SignupScreen> {
           obscureText: _obscurePassword,
           style: const TextStyle(color: Colors.white),
           decoration: _decoration(
-            'Password (min. ${AccountService.minPasswordLength} characters)',
+            s.passwordMin(AccountService.minPasswordLength),
             Icons.lock_outline,
             suffix: IconButton(
               icon: Icon(
@@ -233,7 +291,17 @@ class _SignupScreenState extends State<SignupScreen> {
           obscureText: _obscurePassword,
           style: const TextStyle(color: Colors.white),
           onSubmitted: (_) => _signUp(),
-          decoration: _decoration('Confirm password', Icons.lock_outline),
+          decoration: _decoration(
+            s.confirmPassword,
+            Icons.lock_outline,
+            suffix: IconButton(
+              icon: Icon(
+                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                color: Colors.white54,
+              ),
+              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+            ),
+          ),
         ),
         const SizedBox(height: 12),
 
@@ -254,9 +322,9 @@ class _SignupScreenState extends State<SignupScreen> {
                   text: TextSpan(
                     style: const TextStyle(color: Colors.white54, fontSize: 12),
                     children: [
-                      const TextSpan(text: 'I accept the '),
+                      TextSpan(text: s.iAccept),
                       TextSpan(
-                        text: 'Terms of Service',
+                        text: s.termsOfService,
                         style: const TextStyle(
                           color: Colors.white,
                           decoration: TextDecoration.underline,
@@ -265,9 +333,9 @@ class _SignupScreenState extends State<SignupScreen> {
                         recognizer: TapGestureRecognizer()
                           ..onTap = () => _openUrl('https://www.vulcainvpn.com/terms'),
                       ),
-                      const TextSpan(text: ' and the '),
+                      TextSpan(text: s.andThe),
                       TextSpan(
-                        text: 'Privacy Policy',
+                        text: s.privacyPolicy,
                         style: const TextStyle(
                           color: Colors.white,
                           decoration: TextDecoration.underline,
@@ -295,14 +363,14 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
           ),
 
-        _primaryButton('Create account', _signUp),
+        _primaryButton(s.createAccount, _signUp),
         const SizedBox(height: 20),
 
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text(
-            'Already have an account? Sign in',
-            style: TextStyle(color: Colors.white60, fontSize: 13),
+          child: Text(
+            s.alreadyHaveAccount,
+            style: const TextStyle(color: Colors.white60, fontSize: 13),
           ),
         ),
       ],
@@ -310,14 +378,15 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Widget _buildCheckEmail() {
+    final s = AuthStrings.of(context);
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         const Icon(Icons.mark_email_read_outlined, size: 72, color: MyColors.myOrange),
         const SizedBox(height: 20),
-        const Text(
-          'Check your email',
-          style: TextStyle(
+        Text(
+          s.checkYourEmail,
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 24,
             fontWeight: FontWeight.bold,
@@ -325,22 +394,20 @@ class _SignupScreenState extends State<SignupScreen> {
         ),
         const SizedBox(height: 12),
         Text(
-          'We sent a confirmation link to\n$_createdEmail\n\n'
-          'Open it to activate your account, then come back and sign in. '
-          'Check your spam folder if you don\'t see it.',
+          s.sentConfirmation(_createdEmail ?? ''),
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
         ),
         const SizedBox(height: 28),
 
-        _primaryButton('Go to sign in', () => Navigator.pop(context, _createdEmail)),
+        _primaryButton(s.goToSignIn, () => Navigator.pop(context, _createdEmail)),
         const SizedBox(height: 12),
 
         TextButton(
           onPressed: _isLoading ? null : _resendConfirmation,
-          child: const Text(
-            'Resend confirmation email',
-            style: TextStyle(color: Colors.white60, fontSize: 13),
+          child: Text(
+            s.resendConfirmation,
+            style: const TextStyle(color: Colors.white60, fontSize: 13),
           ),
         ),
 

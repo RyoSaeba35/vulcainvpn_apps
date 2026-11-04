@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/account_service.dart';
 import '../colors.dart';
 import '../widgets/auth_ui.dart';
+import '../l10n/auth_strings.dart';
 
 /// Sends the password reset email. The link in the email opens the website,
 /// where the user chooses a new password, then signs in again in the app.
@@ -55,7 +56,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: MyColors.myBrown,
-      appBar: AuthUi.appBar(context),
+      appBar: AuthUi.appBar(context, actions: const [
+        Padding(padding: EdgeInsets.only(right: 16), child: Center(child: LanguagePicker())),
+      ]),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -68,14 +71,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 
   Widget _buildForm() {
+    final s = AuthStrings.of(context);
     return Column(
       children: [
         const Icon(Icons.lock_reset, size: 64, color: MyColors.myOrange),
         const SizedBox(height: 20),
-        AuthUi.title(
-          'Reset your password',
-          subtitle: 'Enter your account email. We will send you a link to choose a new password.',
-        ),
+        AuthUi.title(s.resetTitle, subtitle: s.resetSubtitle),
         const SizedBox(height: 32),
         TextField(
           controller: _emailController,
@@ -83,28 +84,24 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           autocorrect: false,
           style: const TextStyle(color: Colors.white),
           onSubmitted: (_) => _send(),
-          decoration: AuthUi.input('Email', Icons.email_outlined),
+          decoration: AuthUi.input(s.email, Icons.email_outlined),
         ),
         const SizedBox(height: 16),
         if (_errorMessage != null) AuthUi.message(_errorMessage!, error: true),
-        AuthButton(label: 'Send reset link', onPressed: _send, loading: _isLoading),
+        AuthButton(label: s.sendResetLink, onPressed: _send, loading: _isLoading),
       ],
     );
   }
 
   Widget _buildSent() {
+    final s = AuthStrings.of(context);
     return Column(
       children: [
         const Icon(Icons.mark_email_read_outlined, size: 72, color: MyColors.myOrange),
         const SizedBox(height: 20),
-        AuthUi.title(
-          'Check your email',
-          subtitle: 'If an account exists for ${_emailController.text.trim()}, you will receive '
-              'a link to choose a new password. Check your spam folder if you don\'t see it.\n\n'
-              'Then come back here and sign in with your new password.',
-        ),
+        AuthUi.title(s.checkYourEmail, subtitle: s.resetSent(_emailController.text.trim())),
         const SizedBox(height: 28),
-        AuthButton(label: 'Back to sign in', onPressed: () => Navigator.pop(context)),
+        AuthButton(label: s.backToSignIn, onPressed: () => Navigator.pop(context)),
       ],
     );
   }

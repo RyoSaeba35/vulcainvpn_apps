@@ -1,0 +1,1957 @@
+[1mdiff --git a/lib/screens/auth_gate.dart b/lib/screens/auth_gate.dart[m
+[1mindex acf6982..70ceef6 100644[m
+[1m--- a/lib/screens/auth_gate.dart[m
+[1m+++ b/lib/screens/auth_gate.dart[m
+[36m@@ -2,6 +2,10 @@[m [mimport 'package:flutter/material.dart';[m
+ import '../services/auth_service.dart';[m
+ import '../services/account_service.dart';[m
+ import '../services/deep_link_service.dart';[m
+[32m+[m[32mimport '../services/language_service.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+[32m+[m[32mimport '../main.dart';[m
+[32m+[m[32mimport '../services/billing_service.dart';[m
+ import '../colors.dart';[m
+ import 'login_screen.dart';[m
+ import 'vpn_home_page.dart';[m
+[36m@@ -30,6 +34,8 @@[m [mclass _AuthGateState extends State<AuthGate> {[m
+     super.initState();[m
+     _checkAuth();[m
+     DeepLinkService.listen(_onConfirmationLink);[m
+[32m+[m[32m    // Google Play purchases finished while the app was closed (Android only)[m
+[32m+[m[32m    BillingService.instance.start();[m
+   }[m
+ [m
+   @override[m
+[36m@@ -38,7 +44,25 @@[m [mclass _AuthGateState extends State<AuthGate> {[m
+     super.dispose();[m
+   }[m
+ [m
+[32m+[m[32m  bool _languageLoaded = false;[m
+[32m+[m
+[32m+[m[32m  /// Saves the language whenever it changes (sign in screen picker or[m
+[32m+[m[32m  /// Settings > Language) so it is kept on the next launch.[m
+[32m+[m[32m  @override[m
+[32m+[m[32m  void didChangeDependencies() {[m
+[32m+[m[32m    super.didChangeDependencies();[m
+[32m+[m[32m    final code = Localizations.localeOf(context).languageCode;[m
+[32m+[m[32m    if (_languageLoaded && code != AuthStrings.code) {[m
+[32m+[m[32m      LanguageService.save(code);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+   Future<void> _checkAuth() async {[m
+[32m+[m[32m    // Language first: messages built while checking the session use it[m
+[32m+[m[32m    final locale = await LanguageService.load();[m
+[32m+[m[32m    if (mounted) MyApp.setLocale(context, locale);[m
+[32m+[m[32m    _languageLoaded = true;[m
+[32m+[m
+     final loggedIn = await AuthService.isLoggedIn();[m
+     // Read reset reason AFTER isLoggedIn() — it's set inside that call[m
+     final resetReason = await AuthService.getSessionResetReason();[m
+[36m@@ -123,7 +147,7 @@[m [mclass _AuthGateState extends State<AuthGate> {[m
+     if (_isLoading) return _loadingScreen();[m
+ [m
+     if (_isConfirming && !_isLoggedIn) {[m
+[31m-      return _loadingScreen(text: 'Confirming your email...');[m
+[32m+[m[32m      return _loadingScreen(text: AuthStrings.of(context).confirmingEmail);[m
+     }[m
+ [m
+     if (!_isLoggedIn) {[m
+[1mdiff --git a/lib/screens/delete_account_screen.dart b/lib/screens/delete_account_screen.dart[m
+[1mindex bad12b8..0ff0639 100644[m
+[1m--- a/lib/screens/delete_account_screen.dart[m
+[1m+++ b/lib/screens/delete_account_screen.dart[m
+[36m@@ -1,7 +1,9 @@[m
+ import 'package:flutter/material.dart';[m
+ import '../services/account_service.dart';[m
+[32m+[m[32mimport '../services/google_auth_service.dart';[m
+ import '../colors.dart';[m
+ import '../widgets/auth_ui.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+ [m
+ /// Permanent account deletion (Google Play requirement).[m
+ /// Pops with `true` once the account is deleted; the caller then stops the[m
+[36m@@ -26,9 +28,56 @@[m [mclass _DeleteAccountScreenState extends State<DeleteAccountScreen> {[m
+     super.dispose();[m
+   }[m
+ [m
+[32m+[m[32m  // Accounts created with "Continue with Google" have no password to type[m
+[32m+[m[32m  Future<void> _deleteWithGoogle() async {[m
+[32m+[m[32m    if (!_understood) {[m
+[32m+[m[32m      setState(() => _errorMessage = AuthStrings.of(context).pleaseConfirmUnderstand);[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m[32m    setState(() {[m
+[32m+[m[32m      _isLoading = true;[m
+[32m+[m[32m      _errorMessage = null;[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      final idToken = await GoogleAuthService.getIdToken();[m
+[32m+[m[32m      if (idToken == null) {[m
+[32m+[m[32m        if (mounted) setState(() => _isLoading = false);[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m[32m      final result = await AccountService.deleteAccount('', googleIdToken: idToken);[m
+[32m+[m[32m      if (!mounted) return;[m
+[32m+[m[32m      if (result.ok) {[m
+[32m+[m[32m        Navigator.pop(context, true);[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        setState(() {[m
+[32m+[m[32m          _isLoading = false;[m
+[32m+[m[32m          _errorMessage = result.message;[m
+[32m+[m[32m        });[m
+[32m+[m[32m      }[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      if (!mounted) return;[m
+[32m+[m[32m      setState(() {[m
+[32m+[m[32m        _isLoading = false;[m
+[32m+[m[32m        _errorMessage = AuthStrings.of(context).googleConfirmUnavailable;[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+   Future<void> _delete() async {[m
+     if (!_understood) {[m
+[31m-      setState(() => _errorMessage = 'Please confirm you understand this cannot be undone.');[m
+[32m+[m[32m      setState(() => _errorMessage = AuthStrings.of(context).pleaseConfirmUnderstand);[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    // No password typed: on Android this is usually a Google account, so[m
+[32m+[m[32m    // confirm with Google directly instead of showing "password required"[m
+[32m+[m[32m    if (_passwordController.text.isEmpty) {[m
+[32m+[m[32m      if (GoogleAuthService.isSupported) {[m
+[32m+[m[32m        await _deleteWithGoogle();[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        setState(() => _errorMessage = AuthStrings.of(context).enterPassword);[m
+[32m+[m[32m      }[m
+       return;[m
+     }[m
+ [m
+[36m@@ -71,6 +120,7 @@[m [mclass _DeleteAccountScreenState extends State<DeleteAccountScreen> {[m
+ [m
+   @override[m
+   Widget build(BuildContext context) {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+     return Scaffold([m
+       backgroundColor: MyColors.myBrown,[m
+       appBar: AuthUi.appBar(context, onBack: _isLoading ? () {} : null),[m
+[36m@@ -83,17 +133,16 @@[m [mclass _DeleteAccountScreenState extends State<DeleteAccountScreen> {[m
+               children: [[m
+                 const Icon(Icons.warning_amber_rounded, size: 64, color: Colors.redAccent),[m
+                 const SizedBox(height: 20),[m
+[31m-                AuthUi.title('Delete your account'),[m
+[32m+[m[32m                AuthUi.title(s.deleteTitle),[m
+                 const SizedBox(height: 24),[m
+ [m
+[31m-                _bullet('Your account, devices and connection history are permanently deleted.'),[m
+[31m-                _bullet('Any remaining subscription time is lost.'),[m
+[31m-                _bullet('This cannot be undone.'),[m
+[32m+[m[32m                _bullet(s.deleteBullet1),[m
+[32m+[m[32m                _bullet(s.deleteBullet2),[m
+[32m+[m[32m                _bullet(s.deleteBullet3),[m
+                 const SizedBox(height: 4),[m
+[31m-                const Text([m
+[31m-                  'A subscription bought on Google Play must also be cancelled in '[m
+[31m-                  'Google Play > Payments & subscriptions.',[m
+[31m-                  style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),[m
+[32m+[m[32m                Text([m
+[32m+[m[32m                  s.deletePlayNote,[m
+[32m+[m[32m                  style: const TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),[m
+                 ),[m
+                 const SizedBox(height: 24),[m
+ [m
+[36m@@ -103,7 +152,7 @@[m [mclass _DeleteAccountScreenState extends State<DeleteAccountScreen> {[m
+                   enabled: !_isLoading,[m
+                   style: const TextStyle(color: Colors.white),[m
+                   decoration: AuthUi.input([m
+[31m-                    'Confirm with your password',[m
+[32m+[m[32m                    s.confirmWithPassword,[m
+                     Icons.lock_outline,[m
+                     suffix: IconButton([m
+                       icon: Icon([m
+[36m@@ -123,9 +172,9 @@[m [mclass _DeleteAccountScreenState extends State<DeleteAccountScreen> {[m
+                   controlAffinity: ListTileControlAffinity.leading,[m
+                   activeColor: Colors.redAccent,[m
+                   side: const BorderSide(color: Colors.white54),[m
+[31m-                  title: const Text([m
+[31m-                    'I understand my account will be deleted permanently',[m
+[31m-                    style: TextStyle(color: Colors.white70, fontSize: 13),[m
+[32m+[m[32m                  title: Text([m
+[32m+[m[32m                    s.iUnderstand,[m
+[32m+[m[32m                    style: const TextStyle(color: Colors.white70, fontSize: 13),[m
+                   ),[m
+                 ),[m
+                 const SizedBox(height: 8),[m
+[36m@@ -133,15 +182,28 @@[m [mclass _DeleteAccountScreenState extends State<DeleteAccountScreen> {[m
+                 if (_errorMessage != null) AuthUi.message(_errorMessage!, error: true),[m
+ [m
+                 AuthButton([m
+[31m-                  label: 'Delete permanently',[m
+[32m+[m[32m                  label: s.deletePermanently,[m
+                   onPressed: _delete,[m
+                   loading: _isLoading,[m
+                   color: Colors.red,[m
+                 ),[m
+[32m+[m
+[32m+[m[32m                // Signed up with Google: confirm with Google instead of a password[m
+[32m+[m[32m                if (GoogleAuthService.isSupported) ...[[m
+[32m+[m[32m                  const SizedBox(height: 8),[m
+[32m+[m[32m                  TextButton([m
+[32m+[m[32m                    onPressed: _isLoading ? null : _deleteWithGoogle,[m
+[32m+[m[32m                    child: Text([m
+[32m+[m[32m                      s.confirmWithGoogle,[m
+[32m+[m[32m                      textAlign: TextAlign.center,[m
+[32m+[m[32m                      style: const TextStyle(color: Colors.white70, fontSize: 13),[m
+[32m+[m[32m                    ),[m
+[32m+[m[32m                  ),[m
+[32m+[m[32m                ],[m
+                 const SizedBox(height: 12),[m
+                 TextButton([m
+                   onPressed: _isLoading ? null : () => Navigator.pop(context, false),[m
+[31m-                  child: const Text('Cancel', style: TextStyle(color: Colors.white60, fontSize: 14)),[m
+[32m+[m[32m                  child: Text(s.cancel, style: const TextStyle(color: Colors.white60, fontSize: 14)),[m
+                 ),[m
+               ],[m
+             ),[m
+[1mdiff --git a/lib/screens/forgot_password_screen.dart b/lib/screens/forgot_password_screen.dart[m
+[1mindex 4b5bb85..4514648 100644[m
+[1m--- a/lib/screens/forgot_password_screen.dart[m
+[1m+++ b/lib/screens/forgot_password_screen.dart[m
+[36m@@ -2,6 +2,7 @@[m [mimport 'package:flutter/material.dart';[m
+ import '../services/account_service.dart';[m
+ import '../colors.dart';[m
+ import '../widgets/auth_ui.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+ [m
+ /// Sends the password reset email. The link in the email opens the website,[m
+ /// where the user chooses a new password, then signs in again in the app.[m
+[36m@@ -55,7 +56,9 @@[m [mclass _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {[m
+   Widget build(BuildContext context) {[m
+     return Scaffold([m
+       backgroundColor: MyColors.myBrown,[m
+[31m-      appBar: AuthUi.appBar(context),[m
+[32m+[m[32m      appBar: AuthUi.appBar(context, actions: const [[m
+[32m+[m[32m        Padding(padding: EdgeInsets.only(right: 16), child: Center(child: LanguagePicker())),[m
+[32m+[m[32m      ]),[m
+       body: SafeArea([m
+         child: Center([m
+           child: SingleChildScrollView([m
+[36m@@ -68,14 +71,12 @@[m [mclass _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {[m
+   }[m
+ [m
+   Widget _buildForm() {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+     return Column([m
+       children: [[m
+         const Icon(Icons.lock_reset, size: 64, color: MyColors.myOrange),[m
+         const SizedBox(height: 20),[m
+[31m-        AuthUi.title([m
+[31m-          'Reset your password',[m
+[31m-          subtitle: 'Enter your account email. We will send you a link to choose a new password.',[m
+[31m-        ),[m
+[32m+[m[32m        AuthUi.title(s.resetTitle, subtitle: s.resetSubtitle),[m
+         const SizedBox(height: 32),[m
+         TextField([m
+           controller: _emailController,[m
+[36m@@ -83,28 +84,24 @@[m [mclass _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {[m
+           autocorrect: false,[m
+           style: const TextStyle(color: Colors.white),[m
+           onSubmitted: (_) => _send(),[m
+[31m-          decoration: AuthUi.input('Email', Icons.email_outlined),[m
+[32m+[m[32m          decoration: AuthUi.input(s.email, Icons.email_outlined),[m
+         ),[m
+         const SizedBox(height: 16),[m
+         if (_errorMessage != null) AuthUi.message(_errorMessage!, error: true),[m
+[31m-        AuthButton(label: 'Send reset link', onPressed: _send, loading: _isLoading),[m
+[32m+[m[32m        AuthButton(label: s.sendResetLink, onPressed: _send, loading: _isLoading),[m
+       ],[m
+     );[m
+   }[m
+ [m
+   Widget _buildSent() {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+     return Column([m
+       children: [[m
+         const Icon(Icons.mark_email_read_outlined, size: 72, color: MyColors.myOrange),[m
+         const SizedBox(height: 20),[m
+[31m-        AuthUi.title([m
+[31m-          'Check your email',[m
+[31m-          subtitle: 'If an account exists for ${_emailController.text.trim()}, you will receive '[m
+[31m-              'a link to choose a new password. Check your spam folder if you don\'t see it.\n\n'[m
+[31m-              'Then come back here and sign in with your new password.',[m
+[31m-        ),[m
+[32m+[m[32m        AuthUi.title(s.checkYourEmail, subtitle: s.resetSent(_emailController.text.trim())),[m
+         const SizedBox(height: 28),[m
+[31m-        AuthButton(label: 'Back to sign in', onPressed: () => Navigator.pop(context)),[m
+[32m+[m[32m        AuthButton(label: s.backToSignIn, onPressed: () => Navigator.pop(context)),[m
+       ],[m
+     );[m
+   }[m
+[1mdiff --git a/lib/screens/login_screen.dart b/lib/screens/login_screen.dart[m
+[1mindex f3b026a..6a0a057 100644[m
+[1m--- a/lib/screens/login_screen.dart[m
+[1m+++ b/lib/screens/login_screen.dart[m
+[36m@@ -5,6 +5,11 @@[m [mimport '../services/account_service.dart';[m
+ import '../colors.dart';[m
+ import 'signup_screen.dart';[m
+ import 'forgot_password_screen.dart';[m
+[32m+[m[32mimport '../services/google_auth_service.dart';[m
+[32m+[m[32mimport '../widgets/auth_ui.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+[32m+[m[32mimport 'package:flutter/gestures.dart';[m
+[32m+[m[32mimport 'package:url_launcher/url_launcher.dart';[m
+ [m
+ // Only import window_manager on desktop platforms[m
+ import 'package:window_manager/window_manager.dart';[m
+[36m@@ -39,6 +44,7 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+   String? _errorMessage;[m
+   String? _infoMessage;[m
+   bool _needsConfirmation = false;[m
+[32m+[m[32m  bool _isGoogleLoading = false;[m
+ [m
+   bool get _isDesktop =>[m
+       Platform.isWindows || Platform.isMacOS || Platform.isLinux;[m
+[36m@@ -82,7 +88,7 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+     final password = _passwordController.text;[m
+ [m
+     if (email.isEmpty || password.isEmpty) {[m
+[31m-      setState(() => _errorMessage = 'Please enter your email and password.');[m
+[32m+[m[32m      setState(() => _errorMessage = AuthStrings.of(context).enterEmailAndPassword);[m
+       return;[m
+     }[m
+ [m
+[36m@@ -102,12 +108,64 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+     } else {[m
+       setState(() {[m
+         _isLoading = false;[m
+[31m-        _errorMessage = AuthService.lastLoginError ?? 'Invalid email or password.';[m
+[32m+[m[32m        _errorMessage = AuthService.lastLoginError ?? AuthStrings.of(context).invalidCredentials;[m
+         _needsConfirmation = AuthService.lastLoginNeedsConfirmation;[m
+       });[m
+     }[m
+   }[m
+ [m
+[32m+[m[32m  Future<void> _loginWithGoogle() async {[m
+[32m+[m[32m    setState(() {[m
+[32m+[m[32m      _isGoogleLoading = true;[m
+[32m+[m[32m      _errorMessage = null;[m
+[32m+[m[32m      _infoMessage = null;[m
+[32m+[m[32m      _needsConfirmation = false;[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      final idToken = await GoogleAuthService.getIdToken();[m
+[32m+[m[32m      if (idToken == null) {[m
+[32m+[m[32m        // User closed the Google account picker[m
+[32m+[m[32m        if (mounted) setState(() => _isGoogleLoading = false);[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      var success = await AuthService.loginWithGoogle(idToken);[m
+[32m+[m[32m      if (!mounted) return;[m
+[32m+[m
+[32m+[m[32m      // No Vulcain account for this Google account yet: ask before creating[m
+[32m+[m[32m      // one (e.g. someone who deleted their account must know it's a new one)[m
+[32m+[m[32m      final newEmail = AuthService.lastGoogleNoAccountEmail;[m
+[32m+[m[32m      if (!success && newEmail != null) {[m
+[32m+[m[32m        final create = await _confirmNewGoogleAccount(newEmail);[m
+[32m+[m[32m        if (!mounted) return;[m
+[32m+[m[32m        if (create != true) {[m
+[32m+[m[32m          await GoogleAuthService.signOut();[m
+[32m+[m[32m          if (mounted) setState(() => _isGoogleLoading = false);[m
+[32m+[m[32m          return;[m
+[32m+[m[32m        }[m
+[32m+[m[32m        success = await AuthService.loginWithGoogle(idToken, create: true);[m
+[32m+[m[32m        if (!mounted) return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      if (success) {[m
+[32m+[m[32m        widget.onLoginSuccess();[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        setState(() {[m
+[32m+[m[32m          _isGoogleLoading = false;[m
+[32m+[m[32m          _errorMessage = AuthService.lastLoginError ?? AuthStrings.of(context).googleFailed;[m
+[32m+[m[32m        });[m
+[32m+[m[32m      }[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      print('❌ Google sign-in error: $e');[m
+[32m+[m[32m      if (!mounted) return;[m
+[32m+[m[32m      setState(() {[m
+[32m+[m[32m        _isGoogleLoading = false;[m
+[32m+[m[32m        _errorMessage = AuthStrings.of(context).googleUnavailable;[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+   Future<void> _resendConfirmation() async {[m
+     setState(() => _isLoading = true);[m
+     final result = await AccountService.resendConfirmation(_emailController.text);[m
+[36m@@ -128,17 +186,98 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+       ),[m
+     );[m
+     if (!mounted) return;[m
+[32m+[m[32m    if (createdEmail == SignupScreen.googleSignedIn) {[m
+[32m+[m[32m      widget.onLoginSuccess(); // Signed up with Google: already signed in[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+     if (createdEmail != null && createdEmail.isNotEmpty) {[m
+       setState(() {[m
+         _emailController.text = createdEmail;[m
+         _passwordController.clear();[m
+         _errorMessage = null;[m
+         _needsConfirmation = false;[m
+[31m-        _infoMessage = 'Confirm your email, then sign in here.';[m
+[32m+[m[32m        _infoMessage = AuthStrings.of(context).confirmThenSignIn;[m
+       });[m
+     }[m
+   }[m
+ [m
+[32m+[m[32m  Future<void> _openUrl(String url) async {[m
+[32m+[m[32m    final uri = Uri.parse(url);[m
+[32m+[m[32m    if (await canLaunchUrl(uri)) {[m
+[32m+[m[32m      await launchUrl(uri, mode: LaunchMode.externalApplication);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  /// "Create a Vulcain account?" (styled like the account screens)[m
+[32m+[m[32m  Future<bool?> _confirmNewGoogleAccount(String email) {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+[32m+[m[32m    final linkStyle = const TextStyle([m
+[32m+[m[32m      color: Colors.white70,[m
+[32m+[m[32m      decoration: TextDecoration.underline,[m
+[32m+[m[32m      decorationColor: Colors.white70,[m
+[32m+[m[32m    );[m
+[32m+[m[32m    return showDialog<bool>([m
+[32m+[m[32m      context: context,[m
+[32m+[m[32m      barrierDismissible: false,[m
+[32m+[m[32m      builder: (dialogContext) => AlertDialog([m
+[32m+[m[32m        backgroundColor: const Color(0xFF4A3530),[m
+[32m+[m[32m        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),[m
+[32m+[m[32m        title: Text([m
+[32m+[m[32m          s.googleNewAccountTitle,[m
+[32m+[m[32m          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        content: Column([m
+[32m+[m[32m          mainAxisSize: MainAxisSize.min,[m
+[32m+[m[32m          crossAxisAlignment: CrossAxisAlignment.start,[m
+[32m+[m[32m          children: [[m
+[32m+[m[32m            Text([m
+[32m+[m[32m              s.googleNewAccountBody(email),[m
+[32m+[m[32m              style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m            const SizedBox(height: 14),[m
+[32m+[m[32m            RichText([m
+[32m+[m[32m              text: TextSpan([m
+[32m+[m[32m                style: const TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),[m
+[32m+[m[32m                children: [[m
+[32m+[m[32m                  TextSpan(text: s.googleNewAccountTerms),[m
+[32m+[m[32m                  const TextSpan(text: '\n'),[m
+[32m+[m[32m                  TextSpan([m
+[32m+[m[32m                    text: s.termsOfService,[m
+[32m+[m[32m                    style: linkStyle,[m
+[32m+[m[32m                    recognizer: TapGestureRecognizer()[m
+[32m+[m[32m                      ..onTap = () => _openUrl('https://www.vulcainvpn.com/terms'),[m
+[32m+[m[32m                  ),[m
+[32m+[m[32m                  const TextSpan(text: '  ·  '),[m
+[32m+[m[32m                  TextSpan([m
+[32m+[m[32m                    text: s.privacyPolicy,[m
+[32m+[m[32m                    style: linkStyle,[m
+[32m+[m[32m                    recognizer: TapGestureRecognizer()[m
+[32m+[m[32m                      ..onTap = () => _openUrl('https://www.vulcainvpn.com/privacy'),[m
+[32m+[m[32m                  ),[m
+[32m+[m[32m                ],[m
+[32m+[m[32m              ),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m          ],[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        actions: [[m
+[32m+[m[32m          TextButton([m
+[32m+[m[32m            onPressed: () => Navigator.pop(dialogContext, false),[m
+[32m+[m[32m            child: Text(s.cancel, style: const TextStyle(color: Colors.white60)),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m          ElevatedButton([m
+[32m+[m[32m            onPressed: () => Navigator.pop(dialogContext, true),[m
+[32m+[m[32m            style: ElevatedButton.styleFrom([m
+[32m+[m[32m              backgroundColor: MyColors.myOrange,[m
+[32m+[m[32m              foregroundColor: Colors.white,[m
+[32m+[m[32m              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m            child: Text(s.createMyAccount),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m        ],[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m
+   Future<void> _openForgotPassword() async {[m
+     await Navigator.push([m
+       context,[m
+[36m@@ -150,6 +289,7 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+ [m
+   @override[m
+   Widget build(BuildContext context) {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+     return PopScope([m
+       canPop: false,[m
+       onPopInvokedWithResult: (didPop, result) async {[m
+[36m@@ -161,9 +301,12 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+       child: Scaffold([m
+         backgroundColor: MyColors.myBrown,[m
+         body: SafeArea([m
+[31m-          child: Center([m
+[32m+[m[32m          child: Stack([m
+[32m+[m[32m            fit: StackFit.expand,[m
+[32m+[m[32m            children: [[m
+[32m+[m[32m          Center([m
+             child: SingleChildScrollView([m
+[31m-              padding: const EdgeInsets.symmetric(horizontal: 32),[m
+[32m+[m[32m              padding: const EdgeInsets.fromLTRB(32, 56, 32, 24),[m
+               child: Column([m
+                 mainAxisAlignment: MainAxisAlignment.center,[m
+                 children: [[m
+[36m@@ -188,9 +331,9 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                     ),[m
+                   ),[m
+                   const SizedBox(height: 8),[m
+[31m-                  const Text([m
+[31m-                    'Sign in to your account',[m
+[31m-                    style: TextStyle(color: Colors.white54, fontSize: 14),[m
+[32m+[m[32m                  Text([m
+[32m+[m[32m                    s.signInSubtitle,[m
+[32m+[m[32m                    style: const TextStyle(color: Colors.white54, fontSize: 14),[m
+                   ),[m
+                   const SizedBox(height: 40),[m
+ [m
+[36m@@ -224,6 +367,15 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                       ),[m
+                     ),[m
+ [m
+[32m+[m[32m                  // Continue with Google (Android only)[m
+[32m+[m[32m                  if (GoogleAuthService.isSupported) ...[[m
+[32m+[m[32m                    GoogleButton([m
+[32m+[m[32m                      onPressed: _isLoading ? null : _loginWithGoogle,[m
+[32m+[m[32m                      loading: _isGoogleLoading,[m
+[32m+[m[32m                    ),[m
+[32m+[m[32m                    const OrDivider(),[m
+[32m+[m[32m                  ],[m
+[32m+[m
+                   // Email field[m
+                   TextField([m
+                     controller: _emailController,[m
+[36m@@ -231,7 +383,7 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                     autocorrect: false,[m
+                     style: const TextStyle(color: Colors.white),[m
+                     decoration: InputDecoration([m
+[31m-                      labelText: 'Email',[m
+[32m+[m[32m                      labelText: s.email,[m
+                       labelStyle: const TextStyle(color: Colors.white54),[m
+                       prefixIcon: const Icon([m
+                         Icons.email_outlined,[m
+[36m@@ -258,7 +410,7 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                     style: const TextStyle(color: Colors.white),[m
+                     onSubmitted: (_) => _login(),[m
+                     decoration: InputDecoration([m
+[31m-                      labelText: 'Password',[m
+[32m+[m[32m                      labelText: s.password,[m
+                       labelStyle: const TextStyle(color: Colors.white54),[m
+                       prefixIcon: const Icon([m
+                         Icons.lock_outline,[m
+[36m@@ -292,9 +444,9 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                     alignment: Alignment.centerRight,[m
+                     child: TextButton([m
+                       onPressed: _isLoading ? null : _openForgotPassword,[m
+[31m-                      child: const Text([m
+[31m-                        'Forgot password?',[m
+[31m-                        style: TextStyle(color: Colors.white60, fontSize: 12),[m
+[32m+[m[32m                      child: Text([m
+[32m+[m[32m                        s.forgotPassword,[m
+[32m+[m[32m                        style: const TextStyle(color: Colors.white60, fontSize: 12),[m
+                       ),[m
+                     ),[m
+                   ),[m
+[36m@@ -319,9 +471,9 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                       padding: const EdgeInsets.only(bottom: 12),[m
+                       child: TextButton([m
+                         onPressed: _isLoading ? null : _resendConfirmation,[m
+[31m-                        child: const Text([m
+[31m-                          'Resend confirmation email',[m
+[31m-                          style: TextStyle([m
+[32m+[m[32m                        child: Text([m
+[32m+[m[32m                          s.resendConfirmation,[m
+[32m+[m[32m                          style: const TextStyle([m
+                             color: MyColors.myOrange,[m
+                             fontSize: 13,[m
+                             fontWeight: FontWeight.bold,[m
+[36m@@ -367,9 +519,9 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                                 strokeWidth: 2,[m
+                               ),[m
+                             )[m
+[31m-                          : const Text([m
+[31m-                              'Sign In',[m
+[31m-                              style: TextStyle([m
+[32m+[m[32m                          : Text([m
+[32m+[m[32m                              s.signIn,[m
+[32m+[m[32m                              style: const TextStyle([m
+                                 fontSize: 16,[m
+                                 fontWeight: FontWeight.bold,[m
+                               ),[m
+[36m@@ -382,15 +534,15 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                   Row([m
+                     mainAxisAlignment: MainAxisAlignment.center,[m
+                     children: [[m
+[31m-                      const Text([m
+[31m-                        'Don\'t have an account? ',[m
+[31m-                        style: TextStyle(color: Colors.white38, fontSize: 13),[m
+[32m+[m[32m                      Text([m
+[32m+[m[32m                        s.noAccount,[m
+[32m+[m[32m                        style: const TextStyle(color: Colors.white38, fontSize: 13),[m
+                       ),[m
+                       GestureDetector([m
+                         onTap: _isLoading ? null : _openSignup,[m
+[31m-                        child: const Text([m
+[31m-                          'Create one',[m
+[31m-                          style: TextStyle([m
+[32m+[m[32m                        child: Text([m
+[32m+[m[32m                          s.createOne,[m
+[32m+[m[32m                          style: const TextStyle([m
+                             color: MyColors.myOrange,[m
+                             fontSize: 13,[m
+                             fontWeight: FontWeight.bold,[m
+[36m@@ -399,9 +551,23 @@[m [mclass _LoginScreenState extends State<LoginScreen> with WindowListener {[m
+                       ),[m
+                     ],[m
+                   ),[m
+[32m+[m
+[32m+[m[32m                  // Google sign-in exists on Android and the website only[m
+[32m+[m[32m                  if (_isDesktop) ...[[m
+[32m+[m[32m                    const SizedBox(height: 16),[m
+[32m+[m[32m                    Text([m
+[32m+[m[32m                      s.windowsGoogleHint,[m
+[32m+[m[32m                      textAlign: TextAlign.center,[m
+[32m+[m[32m                      style: const TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),[m
+[32m+[m[32m                    ),[m
+[32m+[m[32m                  ],[m
+                 ],[m
+               ),[m
+             ),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m              // Language (English / Français)[m
+[32m+[m[32m              const Positioned(top: 12, right: 16, child: LanguagePicker()),[m
+[32m+[m[32m            ],[m
+           ),[m
+         ),[m
+       ),[m
+[1mdiff --git a/lib/screens/signup_screen.dart b/lib/screens/signup_screen.dart[m
+[1mindex 2bb0d2f..27702f6 100644[m
+[1m--- a/lib/screens/signup_screen.dart[m
+[1m+++ b/lib/screens/signup_screen.dart[m
+[36m@@ -2,7 +2,11 @@[m [mimport 'package:flutter/gestures.dart';[m
+ import 'package:flutter/material.dart';[m
+ import 'package:url_launcher/url_launcher.dart';[m
+ import '../services/account_service.dart';[m
+[32m+[m[32mimport '../services/auth_service.dart';[m
+[32m+[m[32mimport '../services/google_auth_service.dart';[m
+[32m+[m[32mimport '../widgets/auth_ui.dart';[m
+ import '../colors.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+ [m
+ /// Account creation. On success, shows a "check your email" step; the user[m
+ /// confirms by email, then signs in. Pops with the email so the login screen[m
+[36m@@ -12,6 +16,9 @@[m [mclass SignupScreen extends StatefulWidget {[m
+ [m
+   const SignupScreen({super.key, this.initialEmail});[m
+ [m
+[32m+[m[32m  /// Pop result meaning "signed in with Google, go straight to the app"[m
+[32m+[m[32m  static const String googleSignedIn = '__google_signed_in__';[m
+[32m+[m
+   @override[m
+   State<SignupScreen> createState() => _SignupScreenState();[m
+ }[m
+[36m@@ -44,26 +51,61 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+     super.dispose();[m
+   }[m
+ [m
+[32m+[m[32m  bool _isGoogleLoading = false;[m
+[32m+[m
+[32m+[m[32m  Future<void> _signUpWithGoogle() async {[m
+[32m+[m[32m    setState(() {[m
+[32m+[m[32m      _isGoogleLoading = true;[m
+[32m+[m[32m      _errorMessage = null;[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      final idToken = await GoogleAuthService.getIdToken();[m
+[32m+[m[32m      if (idToken == null) {[m
+[32m+[m[32m        if (mounted) setState(() => _isGoogleLoading = false);[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      final success = await AuthService.loginWithGoogle(idToken, create: true);[m
+[32m+[m[32m      if (!mounted) return;[m
+[32m+[m
+[32m+[m[32m      if (success) {[m
+[32m+[m[32m        Navigator.pop(context, SignupScreen.googleSignedIn);[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        setState(() {[m
+[32m+[m[32m          _isGoogleLoading = false;[m
+[32m+[m[32m          _errorMessage = AuthService.lastLoginError ?? AuthStrings.of(context).googleFailed;[m
+[32m+[m[32m        });[m
+[32m+[m[32m      }[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      print('❌ Google sign-up error: $e');[m
+[32m+[m[32m      if (!mounted) return;[m
+[32m+[m[32m      setState(() {[m
+[32m+[m[32m        _isGoogleLoading = false;[m
+[32m+[m[32m        _errorMessage = AuthStrings.of(context).googleSignUpUnavailable;[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+   Future<void> _signUp() async {[m
+     final email = _emailController.text.trim();[m
+     final password = _passwordController.text;[m
+ [m
+     if (!AccountService.isValidEmail(email)) {[m
+[31m-      setState(() => _errorMessage = 'Please enter a valid email address.');[m
+[32m+[m[32m      setState(() => _errorMessage = AuthStrings.of(context).invalidEmail);[m
+       return;[m
+     }[m
+     if (password.length < AccountService.minPasswordLength) {[m
+       setState(() => _errorMessage =[m
+[31m-          'Password must be at least ${AccountService.minPasswordLength} characters.');[m
+[32m+[m[32m          AuthStrings.of(context).passwordTooShort(AccountService.minPasswordLength));[m
+       return;[m
+     }[m
+     if (password != _confirmController.text) {[m
+[31m-      setState(() => _errorMessage = 'Passwords do not match.');[m
+[32m+[m[32m      setState(() => _errorMessage = AuthStrings.of(context).passwordsDontMatch);[m
+       return;[m
+     }[m
+     if (!_acceptedTerms) {[m
+[31m-      setState(() => _errorMessage =[m
+[31m-          'Please accept the Terms of Service and Privacy Policy.');[m
+[32m+[m[32m      setState(() => _errorMessage = AuthStrings.of(context).acceptTerms);[m
+       return;[m
+     }[m
+ [m
+[36m@@ -170,6 +212,12 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+           icon: const Icon(Icons.arrow_back),[m
+           onPressed: () => Navigator.pop(context, _createdEmail),[m
+         ),[m
+[32m+[m[32m        actions: const [[m
+[32m+[m[32m          Padding([m
+[32m+[m[32m            padding: EdgeInsets.only(right: 16),[m
+[32m+[m[32m            child: Center(child: LanguagePicker()),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m        ],[m
+       ),[m
+       body: SafeArea([m
+         child: Center([m
+[36m@@ -183,30 +231,40 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+   }[m
+ [m
+   Widget _buildForm() {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+     return Column([m
+       mainAxisAlignment: MainAxisAlignment.center,[m
+       children: [[m
+[31m-        const Text([m
+[31m-          'Create your account',[m
+[31m-          style: TextStyle([m
+[32m+[m[32m        Text([m
+[32m+[m[32m          s.createYourAccount,[m
+[32m+[m[32m          style: const TextStyle([m
+             color: Colors.white,[m
+             fontSize: 26,[m
+             fontWeight: FontWeight.bold,[m
+           ),[m
+         ),[m
+         const SizedBox(height: 8),[m
+[31m-        const Text([m
+[31m-          'One account for all your devices',[m
+[31m-          style: TextStyle(color: Colors.white54, fontSize: 14),[m
+[32m+[m[32m        Text([m
+[32m+[m[32m          s.oneAccount,[m
+[32m+[m[32m          style: const TextStyle(color: Colors.white54, fontSize: 14),[m
+         ),[m
+         const SizedBox(height: 32),[m
+ [m
+[32m+[m[32m        // Continue with Google (Android only): no password, no confirmation email[m
+[32m+[m[32m        if (GoogleAuthService.isSupported) ...[[m
+[32m+[m[32m          GoogleButton([m
+[32m+[m[32m            onPressed: _isLoading ? null : _signUpWithGoogle,[m
+[32m+[m[32m            loading: _isGoogleLoading,[m
+[32m+[m[32m          ),[m
+[32m+[m[32m          const OrDivider(),[m
+[32m+[m[32m        ],[m
+[32m+[m
+         TextField([m
+           controller: _emailController,[m
+           keyboardType: TextInputType.emailAddress,[m
+           autocorrect: false,[m
+           style: const TextStyle(color: Colors.white),[m
+[31m-          decoration: _decoration('Email', Icons.email_outlined),[m
+[32m+[m[32m          decoration: _decoration(s.email, Icons.email_outlined),[m
+         ),[m
+         const SizedBox(height: 16),[m
+ [m
+[36m@@ -215,7 +273,7 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+           obscureText: _obscurePassword,[m
+           style: const TextStyle(color: Colors.white),[m
+           decoration: _decoration([m
+[31m-            'Password (min. ${AccountService.minPasswordLength} characters)',[m
+[32m+[m[32m            s.passwordMin(AccountService.minPasswordLength),[m
+             Icons.lock_outline,[m
+             suffix: IconButton([m
+               icon: Icon([m
+[36m@@ -233,7 +291,17 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+           obscureText: _obscurePassword,[m
+           style: const TextStyle(color: Colors.white),[m
+           onSubmitted: (_) => _signUp(),[m
+[31m-          decoration: _decoration('Confirm password', Icons.lock_outline),[m
+[32m+[m[32m          decoration: _decoration([m
+[32m+[m[32m            s.confirmPassword,[m
+[32m+[m[32m            Icons.lock_outline,[m
+[32m+[m[32m            suffix: IconButton([m
+[32m+[m[32m              icon: Icon([m
+[32m+[m[32m                _obscurePassword ? Icons.visibility_off : Icons.visibility,[m
+[32m+[m[32m                color: Colors.white54,[m
+[32m+[m[32m              ),[m
+[32m+[m[32m              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m          ),[m
+         ),[m
+         const SizedBox(height: 12),[m
+ [m
+[36m@@ -254,9 +322,9 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+                   text: TextSpan([m
+                     style: const TextStyle(color: Colors.white54, fontSize: 12),[m
+                     children: [[m
+[31m-                      const TextSpan(text: 'I accept the '),[m
+[32m+[m[32m                      TextSpan(text: s.iAccept),[m
+                       TextSpan([m
+[31m-                        text: 'Terms of Service',[m
+[32m+[m[32m                        text: s.termsOfService,[m
+                         style: const TextStyle([m
+                           color: Colors.white,[m
+                           decoration: TextDecoration.underline,[m
+[36m@@ -265,9 +333,9 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+                         recognizer: TapGestureRecognizer()[m
+                           ..onTap = () => _openUrl('https://www.vulcainvpn.com/terms'),[m
+                       ),[m
+[31m-                      const TextSpan(text: ' and the '),[m
+[32m+[m[32m                      TextSpan(text: s.andThe),[m
+                       TextSpan([m
+[31m-                        text: 'Privacy Policy',[m
+[32m+[m[32m                        text: s.privacyPolicy,[m
+                         style: const TextStyle([m
+                           color: Colors.white,[m
+                           decoration: TextDecoration.underline,[m
+[36m@@ -295,14 +363,14 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+             ),[m
+           ),[m
+ [m
+[31m-        _primaryButton('Create account', _signUp),[m
+[32m+[m[32m        _primaryButton(s.createAccount, _signUp),[m
+         const SizedBox(height: 20),[m
+ [m
+         TextButton([m
+           onPressed: () => Navigator.pop(context),[m
+[31m-          child: const Text([m
+[31m-            'Already have an account? Sign in',[m
+[31m-            style: TextStyle(color: Colors.white60, fontSize: 13),[m
+[32m+[m[32m          child: Text([m
+[32m+[m[32m            s.alreadyHaveAccount,[m
+[32m+[m[32m            style: const TextStyle(color: Colors.white60, fontSize: 13),[m
+           ),[m
+         ),[m
+       ],[m
+[36m@@ -310,14 +378,15 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+   }[m
+ [m
+   Widget _buildCheckEmail() {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+     return Column([m
+       mainAxisAlignment: MainAxisAlignment.center,[m
+       children: [[m
+         const Icon(Icons.mark_email_read_outlined, size: 72, color: MyColors.myOrange),[m
+         const SizedBox(height: 20),[m
+[31m-        const Text([m
+[31m-          'Check your email',[m
+[31m-          style: TextStyle([m
+[32m+[m[32m        Text([m
+[32m+[m[32m          s.checkYourEmail,[m
+[32m+[m[32m          style: const TextStyle([m
+             color: Colors.white,[m
+             fontSize: 24,[m
+             fontWeight: FontWeight.bold,[m
+[36m@@ -325,22 +394,20 @@[m [mclass _SignupScreenState extends State<SignupScreen> {[m
+         ),[m
+         const SizedBox(height: 12),[m
+         Text([m
+[31m-          'We sent a confirmation link to\n$_createdEmail\n\n'[m
+[31m-          'Open it to activate your account, then come back and sign in. '[m
+[31m-          'Check your spam folder if you don\'t see it.',[m
+[32m+[m[32m          s.sentConfirmation(_createdEmail ?? ''),[m
+           textAlign: TextAlign.center,[m
+           style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),[m
+         ),[m
+         const SizedBox(height: 28),[m
+ [m
+[31m-        _primaryButton('Go to sign in', () => Navigator.pop(context, _createdEmail)),[m
+[32m+[m[32m        _primaryButton(s.goToSignIn, () => Navigator.pop(context, _createdEmail)),[m
+         const SizedBox(height: 12),[m
+ [m
+         TextButton([m
+           onPressed: _isLoading ? null : _resendConfirmation,[m
+[31m-          child: const Text([m
+[31m-            'Resend confirmation email',[m
+[31m-            style: TextStyle(color: Colors.white60, fontSize: 13),[m
+[32m+[m[32m          child: Text([m
+[32m+[m[32m            s.resendConfirmation,[m
+[32m+[m[32m            style: const TextStyle(color: Colors.white60, fontSize: 13),[m
+           ),[m
+         ),[m
+ [m
+[1mdiff --git a/lib/screens/tabs/settings_tab.dart b/lib/screens/tabs/settings_tab.dart[m
+[1mindex ca87d14..600642a 100644[m
+[1m--- a/lib/screens/tabs/settings_tab.dart[m
+[1m+++ b/lib/screens/tabs/settings_tab.dart[m
+[36m@@ -2,6 +2,8 @@[m [mimport 'package:flutter/material.dart';[m
+ import 'dart:io';[m
+ import 'package:flutter/services.dart';[m
+ import 'package:url_launcher/url_launcher.dart';[m
+[32m+[m[32mimport 'package:share_plus/share_plus.dart';[m
+[32m+[m[32mimport '../../l10n/auth_strings.dart';[m
+ import '../../main.dart';[m
+ import '../../colors.dart';[m
+ import '../../l10n/app_localizations.dart';[m
+[36m@@ -477,6 +479,80 @@[m [mclass _SettingsTabState extends State<SettingsTab> {[m
+     }[m
+   }[m
+ [m
+[32m+[m[32m  // ── Support the app ───────────────────────────────────────────────────────[m
+[32m+[m[32m  static const String _packageName = 'com.vulcainvpn.app';[m
+[32m+[m[32m  static const String _playUrl = 'https://play.google.com/store/apps/details?id=$_packageName';[m
+[32m+[m[32m  static const String _siteUrl = 'https://www.vulcainvpn.com';[m
+[32m+[m
+[32m+[m[32m  /// Opens the app's page in the Play Store app (review section), or the[m
+[32m+[m[32m  /// Play website if the Store app is missing.[m
+[32m+[m[32m  Future<void> _openReview() async {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      final opened = await launchUrl([m
+[32m+[m[32m        Uri.parse('market://details?id=$_packageName&showAllReviews=true'),[m
+[32m+[m[32m        mode: LaunchMode.externalApplication,[m
+[32m+[m[32m      );[m
+[32m+[m[32m      if (opened) return;[m
+[32m+[m[32m    } catch (_) {}[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      await launchUrl(Uri.parse(_playUrl), mode: LaunchMode.externalApplication);[m
+[32m+[m[32m    } catch (_) {[m
+[32m+[m[32m      if (mounted) {[m
+[32m+[m[32m        ScaffoldMessenger.of(context).showSnackBar([m
+[32m+[m[32m          SnackBar(content: Text(s.couldNotOpenStore), behavior: SnackBarBehavior.floating),[m
+[32m+[m[32m        );[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  Future<void> _shareApp(BuildContext buttonContext) async {[m
+[32m+[m[32m    final s = AuthStrings.of(context);[m
+[32m+[m[32m    // iPad / desktop need an anchor for the share popup[m
+[32m+[m[32m    final box = buttonContext.findRenderObject() as RenderBox?;[m
+[32m+[m[32m    await SharePlus.instance.share([m
+[32m+[m[32m      ShareParams([m
+[32m+[m[32m        text: s.shareMessage(_playUrl, _siteUrl),[m
+[32m+[m[32m        subject: s.shareSubject,[m
+[32m+[m[32m        sharePositionOrigin: box == null ? null : box.localToGlobal(Offset.zero) & box.size,[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  Widget _buildSupportRow({[m
+[32m+[m[32m    required IconData icon,[m
+[32m+[m[32m    required String title,[m
+[32m+[m[32m    required String subtitle,[m
+[32m+[m[32m    required void Function(BuildContext rowContext) onTap,[m
+[32m+[m[32m  }) {[m
+[32m+[m[32m    return Builder([m
+[32m+[m[32m      builder: (rowContext) => InkWell([m
+[32m+[m[32m        onTap: () => onTap(rowContext),[m
+[32m+[m[32m        borderRadius: BorderRadius.circular(8),[m
+[32m+[m[32m        child: Padding([m
+[32m+[m[32m          padding: const EdgeInsets.symmetric(vertical: 12),[m
+[32m+[m[32m          child: Row([m
+[32m+[m[32m            children: [[m
+[32m+[m[32m              Icon(icon, color: MyColors.myOrange, size: 22),[m
+[32m+[m[32m              const SizedBox(width: 14),[m
+[32m+[m[32m              Expanded([m
+[32m+[m[32m                child: Column([m
+[32m+[m[32m                  crossAxisAlignment: CrossAxisAlignment.start,[m
+[32m+[m[32m                  children: [[m
+[32m+[m[32m                    Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),[m
+[32m+[m[32m                    const SizedBox(height: 2),[m
+[32m+[m[32m                    Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[500])),[m
+[32m+[m[32m                  ],[m
+[32m+[m[32m                ),[m
+[32m+[m[32m              ),[m
+[32m+[m[32m              Icon(Icons.chevron_right, color: Colors.grey[400]),[m
+[32m+[m[32m            ],[m
+[32m+[m[32m          ),[m
+[32m+[m[32m        ),[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m
+   void _openLicences(BuildContext context) {[m
+     showLicensePage([m
+       context: context,[m
+[36m@@ -737,6 +813,39 @@[m [mclass _SettingsTabState extends State<SettingsTab> {[m
+ [m
+         const SizedBox(height: 32),[m
+ [m
+[32m+[m[32m        // ── Support the app ───────────────────────────────────────────────[m
+[32m+[m[32m        InfoCard([m
+[32m+[m[32m          title: AuthStrings.of(context).supportTheApp,[m
+[32m+[m[32m          icon: Icons.favorite_border,[m
+[32m+[m[32m          children: [[m
+[32m+[m[32m            // Reviews only make sense where the app is on Google Play[m
+[32m+[m[32m            if (Platform.isAndroid) ...[[m
+[32m+[m[32m              _buildSupportRow([m
+[32m+[m[32m                icon: Icons.star_outline,[m
+[32m+[m[32m                title: AuthStrings.of(context).leaveReview,[m
+[32m+[m[32m                subtitle: AuthStrings.of(context).leaveReviewDesc,[m
+[32m+[m[32m                onTap: (_) => _openReview(),[m
+[32m+[m[32m              ),[m
+[32m+[m[32m              const Divider(height: 1),[m
+[32m+[m[32m            ],[m
+[32m+[m[32m            _buildSupportRow([m
+[32m+[m[32m              icon: Icons.share_outlined,[m
+[32m+[m[32m              title: AuthStrings.of(context).shareApp,[m
+[32m+[m[32m              subtitle: AuthStrings.of(context).shareAppDesc,[m
+[32m+[m[32m              onTap: _shareApp,[m
+[32m+[m[32m            ),[m
+[32m+[m[32m            Padding([m
+[32m+[m[32m              padding: const EdgeInsets.only(top: 8),[m
+[32m+[m[32m              child: Text([m
+[32m+[m[32m                AuthStrings.of(context).supportThanks,[m
+[32m+[m[32m                style: TextStyle(fontSize: 12, color: Colors.grey[500], height: 1.4),[m
+[32m+[m[32m              ),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m          ],[m
+[32m+[m[32m        ),[m
+[32m+[m
+[32m+[m[32m        const SizedBox(height: 16),[m
+[32m+[m
+         // ── Support & Diagnostics ─────────────────────────────────────────[m
+         if (Platform.isAndroid || Platform.isIOS)[m
+           InfoCard([m
+[1mdiff --git a/lib/screens/tabs/subscription_tab.dart b/lib/screens/tabs/subscription_tab.dart[m
+[1mindex 7fc5ce7..69e03a6 100644[m
+[1m--- a/lib/screens/tabs/subscription_tab.dart[m
+[1m+++ b/lib/screens/tabs/subscription_tab.dart[m
+[36m@@ -9,6 +9,7 @@[m [mimport '../../widgets/info_card.dart';[m
+ import '../../widgets/info_row.dart';[m
+ import '../../l10n/app_localizations.dart';[m
+ import 'package:url_launcher/url_launcher.dart';[m
+[32m+[m[32mimport '../paywall_screen.dart';[m
+ [m
+ class SubscriptionTab extends StatefulWidget {[m
+   const SubscriptionTab({super.key});[m
+[36m@@ -22,6 +23,7 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+   Map<String, dynamic>? _subscriptionData;[m
+   bool _isLoading = true;[m
+   String? _error;[m
+[32m+[m[32m  bool _noSubscription = false; // Signed in but never subscribed (API 404)[m
+ [m
+   // Tracks when we last successfully loaded, to avoid re-fetching on every[m
+   // rebuild triggered by locale/theme changes via didChangeDependencies.[m
+[36m@@ -62,6 +64,7 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+     setState(() {[m
+       _isLoading = true;[m
+       _error = null;[m
+[32m+[m[32m      _noSubscription = false;[m
+     });[m
+ [m
+     try {[m
+[36m@@ -91,6 +94,16 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+ [m
+       if (!mounted) return;[m
+ [m
+[32m+[m[32m      // 404 = no subscription yet: not an error, show the subscribe screen[m
+[32m+[m[32m      if (e.toString().contains('404')) {[m
+[32m+[m[32m        setState(() {[m
+[32m+[m[32m          _subscriptionData = null;[m
+[32m+[m[32m          _noSubscription = true;[m
+[32m+[m[32m          _isLoading = false;[m
+[32m+[m[32m        });[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+       final loc = AppLocalizations.of(context)!;[m
+       setState(() {[m
+         _error = loc.failedLoadSubscription;[m
+[36m@@ -134,8 +147,17 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+     }[m
+   }[m
+ [m
+[31m-  // ✅ Open renewal page[m
+[32m+[m[32m  // Android: Google Play subscription screen. Windows/macOS: website.[m
+   Future<void> _openRenewalPage() async {[m
+[32m+[m[32m    if (Platform.isAndroid) {[m
+[32m+[m[32m      final subscribed = await Navigator.push<bool>([m
+[32m+[m[32m        context,[m
+[32m+[m[32m        MaterialPageRoute(builder: (_) => const PaywallScreen()),[m
+[32m+[m[32m      );[m
+[32m+[m[32m      if (subscribed == true) await _loadSubscription(force: true);[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+     final url = Uri.parse('https://www.vulcainvpn.com/dashboard');[m
+     try {[m
+       if (await canLaunchUrl(url)) {[m
+[36m@@ -148,6 +170,36 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+     }[m
+   }[m
+ [m
+[32m+[m[32m  // Google Play's own subscription page (cancel, change payment method)[m
+[32m+[m[32m  Future<void> _openPlaySubscriptions() async {[m
+[32m+[m[32m    final url = Uri.parse([m
+[32m+[m[32m        'https://play.google.com/store/account/subscriptions?sku=vulcain_premium&package=com.vulcainvpn.app');[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      await launchUrl(url, mode: LaunchMode.externalApplication);[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      print('❌ Could not open Google Play subscriptions: $e');[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  Widget _primaryButton(String label, IconData icon, VoidCallback onPressed) {[m
+[32m+[m[32m    return SizedBox([m
+[32m+[m[32m      width: double.infinity,[m
+[32m+[m[32m      height: 50,[m
+[32m+[m[32m      child: ElevatedButton.icon([m
+[32m+[m[32m        onPressed: onPressed,[m
+[32m+[m[32m        icon: Icon(icon, color: Colors.white),[m
+[32m+[m[32m        label: Text([m
+[32m+[m[32m          label,[m
+[32m+[m[32m          style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        style: ElevatedButton.styleFrom([m
+[32m+[m[32m          backgroundColor: MyColors.myOrange,[m
+[32m+[m[32m          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),[m
+[32m+[m[32m        ),[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m
+   @override[m
+   Widget build(BuildContext context) {[m
+     super.build(context);[m
+[36m@@ -181,10 +233,41 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+       );[m
+     }[m
+ [m
+[32m+[m[32m    if (_noSubscription) {[m
+[32m+[m[32m      return RefreshIndicator([m
+[32m+[m[32m        onRefresh: () => _loadSubscription(force: true),[m
+[32m+[m[32m        color: MyColors.myOrange,[m
+[32m+[m[32m        child: ListView([m
+[32m+[m[32m          padding: const EdgeInsets.all(24),[m
+[32m+[m[32m          children: [[m
+[32m+[m[32m            const SizedBox(height: 40),[m
+[32m+[m[32m            const Icon(Icons.card_membership, size: 64, color: MyColors.myOrange),[m
+[32m+[m[32m            const SizedBox(height: 16),[m
+[32m+[m[32m            const Text([m
+[32m+[m[32m              'No active subscription',[m
+[32m+[m[32m              textAlign: TextAlign.center,[m
+[32m+[m[32m              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m            const SizedBox(height: 8),[m
+[32m+[m[32m            Text([m
+[32m+[m[32m              Platform.isAndroid[m
+[32m+[m[32m                  ? 'Subscribe to protect your connection on up to 3 devices.'[m
+[32m+[m[32m                  : 'Subscribe on vulcainvpn.com, or on the Android app, then pull to refresh.',[m
+[32m+[m[32m              textAlign: TextAlign.center,[m
+[32m+[m[32m              style: TextStyle(color: Colors.grey[600]),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m            const SizedBox(height: 24),[m
+[32m+[m[32m            _primaryButton('Subscribe', Icons.shopping_cart, _openRenewalPage),[m
+[32m+[m[32m          ],[m
+[32m+[m[32m        ),[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+     final sub = _subscriptionData?['subscription'];[m
+     if (sub == null) {[m
+       return Center(child: Text(loc.noSubscriptionData));[m
+     }[m
+[32m+[m[32m    final isGooglePlay = sub['source'] == 'google_play';[m
+ [m
+     final plan = sub['plan'] ?? {};[m
+     final server = sub['server'] ?? {};[m
+[36m@@ -308,6 +391,24 @@[m [mclass _SubscriptionTabState extends State<SubscriptionTab>[m
+             ],[m
+           ),[m
+ [m
+[32m+[m[32m          // Google Play subscriptions are managed (cancelled) in Google Play[m
+[32m+[m[32m          if (isGooglePlay && !isExpired) ...[[m
+[32m+[m[32m            const SizedBox(height: 24),[m
+[32m+[m[32m            SizedBox([m
+[32m+[m[32m              width: double.infinity,[m
+[32m+[m[32m              child: OutlinedButton.icon([m
+[32m+[m[32m                onPressed: _openPlaySubscriptions,[m
+[32m+[m[32m                icon: const Icon(Icons.open_in_new, color: MyColors.myOrange, size: 18),[m
+[32m+[m[32m                label: const Text('Manage in Google Play', style: TextStyle(color: MyColors.myOrange)),[m
+[32m+[m[32m                style: OutlinedButton.styleFrom([m
+[32m+[m[32m                  side: const BorderSide(color: MyColors.myOrange),[m
+[32m+[m[32m                  padding: const EdgeInsets.symmetric(vertical: 14),[m
+[32m+[m[32m                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m              ),[m
+[32m+[m[32m            ),[m
+[32m+[m[32m          ],[m
+[32m+[m
+           // ✅ Renew button if expired[m
+           if (isExpired) ...[[m
+             const SizedBox(height: 24),[m
+[1mdiff --git a/lib/screens/vpn_home_page.dart b/lib/screens/vpn_home_page.dart[m
+[1mindex 2b0ebe1..02ab07d 100644[m
+[1m--- a/lib/screens/vpn_home_page.dart[m
+[1m+++ b/lib/screens/vpn_home_page.dart[m
+[36m@@ -16,6 +16,7 @@[m [mimport '../services/vpn_service_ios.dart';[m
+ import 'tabs/home_tab.dart';[m
+ import 'tabs/subscription_tab.dart';[m
+ import 'tabs/settings_tab.dart';[m
+[32m+[m[32mimport 'paywall_screen.dart';[m
+ import 'package:url_launcher/url_launcher.dart';[m
+ import 'dart:math';[m
+ [m
+[36m@@ -611,21 +612,7 @@[m [mclass _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {[m
+           ElevatedButton.icon([m
+             onPressed: () async {[m
+               Navigator.pop(context);[m
+[31m-              final url = Uri.parse('https://www.vulcainvpn.com/dashboard');[m
+[31m-              try {[m
+[31m-                if (await canLaunchUrl(url)) {[m
+[31m-                  await launchUrl(url, mode: LaunchMode.externalApplication);[m
+[31m-                }[m
+[31m-              } catch (e) {[m
+[31m-                if (mounted) {[m
+[31m-                  ScaffoldMessenger.of(context).showSnackBar([m
+[31m-                    SnackBar([m
+[31m-                      content: Text('Please visit vulcainvpn.com to renew'),[m
+[31m-                      backgroundColor: MyColors.myOrange,[m
+[31m-                    ),[m
+[31m-                  );[m
+[31m-                }[m
+[31m-              }[m
+[32m+[m[32m              await _openRenewal();[m
+             },[m
+             icon: Icon(Icons.shopping_cart),[m
+             label: Text('Renew'),[m
+[36m@@ -840,21 +827,7 @@[m [mclass _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {[m
+           ElevatedButton.icon([m
+             onPressed: () async {[m
+               Navigator.pop(context);[m
+[31m-              final url = Uri.parse('https://www.vulcainvpn.com/dashboard');[m
+[31m-              try {[m
+[31m-                if (await canLaunchUrl(url)) {[m
+[31m-                  await launchUrl(url, mode: LaunchMode.externalApplication);[m
+[31m-                }[m
+[31m-              } catch (e) {[m
+[31m-                if (mounted) {[m
+[31m-                  ScaffoldMessenger.of(context).showSnackBar([m
+[31m-                    SnackBar([m
+[31m-                      content: Text('Please visit vulcainvpn.com to renew'),[m
+[31m-                      backgroundColor: MyColors.myOrange,[m
+[31m-                    ),[m
+[31m-                  );[m
+[31m-                }[m
+[31m-              }[m
+[32m+[m[32m              await _openRenewal();[m
+             },[m
+             icon: Icon(Icons.shopping_cart),[m
+             label: Text('Renew'),[m
+[36m@@ -1196,6 +1169,35 @@[m [mclass _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {[m
+     }[m
+   }[m
+ [m
+[32m+[m[32m  /// Android: Google Play subscription screen (Play Billing policy).[m
+[32m+[m[32m  /// Windows/macOS: the website, as before.[m
+[32m+[m[32m  Future<void> _openRenewal({String websiteUrl = 'https://www.vulcainvpn.com/dashboard'}) async {[m
+[32m+[m[32m    if (Platform.isAndroid) {[m
+[32m+[m[32m      await Navigator.push<bool>([m
+[32m+[m[32m        context,[m
+[32m+[m[32m        MaterialPageRoute(builder: (_) => const PaywallScreen()),[m
+[32m+[m[32m      );[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    final url = Uri.parse(websiteUrl);[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      if (await canLaunchUrl(url)) {[m
+[32m+[m[32m        await launchUrl(url, mode: LaunchMode.externalApplication);[m
+[32m+[m[32m      }[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      if (mounted) {[m
+[32m+[m[32m        ScaffoldMessenger.of(context).showSnackBar([m
+[32m+[m[32m          SnackBar([m
+[32m+[m[32m            content: Text('Please visit $websiteUrl to renew'),[m
+[32m+[m[32m            backgroundColor: MyColors.myOrange,[m
+[32m+[m[32m            duration: const Duration(seconds: 5),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m        );[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+   void _showSubscriptionExpiredDialog(AppLocalizations loc, String errorString) {[m
+     String renewalUrl = 'https://www.vulcainvpn.com/dashboard';[m
+     if (errorString.contains('renewal_url:')) {[m
+[36m@@ -1231,22 +1233,7 @@[m [mclass _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {[m
+           ElevatedButton.icon([m
+             onPressed: () async {[m
+               Navigator.pop(context);[m
+[31m-              final url = Uri.parse(renewalUrl);[m
+[31m-              try {[m
+[31m-                if (await canLaunchUrl(url)) {[m
+[31m-                  await launchUrl(url, mode: LaunchMode.externalApplication);[m
+[31m-                }[m
+[31m-              } catch (e) {[m
+[31m-                if (mounted) {[m
+[31m-                  ScaffoldMessenger.of(context).showSnackBar([m
+[31m-                    SnackBar([m
+[31m-                      content: Text('Please visit $renewalUrl to renew'),[m
+[31m-                      backgroundColor: MyColors.myOrange,[m
+[31m-                      duration: Duration(seconds: 5),[m
+[31m-                    ),[m
+[31m-                  );[m
+[31m-                }[m
+[31m-              }[m
+[32m+[m[32m              await _openRenewal(websiteUrl: renewalUrl);[m
+             },[m
+             icon: Icon(Icons.shopping_cart),[m
+             label: Text(loc.renewNow),[m
+[1mdiff --git a/lib/services/account_service.dart b/lib/services/account_service.dart[m
+[1mindex 5d5447c..aa14911 100644[m
+[1m--- a/lib/services/account_service.dart[m
+[1m+++ b/lib/services/account_service.dart[m
+[36m@@ -2,6 +2,8 @@[m [mimport 'dart:async';[m
+ import 'dart:convert';[m
+ import 'package:http/http.dart' as http;[m
+ import 'auth_service.dart';[m
+[32m+[m[32mimport 'language_service.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+ [m
+ /// Result of an account API call: [ok] plus a message to show the user.[m
+ class AccountResult {[m
+[36m@@ -26,11 +28,10 @@[m [mclass AccountService {[m
+     final sanitizedEmail = email.trim().toLowerCase();[m
+ [m
+     if (!isValidEmail(sanitizedEmail)) {[m
+[31m-      return const AccountResult(false, 'Please enter a valid email address.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.invalidEmail);[m
+     }[m
+     if (password.length < minPasswordLength) {[m
+[31m-      return const AccountResult([m
+[31m-          false, 'Password must be at least $minPasswordLength characters.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.passwordTooShort(minPasswordLength));[m
+     }[m
+ [m
+     return _post('signup', {[m
+[36m@@ -44,7 +45,7 @@[m [mclass AccountService {[m
+   static Future<AccountResult> requestPasswordReset(String email) async {[m
+     final sanitizedEmail = email.trim().toLowerCase();[m
+     if (!isValidEmail(sanitizedEmail)) {[m
+[31m-      return const AccountResult(false, 'Please enter a valid email address.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.invalidEmail);[m
+     }[m
+     return _post('password/reset', {'email': sanitizedEmail});[m
+   }[m
+[36m@@ -53,7 +54,7 @@[m [mclass AccountService {[m
+   static Future<AccountResult> resendConfirmation(String email) async {[m
+     final sanitizedEmail = email.trim().toLowerCase();[m
+     if (!isValidEmail(sanitizedEmail)) {[m
+[31m-      return const AccountResult(false, 'Please enter a valid email address.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.invalidEmail);[m
+     }[m
+     return _post('confirmation/resend', {'email': sanitizedEmail});[m
+   }[m
+[36m@@ -66,14 +67,14 @@[m [mclass AccountService {[m
+   static Future<AccountResult> confirmEmail(String token) async {[m
+     lastConfirmedEmail = null;[m
+     if (token.isEmpty) {[m
+[31m-      return const AccountResult(false, 'This confirmation link is invalid.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.invalidLink);[m
+     }[m
+ [m
+     try {[m
+       final response = await http[m
+           .post([m
+             Uri.parse('$_baseUrl/confirmation'),[m
+[31m-            headers: {'Content-Type': 'application/json'},[m
+[32m+[m[32m            headers: {'Content-Type': 'application/json', ...LanguageService.headers},[m
+             body: json.encode({'confirmation_token': token}),[m
+           )[m
+           .timeout(_timeout);[m
+[36m@@ -85,22 +86,21 @@[m [mclass AccountService {[m
+       return _toResult(response, successCodes: const [200]);[m
+     } catch (e) {[m
+       print('❌ Confirm email error: $e');[m
+[31m-      return const AccountResult([m
+[31m-          false, 'Connection error. Check your internet and open the link again.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.connectionErrorLink);[m
+     }[m
+   }[m
+ [m
+   /// DELETE /api/account. Requires the current password.[m
+   /// On success the caller must clear the local session (AuthService.logout).[m
+[31m-  static Future<AccountResult> deleteAccount(String password) async {[m
+[31m-    if (password.isEmpty) {[m
+[31m-      return const AccountResult(false, 'Please enter your password.');[m
+[32m+[m[32m  /// For accounts created with Google, pass [googleIdToken] instead of a password.[m
+[32m+[m[32m  static Future<AccountResult> deleteAccount(String password, {String? googleIdToken}) async {[m
+[32m+[m[32m    if (password.isEmpty && googleIdToken == null) {[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.enterPassword);[m
+     }[m
+ [m
+     final token = await AuthService.getValidAccessToken();[m
+     if (token == null) {[m
+[31m-      return const AccountResult([m
+[31m-          false, 'Your session has expired. Please sign in again, then retry.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.sessionExpired);[m
+     }[m
+ [m
+     try {[m
+[36m@@ -109,17 +109,19 @@[m [mclass AccountService {[m
+             Uri.parse('$_baseUrl/account'),[m
+             headers: {[m
+               'Content-Type': 'application/json',[m
+[32m+[m[32m              ...LanguageService.headers,[m
+               'Authorization': 'Bearer $token',[m
+             },[m
+[31m-            body: json.encode({'password': password}),[m
+[32m+[m[32m            body: json.encode(googleIdToken != null[m
+[32m+[m[32m                ? {'google_id_token': googleIdToken}[m
+[32m+[m[32m                : {'password': password}),[m
+           )[m
+           .timeout(_timeout);[m
+ [m
+       return _toResult(response, successCodes: const [200]);[m
+     } catch (e) {[m
+       print('❌ Delete account error: $e');[m
+[31m-      return const AccountResult([m
+[31m-          false, 'Connection error. Check your internet and try again.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.connectionError);[m
+     }[m
+   }[m
+ [m
+[36m@@ -132,7 +134,7 @@[m [mclass AccountService {[m
+       final response = await http[m
+           .post([m
+             Uri.parse('$_baseUrl/$endpoint'),[m
+[31m-            headers: {'Content-Type': 'application/json'},[m
+[32m+[m[32m            headers: {'Content-Type': 'application/json', ...LanguageService.headers},[m
+             body: json.encode(body),[m
+           )[m
+           .timeout(_timeout);[m
+[36m@@ -140,8 +142,7 @@[m [mclass AccountService {[m
+       return _toResult(response, successCodes: successCodes);[m
+     } catch (e) {[m
+       print('❌ $endpoint error: $e');[m
+[31m-      return const AccountResult([m
+[31m-          false, 'Connection error. Check your internet and try again.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.connectionError);[m
+     }[m
+   }[m
+ [m
+[36m@@ -153,15 +154,14 @@[m [mclass AccountService {[m
+     } catch (_) {}[m
+ [m
+     if (successCodes.contains(response.statusCode)) {[m
+[31m-      return AccountResult(true, (data['message'] as String?) ?? 'Done.');[m
+[32m+[m[32m      return AccountResult(true, (data['message'] as String?) ?? AuthStrings.current.done);[m
+     }[m
+ [m
+     if (response.statusCode == 429) {[m
+[31m-      return const AccountResult([m
+[31m-          false, 'Too many attempts. Please wait a moment and try again.');[m
+[32m+[m[32m      return AccountResult(false, AuthStrings.current.tooManyAttempts);[m
+     }[m
+ [m
+     return AccountResult([m
+[31m-        false, (data['error'] as String?) ?? 'Something went wrong. Please try again.');[m
+[32m+[m[32m        false, (data['error'] as String?) ?? AuthStrings.current.somethingWrong);[m
+   }[m
+ }[m
+[1mdiff --git a/lib/services/auth_service.dart b/lib/services/auth_service.dart[m
+[1mindex 25237f2..10e95dd 100644[m
+[1m--- a/lib/services/auth_service.dart[m
+[1m+++ b/lib/services/auth_service.dart[m
+[36m@@ -6,6 +6,9 @@[m [mimport 'dart:async';[m
+ import 'dart:math';[m
+ import 'package:device_info_plus/device_info_plus.dart';[m
+ import 'package:shared_preferences/shared_preferences.dart';[m
+[32m+[m[32mimport 'google_auth_service.dart';[m
+[32m+[m[32mimport 'language_service.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+ [m
+ class AuthService {[m
+   static const String _baseUrl = 'https://api.vulcainvpn.com/api';[m
+[36m@@ -224,6 +227,10 @@[m [mclass AuthService {[m
+   /// so the login screen can offer "Resend confirmation email".[m
+   static bool lastLoginNeedsConfirmation = false;[m
+ [m
+[32m+[m[32m  /// Set when "Continue with Google" found no Vulcain account for this[m
+[32m+[m[32m  /// Google account: the login screen asks before creating one.[m
+[32m+[m[32m  static String? lastGoogleNoAccountEmail;[m
+[32m+[m
+   static Future<bool> login(String email, String password) async {[m
+     lastLoginError = null;[m
+     lastLoginNeedsConfirmation = false;[m
+[36m@@ -231,7 +238,7 @@[m [mclass AuthService {[m
+     // Validate inputs before sending[m
+     if (email.isEmpty || password.isEmpty) {[m
+       print('❌ Empty credentials');[m
+[31m-      lastLoginError = 'Please enter your email and password.';[m
+[32m+[m[32m      lastLoginError = AuthStrings.current.enterEmailAndPassword;[m
+       return false;[m
+     }[m
+ [m
+[36m@@ -239,14 +246,14 @@[m [mclass AuthService {[m
+     final emailRegex = RegExp(r'^[\w\-\.+]+@([\w\-]+\.)+[\w\-]{2,}$');[m
+     if (!emailRegex.hasMatch(email.trim())) {[m
+       print('❌ Invalid email format');[m
+[31m-      lastLoginError = 'Please enter a valid email address.';[m
+[32m+[m[32m      lastLoginError = AuthStrings.current.invalidEmail;[m
+       return false;[m
+     }[m
+ [m
+     // Password length check[m
+     if (password.length < 6) {[m
+       print('❌ Password too short (minimum 6 characters)');[m
+[31m-      lastLoginError = 'Invalid email or password.';[m
+[32m+[m[32m      lastLoginError = AuthStrings.current.invalidCredentials;[m
+       return false;[m
+     }[m
+ [m
+[36m@@ -259,7 +266,7 @@[m [mclass AuthService {[m
+ [m
+       final response = await http.post([m
+         Uri.parse('$_baseUrl/login'),[m
+[31m-        headers: {'Content-Type': 'application/json'},[m
+[32m+[m[32m        headers: {'Content-Type': 'application/json', ...LanguageService.headers},[m
+         body: json.encode({[m
+           'email': sanitizedEmail,[m
+           'password': password,[m
+[36m@@ -276,18 +283,72 @@[m [mclass AuthService {[m
+         if (response.statusCode == 403 &&[m
+             (serverError ?? '').toLowerCase().contains('confirm')) {[m
+           lastLoginNeedsConfirmation = true;[m
+[31m-          lastLoginError = 'Please confirm your email first. Check your inbox (and spam folder).';[m
+[32m+[m[32m          lastLoginError = AuthStrings.current.confirmEmailFirst;[m
+         } else if (response.statusCode == 429) {[m
+[31m-          lastLoginError = 'Too many attempts. Please wait a moment and try again.';[m
+[32m+[m[32m          lastLoginError = AuthStrings.current.tooManyAttempts;[m
+[32m+[m[32m        } else if ((serverError ?? '').toLowerCase().contains('locked')) {[m
+[32m+[m[32m          lastLoginError = AuthStrings.current.accountLocked;[m
+         } else {[m
+[31m-          lastLoginError = serverError ?? 'Invalid email or password.';[m
+[32m+[m[32m          lastLoginError = AuthStrings.current.invalidCredentials;[m
+         }[m
+         return false;[m
+       }[m
+ [m
+[31m-      final data = json.decode(response.body);[m
+[31m-[m
+       print('✅ Login successful');[m
+[32m+[m[32m      return await _completeLogin(json.decode(response.body));[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      print('❌ Login error: $e');[m
+[32m+[m[32m      lastLoginError = AuthStrings.current.connectionError;[m
+[32m+[m[32m      return false;[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  /// "Continue with Google" (Android). [idToken] comes from google_sign_in;[m
+[32m+[m[32m  /// the backend verifies it and returns the same tokens as /login.[m
+[32m+[m[32m  ///[m
+[32m+[m[32m  /// With [create] false, a Google account that has no Vulcain account yet is[m
+[32m+[m[32m  /// not created: this returns false with [lastGoogleNoAccountEmail] set, and[m
+[32m+[m[32m  /// the caller asks the user, then calls again with create: true.[m
+[32m+[m[32m  static Future<bool> loginWithGoogle(String idToken, {bool create = false}) async {[m
+[32m+[m[32m    lastLoginError = null;[m
+[32m+[m[32m    lastLoginNeedsConfirmation = false;[m
+[32m+[m[32m    lastGoogleNoAccountEmail = null;[m
+[32m+[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      final response = await http.post([m
+[32m+[m[32m        Uri.parse('$_baseUrl/auth/google'),[m
+[32m+[m[32m        headers: {'Content-Type': 'application/json', ...LanguageService.headers},[m
+[32m+[m[32m        body: json.encode({'id_token': idToken, 'create': create}),[m
+[32m+[m[32m      ).timeout(_authTimeout);[m
+[32m+[m
+[32m+[m[32m      if (response.statusCode != 200) {[m
+[32m+[m[32m        Map<String, dynamic> body = {};[m
+[32m+[m[32m        try {[m
+[32m+[m[32m          body = json.decode(response.body) as Map<String, dynamic>;[m
+[32m+[m[32m        } catch (_) {}[m
+[32m+[m[32m        final serverError = body['error'] as String?;[m
+[32m+[m
+[32m+[m[32m        if (response.statusCode == 404 && serverError == 'no_account') {[m
+[32m+[m[32m          lastGoogleNoAccountEmail = (body['email'] as String?) ?? '';[m
+[32m+[m[32m          return false;[m
+[32m+[m[32m        }[m
+[32m+[m[32m        lastLoginError = response.statusCode == 429[m
+[32m+[m[32m            ? AuthStrings.current.tooManyAttempts[m
+[32m+[m[32m            : (serverError ?? AuthStrings.current.googleFailed);[m
+[32m+[m[32m        return false;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      print('✅ Google login successful');[m
+[32m+[m[32m      return await _completeLogin(json.decode(response.body));[m
+[32m+[m[32m    } catch (e) {[m
+[32m+[m[32m      print('❌ Google login error: $e');[m
+[32m+[m[32m      lastLoginError = AuthStrings.current.connectionError;[m
+[32m+[m[32m      return false;[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  /// Stores the tokens from /login or /auth/google and registers this device.[m
+[32m+[m[32m  static Future<bool> _completeLogin(Map<String, dynamic> data) async {[m
+ [m
+       // ✅ UPDATED: Use Windows-safe token storage[m
+       await _writeToken(_accessTokenKey, data['access_token']);[m
+[36m@@ -323,6 +384,7 @@[m [mclass AuthService {[m
+         Uri.parse('$_baseUrl/devices/register'),[m
+         headers: {[m
+           'Content-Type': 'application/json',[m
+[32m+[m[32m          ...LanguageService.headers,[m
+           'Authorization': 'Bearer ${data['access_token']}',[m
+         },[m
+         body: json.encode({[m
+[36m@@ -338,7 +400,6 @@[m [mclass AuthService {[m
+         final registerData = json.decode(registerResponse.body);[m
+ [m
+         print('🔑 Registration successful!');[m
+[31m-        print('   api_key: ${registerData['api_key']}');[m
+         print('   returned device_id: ${registerData['device_id']}');[m
+ [m
+         await saveApiKey(registerData['api_key']);[m
+[36m@@ -360,11 +421,6 @@[m [mclass AuthService {[m
+         // User will see "device not registered" when trying to connect[m
+         return true;[m
+       }[m
+[31m-    } catch (e) {[m
+[31m-      print('❌ Login error: $e');[m
+[31m-      lastLoginError = 'Connection error. Check your internet and try again.';[m
+[31m-      return false;[m
+[31m-    }[m
+   }[m
+ [m
+   // ✅ UPDATED: Refresh the access token with better diagnostics[m
+[36m@@ -404,7 +460,7 @@[m [mclass AuthService {[m
+ [m
+           final response = await http.post([m
+             Uri.parse('$_baseUrl/refresh'),[m
+[31m-            headers: {'Content-Type': 'application/json'},[m
+[32m+[m[32m            headers: {'Content-Type': 'application/json', ...LanguageService.headers},[m
+             body: json.encode({'refresh_token': refreshToken}),[m
+           ).timeout(_authTimeout);[m
+ [m
+[36m@@ -580,6 +636,9 @@[m [mclass AuthService {[m
+       print('Logout API call failed: $e');[m
+     }[m
+ [m
+[32m+[m[32m    // Forget the Google account choice so the picker shows next time[m
+[32m+[m[32m    await GoogleAuthService.signOut();[m
+[32m+[m
+     // Clear secure storage[m
+     await _storage.deleteAll();[m
+ [m
+[36m@@ -626,11 +685,7 @@[m [mclass AuthService {[m
+       // Session flag is set but tokens are gone — keystore was wiped.[m
+       // Record this so the login screen can show a clear explanation.[m
+       print('⚠️ Session flag set but tokens missing — keystore was reset');[m
+[31m-      await _markSessionReset([m
+[31m-        'Your session was reset automatically (security key changed). '[m
+[31m-        'This can happen after an OS update or device restore. '[m
+[31m-        'Please log in again.',[m
+[31m-      );[m
+[32m+[m[32m      await _markSessionReset(AuthStrings.current.sessionReset);[m
+     } else {[m
+       print('⚠️ User not logged in — no previous session recorded');[m
+       if (Platform.isWindows) {[m
+[1mdiff --git a/lib/widgets/auth_ui.dart b/lib/widgets/auth_ui.dart[m
+[1mindex befd338..444e26b 100644[m
+[1m--- a/lib/widgets/auth_ui.dart[m
+[1m+++ b/lib/widgets/auth_ui.dart[m
+[36m@@ -1,5 +1,7 @@[m
+ import 'package:flutter/material.dart';[m
+ import '../colors.dart';[m
+[32m+[m[32mimport '../l10n/auth_strings.dart';[m
+[32m+[m[32mimport '../main.dart';[m
+ [m
+ /// Shared look for the account screens (login, sign up, forgot password,[m
+ /// delete account): brown background, white text, orange accents.[m
+[36m@@ -32,11 +34,12 @@[m [mclass AuthUi {[m
+     );[m
+   }[m
+ [m
+[31m-  static AppBar appBar(BuildContext context, {VoidCallback? onBack}) {[m
+[32m+[m[32m  static AppBar appBar(BuildContext context, {VoidCallback? onBack, List<Widget>? actions}) {[m
+     return AppBar([m
+       backgroundColor: MyColors.myBrown,[m
+       elevation: 0,[m
+       iconTheme: const IconThemeData(color: Colors.white),[m
+[32m+[m[32m      actions: actions,[m
+       leading: IconButton([m
+         icon: const Icon(Icons.arrow_back),[m
+         onPressed: onBack ?? () => Navigator.pop(context),[m
+[36m@@ -115,3 +118,125 @@[m [mclass AuthButton extends StatelessWidget {[m
+     );[m
+   }[m
+ }[m
+[32m+[m
+[32m+[m[32m/// White "Continue with Google" button (Android sign in / sign up).[m
+[32m+[m[32mclass GoogleButton extends StatelessWidget {[m
+[32m+[m[32m  final VoidCallback? onPressed;[m
+[32m+[m[32m  final bool loading;[m
+[32m+[m[32m  final String? label;[m
+[32m+[m
+[32m+[m[32m  const GoogleButton({[m
+[32m+[m[32m    super.key,[m
+[32m+[m[32m    required this.onPressed,[m
+[32m+[m[32m    this.loading = false,[m
+[32m+[m[32m    this.label,[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  @override[m
+[32m+[m[32m  Widget build(BuildContext context) {[m
+[32m+[m[32m    return SizedBox([m
+[32m+[m[32m      width: double.infinity,[m
+[32m+[m[32m      height: 50,[m
+[32m+[m[32m      child: ElevatedButton([m
+[32m+[m[32m        onPressed: loading ? null : onPressed,[m
+[32m+[m[32m        style: ElevatedButton.styleFrom([m
+[32m+[m[32m          backgroundColor: Colors.white,[m
+[32m+[m[32m          foregroundColor: const Color(0xFF3C4043),[m
+[32m+[m[32m          disabledBackgroundColor: Colors.white70,[m
+[32m+[m[32m          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        child: loading[m
+[32m+[m[32m            ? const SizedBox([m
+[32m+[m[32m                width: 20,[m
+[32m+[m[32m                height: 20,[m
+[32m+[m[32m                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF3C4043)),[m
+[32m+[m[32m              )[m
+[32m+[m[32m            : Row([m
+[32m+[m[32m                mainAxisAlignment: MainAxisAlignment.center,[m
+[32m+[m[32m                children: [[m
+[32m+[m[32m                  const Text([m
+[32m+[m[32m                    'G',[m
+[32m+[m[32m                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF4285F4)),[m
+[32m+[m[32m                  ),[m
+[32m+[m[32m                  const SizedBox(width: 12),[m
+[32m+[m[32m                  Text(label ?? AuthStrings.of(context).continueWithGoogle,[m
+[32m+[m[32m                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),[m
+[32m+[m[32m                ],[m
+[32m+[m[32m              ),[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/// "or" separator between Google and email/password[m
+[32m+[m[32mclass OrDivider extends StatelessWidget {[m
+[32m+[m[32m  const OrDivider({super.key});[m
+[32m+[m
+[32m+[m[32m  @override[m
+[32m+[m[32m  Widget build(BuildContext context) {[m
+[32m+[m[32m    return Padding([m
+[32m+[m[32m      padding: const EdgeInsets.symmetric(vertical: 16),[m
+[32m+[m[32m      child: Row([m
+[32m+[m[32m        children: [[m
+[32m+[m[32m          const Expanded(child: Divider(color: Colors.white24)),[m
+[32m+[m[32m          Padding([m
+[32m+[m[32m            padding: const EdgeInsets.symmetric(horizontal: 12),[m
+[32m+[m[32m            child: Text(AuthStrings.of(context).or,[m
+[32m+[m[32m                style: const TextStyle(color: Colors.white38, fontSize: 13)),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m          const Expanded(child: Divider(color: Colors.white24)),[m
+[32m+[m[32m        ],[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m/// "EN / FR" language switch for the account screens. The choice is saved by[m
+[32m+[m[32m/// AuthGate (LanguageService) and shared with Settings > Language.[m
+[32m+[m[32mclass LanguagePicker extends StatelessWidget {[m
+[32m+[m[32m  const LanguagePicker({super.key});[m
+[32m+[m
+[32m+[m[32m  static const Map<String, String> _names = {'en': '🇬🇧  English', 'fr': '🇫🇷  Français'};[m
+[32m+[m
+[32m+[m[32m  @override[m
+[32m+[m[32m  Widget build(BuildContext context) {[m
+[32m+[m[32m    final code = Localizations.localeOf(context).languageCode == 'fr' ? 'fr' : 'en';[m
+[32m+[m[32m    return PopupMenuButton<String>([m
+[32m+[m[32m      tooltip: AuthStrings.of(context).languageLabel,[m
+[32m+[m[32m      color: const Color(0xFF4A3530),[m
+[32m+[m[32m      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),[m
+[32m+[m[32m      onSelected: (value) {[m
+[32m+[m[32m        if (value != code) MyApp.setLocale(context, Locale(value));[m
+[32m+[m[32m      },[m
+[32m+[m[32m      itemBuilder: (_) => [[m
+[32m+[m[32m        for (final entry in _names.entries)[m
+[32m+[m[32m          PopupMenuItem<String>([m
+[32m+[m[32m            value: entry.key,[m
+[32m+[m[32m            child: Row([m
+[32m+[m[32m              children: [[m
+[32m+[m[32m                Expanded(child: Text(entry.value, style: const TextStyle(color: Colors.white))),[m
+[32m+[m[32m                if (entry.key == code) const Icon(Icons.check, size: 18, color: MyColors.myOrange),[m
+[32m+[m[32m              ],[m
+[32m+[m[32m            ),[m
+[32m+[m[32m          ),[m
+[32m+[m[32m      ],[m
+[32m+[m[32m      child: Container([m
+[32m+[m[32m        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),[m
+[32m+[m[32m        decoration: BoxDecoration([m
+[32m+[m[32m          border: Border.all(color: Colors.white24),[m
+[32m+[m[32m          borderRadius: BorderRadius.circular(20),[m
+[32m+[m[32m        ),[m
+[32m+[m[32m        child: Row([m
+[32m+[m[32m          mainAxisSize: MainAxisSize.min,[m
+[32m+[m[32m          children: [[m
+[32m+[m[32m            const Icon(Icons.language, size: 18, color: Colors.white70),[m
+[32m+[m[32m            const SizedBox(width: 6),[m
+[32m+[m[32m            Text(code.toUpperCase(),[m
+[32m+[m[32m                style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),[m
+[32m+[m[32m            const Icon(Icons.arrow_drop_down, size: 18, color: Colors.white54),[m
+[32m+[m[32m          ],[m
+[32m+[m[32m        ),[m
+[32m+[m[32m      ),[m
+[32m+[m[32m    );[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[1mdiff --git a/macos/Flutter/GeneratedPluginRegistrant.swift b/macos/Flutter/GeneratedPluginRegistrant.swift[m
+[1mindex fb14699..8fa293d 100644[m
+[1m--- a/macos/Flutter/GeneratedPluginRegistrant.swift[m
+[1m+++ b/macos/Flutter/GeneratedPluginRegistrant.swift[m
+[36m@@ -10,6 +10,7 @@[m [mimport app_settings[m
+ import device_info_plus[m
+ import flutter_local_notifications[m
+ import flutter_secure_storage_macos[m
+[32m+[m[32mimport google_sign_in_ios[m
+ import in_app_purchase_storekit[m
+ import screen_retriever[m
+ import shared_preferences_foundation[m
+[36m@@ -23,6 +24,7 @@[m [mfunc RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {[m
+   DeviceInfoPlusMacosPlugin.register(with: registry.registrar(forPlugin: "DeviceInfoPlusMacosPlugin"))[m
+   FlutterLocalNotificationsPlugin.register(with: registry.registrar(forPlugin: "FlutterLocalNotificationsPlugin"))[m
+   FlutterSecureStoragePlugin.register(with: registry.registrar(forPlugin: "FlutterSecureStoragePlugin"))[m
+[32m+[m[32m  GoogleSignInPlugin.register(with: registry.registrar(forPlugin: "GoogleSignInPlugin"))[m
+   InAppPurchasePlugin.register(with: registry.registrar(forPlugin: "InAppPurchasePlugin"))[m
+   ScreenRetrieverPlugin.register(with: registry.registrar(forPlugin: "ScreenRetrieverPlugin"))[m
+   SharedPreferencesPlugin.register(with: registry.registrar(forPlugin: "SharedPreferencesPlugin"))[m
+[1mdiff --git a/pubspec.lock b/pubspec.lock[m
+[1mindex 029df27..158256b 100644[m
+[1m--- a/pubspec.lock[m
+[1m+++ b/pubspec.lock[m
+[36m@@ -341,6 +341,54 @@[m [mpackages:[m
+       url: "https://pub.dev"[m
+     source: hosted[m
+     version: "2.1.3"[m
+[32m+[m[32m  google_identity_services_web:[m
+[32m+[m[32m    dependency: transitive[m
+[32m+[m[32m    description:[m
+[32m+[m[32m      name: google_identity_services_web[m
+[32m+[m[32m      sha256: "5d187c46dc59e02646e10fe82665fc3884a9b71bc1c90c2b8b749316d33ee454"[m
+[32m+[m[32m      url: "https://pub.dev"[m
+[32m+[m[32m    source: hosted[m
+[32m+[m[32m    version: "0.3.3+1"[m
+[32m+[m[32m  google_sign_in:[m
+[32m+[m[32m    dependency: "direct main"[m
+[32m+[m[32m    description:[m
+[32m+[m[32m      name: google_sign_in[m
+[32m+[m[32m      sha256: "521031b65853b4409b8213c0387d57edaad7e2a949ce6dea0d8b2afc9cb29763"[m
+[32m+[m[32m      url: "https://pub.dev"[m
+[32m+[m[32m    source: hosted[m
+[32m+[m[32m    version: "7.2.0"[m
+[32m+[m[32m  google_sign_in_android:[m
+[32m+[m[32m    dependency: transitive[m
+[32m+[m[32m    description:[m
+[32m+[m[32m      name: google_sign_in_android[m
+[32m+[m[32m      sha256: "312e74b3e839896ff30ed98310da4cc24dbfa19ad060b1612f7718d5afa66480"[m
+[32m+[m[32m      url: "https://pub.dev"[m
+[32m+[m[32m    source: hosted[m
+[32m+[m[32m    version: "7.2.18"[m
+[32m+[m[32m  google_sign_in_ios:[m
+[32m+[m[32m    dependency: transitive[m
+[32m+[m[32m    description:[m
+[32m+[m[32m      name: google_sign_in_ios[m
+[32m+[m[32m      sha256: b8efb315c778390f1b1c4fc14d74c42784dd9ee0c1d0c26b13f30b46826319ad[m
+[32m+[m[32m      url: "https://pub.dev"[m
+[32m+[m[32m    source: hosted[m
+[32m+[m[32m    version: "6.3.8"[m
+[32m+[m[32m  google_sign_in_platform_interface:[m
+[32m+[m[32m    dependency: transitive[m
+[32m+[m[32m    description:[m
+[32m+[m[32m      name: google_sign_in_platform_interface[m
+[32m+[m[32m      sha256: "7f59208c42b415a3cca203571128d6f84f885fead2d5b53eb65a9e27f2965bb5"[m
+[32m+[m[32m      url: "https://pub.dev"[m
+[32m+[m[32m    source: hosted[m
+[32m+[m[32m    version: "3.1.0"[m
+[32m+[m[32m  google_sign_in_web:[m
+[32m+[m[32m    dependency: transitive[m
+[32m+[m[32m    description:[m
+[32m+[m[32m      name: google_sign_in_web[m
+[32m+[m[32m      sha256: d473003eeca892f96a01a64fc803378be765071cb0c265ee872c7f8683245d14[m
+[32m+[m[32m      url: "https://pub.dev"[m
+[32m+[m[32m    source: hosted[m
+[32m+[m[32m    version: "1.1.3"[m
+   hooks:[m
+     dependency: transitive[m
+     description:[m
+[36m@@ -390,7 +438,7 @@[m [mpackages:[m
+     source: hosted[m
+     version: "3.3.1"[m
+   in_app_purchase_android:[m
+[31m-    dependency: transitive[m
+[32m+[m[32m    dependency: "direct main"[m
+     description:[m
+       name: in_app_purchase_android[m
+       sha256: b76ab601573f8a848e72d015496257235066ba3479bef6300482239f417e0d72[m
+[1mdiff --git a/pubspec.yaml b/pubspec.yaml[m
+[1mindex 5e60af0..07527d6 100644[m
+[1m--- a/pubspec.yaml[m
+[1m+++ b/pubspec.yaml[m
+[36m@@ -16,7 +16,7 @@[m [mpublish_to: 'none' # Remove this line if you wish to publish to pub.dev[m
+ # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html[m
+ # In Windows, build-name is used as the major, minor, and patch parts[m
+ # of the product and file versions while build-number is used as the build suffix.[m
+[31m-version: 1.0.25+25[m
+[32m+[m[32mversion: 1.0.29+29[m
+ [m
+ environment:[m
+   sdk: ^3.10.4[m
+[36m@@ -32,6 +32,7 @@[m [mdependencies:[m
+     sdk: flutter[m
+   flutter_svg: ^2.0.0[m
+   url_launcher: ^6.1.11[m
+[32m+[m[32m  share_plus: ^11.0.0  # Settings > Share the app[m
+   app_settings: ^7.0.0[m
+   shared_preferences: ^2.5.4[m
+   flutter_localizations:  # For multi-language[m
+[36m@@ -49,6 +50,8 @@[m [mdependencies:[m
+   flutter_local_notifications: ^17.0.0[m
+   win_toast: ^0.1.1  # Windows toast notifications[m
+   in_app_purchase: ^3.2.0  # Google Play Billing (Android only)[m
+[32m+[m[32m  in_app_purchase_android: ^0.5.0  # Play Billing types (base plans, account id)[m
+[32m+[m[32m  google_sign_in: ^7.1.0  # Continue with Google (Android only)[m
+   app_links: ^7.2.2[m
+ [m
+ [m
