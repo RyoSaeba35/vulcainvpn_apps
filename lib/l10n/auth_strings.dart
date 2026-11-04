@@ -233,13 +233,13 @@ class AuthStrings {
   String get supportThanks => _t(
       'Vulcain VPN is made by an independent developer. A review or a share really helps!',
       'Vulcain VPN est développé par un développeur indépendant. Un avis ou un partage aide vraiment !');
+  // Website link first: apps like Facebook keep only the first link and drop
+  // the text, and the site has a proper preview (logo, title, description).
   String shareMessage(String playUrl, String siteUrl) => _t(
-      'I use Vulcain VPN, a fast and private VPN.\n'
-          'Android: $playUrl\n'
-          'Windows and more: $siteUrl',
-      "J'utilise Vulcain VPN, un VPN rapide et respectueux de la vie privée.\n"
-          'Android : $playUrl\n'
-          'Windows et plus : $siteUrl');
+      'I use Vulcain VPN, a fast and private VPN: $siteUrl\n\n'
+          'Android: $playUrl',
+      "J'utilise Vulcain VPN, un VPN rapide et respectueux de la vie privée : $siteUrl\n\n"
+          'Android : $playUrl');
   String get shareSubject => _t('Try Vulcain VPN', 'Essaie Vulcain VPN');
   String get couldNotOpenStore =>
       _t('Could not open Google Play.', "Impossible d'ouvrir Google Play.");
