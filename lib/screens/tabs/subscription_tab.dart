@@ -33,14 +33,10 @@ class _SubscriptionTabState extends State<SubscriptionTab>
   @override
   bool get wantKeepAlive => false; // Tab rebuilds when revisited — intentional
 
-  @override
-  void initState() {
-    super.initState();
-    // ✅ Do NOT call _loadSubscription() here.
-    // Flutter always calls didChangeDependencies() immediately after initState
-    // on first build, which handles the initial load. Calling it here too
-    // caused two simultaneous API requests every time the tab opened.
-  }
+  // ✅ No initState: do NOT call _loadSubscription() there.
+  // Flutter always calls didChangeDependencies() immediately after initState
+  // on first build, which handles the initial load. Calling it there too
+  // caused two simultaneous API requests every time the tab opened.
 
   @override
   void didChangeDependencies() {
@@ -270,7 +266,6 @@ class _SubscriptionTabState extends State<SubscriptionTab>
     final isGooglePlay = sub['source'] == 'google_play';
 
     final plan = sub['plan'] ?? {};
-    final server = sub['server'] ?? {};
     final devices = sub['devices'] ?? {};
     final expiresAt = DateTime.tryParse(sub['expires_at'] ?? '');
     final daysRemaining =

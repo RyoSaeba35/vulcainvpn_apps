@@ -165,7 +165,7 @@ class _SignupScreenState extends State<SignupScreen> {
         borderSide: const BorderSide(color: MyColors.myOrange),
       ),
       filled: true,
-      fillColor: Colors.white.withOpacity(0.05),
+      fillColor: Colors.white.withValues(alpha: 0.05),
     );
   }
 

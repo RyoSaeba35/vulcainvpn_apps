@@ -328,6 +328,7 @@ class _SettingsTabState extends State<SettingsTab> {
       onTap: () async {
         setState(() => _connectionMode = mode);
         await SettingsService.setConnectionMode(mode);
+        if (!mounted) return;
         Navigator.pop(context);
 
         if (mounted) {
@@ -775,14 +776,14 @@ class _SettingsTabState extends State<SettingsTab> {
                 ),
               ),
               value: _autoReconnectEnabled,
-              activeColor: MyColors.myOrange,
+              activeThumbColor: MyColors.myOrange,
               onChanged: _isLoadingSettings
                   ? null
                   : (bool value) async {
                       setState(() => _autoReconnectEnabled = value);
                       await SettingsService.setAutoReconnect(value);
 
-                      if (mounted) {
+                      if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Row(

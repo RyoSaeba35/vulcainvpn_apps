@@ -10,6 +10,7 @@ class ApiService {
 
   // ✅ FIX #9: Network timeout configuration
   static const Duration _requestTimeout = Duration(seconds: 15);  // API requests
+  // ignore: unused_field
   static const Duration _connectionTimeout = Duration(seconds: 10);  // Initial connection
 
   // ✅ FIX #11: API rate limiting protection
@@ -20,6 +21,8 @@ class ApiService {
   static const String _userAgent = 'VulcainVPN/1.0';
 
   // ⭐ Get exe directory (same as vpn_service_windows.dart)
+  // Used by the disabled file logging below
+  // ignore: unused_element
   static String get _exeDir => File(Platform.resolvedExecutable).parent.path;
 
   // ✅ FIX #4 PREVIEW: Simplified logging (file logging disabled to fix Windows issue)

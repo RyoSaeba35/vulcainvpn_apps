@@ -38,7 +38,6 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
   Timer? _displayTimer;
 
   Timer? _ipCheckTimer;
-  bool _isProtected = false;
   String _displayRealIp = '';
   String _displayIp = '';
   String _displayCountry = '';
@@ -278,6 +277,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         });
         _startDisplayTimer();
 
+        if (!mounted) return;
         ScaffoldMessenger.of(context).clearSnackBars();
 
         if (mounted) {
@@ -340,6 +340,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     }
 
     print('🔴 Auto-reconnect FAILED after $_maxReconnectAttempts attempts');
+    if (!mounted) return;
     setState(() => _isAutoReconnecting = false);
     ScaffoldMessenger.of(context).clearSnackBars();
 
@@ -426,9 +427,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -585,9 +586,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -711,9 +712,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -800,9 +801,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.withOpacity(0.3)),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -896,9 +897,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       setState(() {
         if (isConnected) {
           _connectionState = 'connected';
-          if (_vpnStartTime == null) {
-            _vpnStartTime = DateTime.now();
-          }
+          _vpnStartTime ??= DateTime.now();
           _startDisplayTimer();
         } else {
           _connectionState = 'disconnected';
@@ -991,14 +990,12 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
       _displayCountry = 'Protected';
       _displayCountryCode = '';
       _isAnimatingIp = false;
-      _isProtected = true;
     });
   }
 
   Future<void> _showDisconnectedIp() async {
     // When disconnected, fetch real IP to show user their unprotected state
     setState(() {
-      _isProtected = false;
       _isAnimatingIp = true;
       _displayIp = 'Loading...';
       _displayCountry = '';
@@ -1287,9 +1284,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.1),
+                color: Colors.blue.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -1311,9 +1308,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green.withOpacity(0.1),
+                color: Colors.green.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.withOpacity(0.3)),
+                border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
@@ -1452,9 +1449,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
             Container(
               padding: EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
+                color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [

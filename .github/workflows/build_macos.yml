@@ -2,8 +2,14 @@ name: Build macOS
 
 on:
   push:
-    branches: [ main ]
+    tags:
+      - 'v*'       # both platforms
+      - 'mac-v*'   # macOS only
   workflow_dispatch:
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-macos:

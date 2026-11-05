@@ -362,7 +362,7 @@ class WindowsVpnService extends VpnService {
       if (!_wasNetworkLost) {
         _wasNetworkLost = true;
         _networkLostTimestamp = DateTime.now();
-        await _log('   📍 Marking network as lost at ${_networkLostTimestamp}');
+        await _log('   📍 Marking network as lost at $_networkLostTimestamp');
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('last_seen_at', _networkLostTimestamp!.millisecondsSinceEpoch);
@@ -471,7 +471,7 @@ class WindowsVpnService extends VpnService {
         await _restartVpnWithCachedConfig();
       } else {
         final minutes = disconnectedSeconds ~/ 60;
-        await _log('   ⚠️ Long disconnection (${minutes} min) - sending death event for manual reconnect');
+        await _log('   ⚠️ Long disconnection ($minutes min) - sending death event for manual reconnect');
 
         _isNormalStop = true;
 

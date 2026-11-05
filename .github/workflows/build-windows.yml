@@ -3,9 +3,14 @@ name: Build Windows
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*'       # both platforms
+      - 'win-v*'   # Windows only
   workflow_dispatch:
-    
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -49,7 +54,15 @@ jobs:
       - name: Build Installer
         run: iscc installer.iss
 
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulcain_vpn_windows
+          path: installer-output/VulcainVPN-Setup-*.exe
+          retention-days: 7
+
       - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           files: installer-output/VulcainVPN-Setup-*.exe

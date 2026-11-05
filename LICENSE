@@ -1,0 +1,26 @@
+Copyright (c) 2026 Pierre Libran (Vulcain VPN). All rights reserved.
+
+This software, including its source code, binaries, assets, documentation
+and design (the "Software"), is proprietary and confidential.
+
+No license is granted. Without prior written permission from the copyright
+holder, you may not:
+
+  - copy, reproduce or redistribute the Software, in whole or in part;
+  - modify, adapt, translate or create derivative works from it;
+  - sell, sublicense, rent, lease or otherwise commercialize it;
+  - reverse engineer, decompile or disassemble it, except where such
+    restriction is prohibited by applicable law;
+  - use the Vulcain VPN name, logo or branding.
+
+Viewing this repository (if made accessible) does not grant any right to
+use the Software.
+
+Third-party components (such as sing-box and Flutter packages) remain under
+their own licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+This license is governed by French law.
+
+Contact: pierre.webdev@gmail.com

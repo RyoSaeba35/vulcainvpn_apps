@@ -315,7 +315,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                     'assets/icons/icon.png',
                     width: 80,
                     height: 80,
-                    errorBuilder: (_, __, ___) => const Icon(
+                    errorBuilder: (_, _, _) => const Icon(
                       Icons.vpn_lock,
                       size: 80,
                       color: MyColors.myOrange,
@@ -344,7 +344,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                       margin: const EdgeInsets.only(bottom: 20),
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.15),
+                        color: Colors.orange.withValues(alpha: 0.15),
                         border: Border.all(color: Colors.orange, width: 1),
                         borderRadius: BorderRadius.circular(10),
                       ),
@@ -398,7 +398,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                         borderSide: const BorderSide(color: MyColors.myOrange),
                       ),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
+                      fillColor: Colors.white.withValues(alpha: 0.05),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -436,7 +436,7 @@ class _LoginScreenState extends State<LoginScreen> with WindowListener {
                         borderSide: const BorderSide(color: MyColors.myOrange),
                       ),
                       filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
+                      fillColor: Colors.white.withValues(alpha: 0.05),
                     ),
                   ),
                   // Forgot password

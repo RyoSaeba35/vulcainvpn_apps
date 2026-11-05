@@ -649,7 +649,9 @@ class AuthService {
     if (Platform.isMacOS) {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys().where((k) => k.startsWith('mac_fallback_')).toList();
-      for (final key in keys) await prefs.remove(key);
+      for (final key in keys) {
+        await prefs.remove(key);
+      }
     }
 
     // ✅ NEW: Clear Windows fallback
