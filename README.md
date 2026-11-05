@@ -1,6 +1,6 @@
 # Vulcain VPN
 
-Cross-platform VPN client for [Vulcain VPN](https://vulcainvpn.com), built with Flutter.
+Open source (GPL-3.0) cross-platform VPN client for [Vulcain VPN](https://vulcainvpn.com), built with Flutter.
 One codebase for **Android, iOS, macOS and Windows**, powered by [sing-box](https://github.com/SagerNet/sing-box) with **WireGuard** and **Hysteria2** protocols.
 
 The app talks to the Vulcain VPN backend (`https://api.vulcainvpn.com/api`) for accounts, subscriptions and VPN credentials.
@@ -227,4 +227,15 @@ Supported: **English** and **French**. The app uses French if the device is in F
 
 ## License
 
-Proprietary. © Vulcain VPN. All rights reserved.
+The Vulcain VPN client is free software, licensed under the **GNU General Public License v3.0 or later**. See [LICENSE](LICENSE).
+
+Copyright (C) 2026 Pierre Libran.
+
+- You may use, study, modify and share this code under the GPL terms. Modified versions you distribute must also be GPL with their source available.
+- The **Vulcain VPN name and logo are not licensed**. Forks must use a different name and must not imply association with Vulcain VPN.
+- The **Vulcain VPN servers, backend and API are not part of this repository** and are not covered by this license.
+
+### Third-party
+
+- [sing-box](https://github.com/SagerNet/sing-box), GPL-3.0-or-later, Copyright (C) 2022 nekohasekai
+- Flutter packages under their own licenses (BSD, MIT, Apache 2.0), listed in the app under Settings > Open Source Licences

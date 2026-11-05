@@ -40,6 +40,12 @@ void main() {
 Future<void> _main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Licenses not discovered automatically (shown in Settings > Open Source Licences)
+  LicenseRegistry.addLicense(() async* {
+    yield const LicenseEntryWithLineBreaks(['Vulcain VPN'], _appLicense);
+    yield const LicenseEntryWithLineBreaks(['sing-box'], _singBoxLicense);
+  });
+
   await AuthService.initialize();
 
   // ✅ FIX #8: Check device security before app starts
@@ -258,3 +264,25 @@ class SecurityBlockedApp extends StatelessWidget {
     );
   }
 }
+
+
+const String _appLicense = '''Vulcain VPN client
+Copyright (C) 2026 Pierre Libran
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details: https://www.gnu.org/licenses/gpl-3.0.html
+
+Source code: https://github.com/RyoSaeba35/cross_platform_vpn
+
+The "Vulcain VPN" name and logo are not licensed under the GPL.''';
+
+const String _singBoxLicense = '''Copyright (C) 2022 by nekohasekai <contact-sagernet@sekai.icu>
+
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details: https://www.gnu.org/licenses/gpl-3.0.html
+
+In addition, no derivative work may use the name or imply association with this application without prior consent.
+
+Source code: https://github.com/SagerNet/sing-box''';
