@@ -48,3 +48,5 @@ vpn_log.txt
 cache.db
 android/key.properties
 android/keystore.jks
+gitleaks
+android/.kotlin/
