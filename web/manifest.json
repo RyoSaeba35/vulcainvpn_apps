@@ -1,6 +1,6 @@
 {
-    "name": "cross_platform_vpn",
-    "short_name": "cross_platform_vpn",
+    "name": "VulcainVPN",
+    "short_name": "VulcainVPN",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

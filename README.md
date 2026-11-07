@@ -91,8 +91,8 @@ codemagic.yaml                    # Signed iOS and macOS builds
 ### Install
 
 ```bash
-git clone https://github.com/RyoSaeba35/cross_platform_vpn.git
-cd cross_platform_vpn
+git clone https://github.com/RyoSaeba35/vulcainvpn_apps.git
+cd vulcainvpn_apps
 flutter pub get
 ```
 
