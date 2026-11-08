@@ -13,6 +13,9 @@ import '../services/vpn_service_windows.dart';
 import '../services/settings_service.dart';
 import '../services/notification_service.dart';
 import '../services/vpn_service_ios.dart';
+import '../services/location_service.dart';
+import '../services/trial_notice.dart';
+import '../widgets/location_picker.dart';
 import 'tabs/home_tab.dart';
 import 'tabs/subscription_tab.dart';
 import 'tabs/settings_tab.dart';
@@ -70,9 +73,124 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     _initTrayIfWindows();
     _init();
     _setupVpnEventListener();
+    _initLocations();
 
     Future.delayed(Duration(milliseconds: 800), () {
       _checkForStoredDeathEvents();
+    });
+  }
+
+  // ─── VPN locations ───────────────────────────────────────────────
+  Future<void> _initLocations() async {
+    await LocationService.init();
+    if (mounted) setState(() {});
+    await LocationService.refresh();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openLocationPicker() async {
+    final loc = AppLocalizations.of(context)!;
+    final current = LocationService.selected.value;
+    final chosen = await showLocationPicker(
+      context: context,
+      loc: loc,
+      current: current,
+      refresh: LocationService.refresh,
+    );
+    if (!mounted) return;
+    setState(() {}); // list may have been refreshed
+    if (chosen == null || chosen == current) return;
+    await _applyLocation(chosen);
+  }
+
+  /// Saves the choice; when connected, reconnects through the new location.
+  Future<void> _applyLocation(String code) async {
+    await LocationService.select(code);
+    if (!mounted) return;
+    setState(() {});
+
+    if (_connectionState != 'connected') return;
+
+    setState(() => _connectionState = 'disconnecting');
+    await _vpnService.stopVpn();
+    _stopDisplayTimer();
+    LocationService.connectedCountry.value = null;
+    if (!mounted) return;
+    setState(() => _connectionState = 'disconnected');
+    _toggleConnection();
+  }
+
+  /// One-time message after the connect that started the free trial
+  Future<void> _showTrialStartedIfAny() async {
+    final notice = await TrialNotice.take();
+    if (notice == null || !mounted) return;
+
+    final loc = AppLocalizations.of(context)!;
+    final end = notice.expiresAt;
+    final date = end != null ? '${end.day}/${end.month}/${end.year}' : '-';
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(loc.trialStartedTitle),
+        content: Text(loc.trialStartedMessage(notice.days, date), style: const TextStyle(fontSize: 16)),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(loc.ok),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLocationUnavailableDialog(AppLocalizations loc, String errorString) {
+    final message = errorString
+        .split(LocationService.unavailableErrorPrefix)
+        .last
+        .replaceAll('Exception: ', '');
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.public_off, color: MyColors.myOrange),
+            const SizedBox(width: 8),
+            Expanded(child: Text(loc.locationUnavailableTitle)),
+          ],
+        ),
+        content: Text(message, style: const TextStyle(fontSize: 16)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _openLocationPicker();
+            },
+            child: Text(loc.locationChooseAnother, style: const TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              await _applyLocation(LocationService.automatic);
+              if (mounted && _connectionState == 'disconnected') _toggleConnection();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MyColors.myOrange,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(loc.locationUseAutomatic),
+          ),
+        ],
+      ),
+    );
+    // Refresh the list so the picker shows the new state
+    LocationService.refresh().then((_) {
+      if (mounted) setState(() {});
     });
   }
 
@@ -1089,6 +1207,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           });
           _startDisplayTimer();
           _showProtectedIp();
+          _showTrialStartedIfAny();
         } else {
           setState(() => _connectionState = 'disconnected');
           _showGenericError(loc);
@@ -1104,6 +1223,11 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
         if (errorString.contains('TECHNICAL_ISSUE')) {
           _showTechnicalIssueDialog(loc, errorString);
+          return;
+        }
+
+        if (errorString.contains(LocationService.unavailableErrorPrefix)) {
+          _showLocationUnavailableDialog(loc, errorString);
           return;
         }
 
@@ -1157,6 +1281,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
       await _vpnService.stopVpn();
       _stopDisplayTimer();
+      LocationService.connectedCountry.value = null;
 
       setState(() {
         _connectionState = 'disconnected';
@@ -1509,6 +1634,9 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
         currentCountryCode: _displayCountryCode,
         isLoadingIp: _isAnimatingIp,
         onToggleConnection: _toggleConnection,
+        selectedLocation: LocationService.selected.value,
+        connectedCountry: LocationService.connectedCountry.value,
+        onChangeLocation: _openLocationPicker,
         loc: loc,
       ),
       const SubscriptionTab(),

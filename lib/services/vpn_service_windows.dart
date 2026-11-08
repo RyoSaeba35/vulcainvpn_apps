@@ -7,6 +7,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
+import 'location_service.dart';
+import 'language_service.dart';
+import 'trial_notice.dart';
 import 'vpn_service_android.dart'; // For VpnEvent types
 import 'windows_notification_service.dart';
 
@@ -688,7 +691,9 @@ class WindowsVpnService extends VpnService {
 
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
-        headers: {'X-Api-Key': apiKey},
+        headers: {'X-Api-Key': apiKey, 'Content-Type': 'application/json', ...LanguageService.headers},
+        // "auto" or a country code chosen in the location picker
+        body: await LocationService.connectBody(),
       );
 
       if (response.statusCode == 401) {
@@ -712,6 +717,12 @@ class WindowsVpnService extends VpnService {
         throw Exception(errorData['message'] ?? 'Maximum active devices reached');
       }
 
+      if (response.statusCode == 409) {
+        // The chosen country can't take the connection (coming soon, full...)
+        final errorData = json.decode(response.body);
+        throw Exception('${LocationService.unavailableErrorPrefix}${errorData['message'] ?? 'This location is not available right now.'}');
+      }
+
       if (response.statusCode == 503) {
         await _log('Service Unavailable - Technical issue (503)');
         final errorData = json.decode(response.body);
@@ -729,6 +740,8 @@ class WindowsVpnService extends VpnService {
       }
 
       final data = json.decode(response.body);
+      LocationService.rememberConnectedServer(Map<String, dynamic>.from(data as Map));
+      TrialNotice.rememberFromConnect(Map<String, dynamic>.from(data));
       final credentials = data['credentials'];
 
       if (credentials == null || credentials['wireguard'] == null) {

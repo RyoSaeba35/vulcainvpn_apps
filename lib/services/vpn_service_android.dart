@@ -5,6 +5,9 @@ import 'package:http/http.dart' as http;
 import 'vpn_service.dart';
 import 'vpn_config_service.dart';
 import 'auth_service.dart';
+import 'location_service.dart';
+import 'language_service.dart';
+import 'trial_notice.dart';
 
 class AndroidVpnService extends VpnService {
   static const MethodChannel _platform = MethodChannel('com.vulcain.vpn/control');
@@ -93,7 +96,9 @@ class AndroidVpnService extends VpnService {
       // Call /connect API
       final response = await http.post(
         Uri.parse('https://api.vulcainvpn.com/api/connect/$deviceId'),
-        headers: {'X-Api-Key': apiKey},
+        headers: {'X-Api-Key': apiKey, 'Content-Type': 'application/json', ...LanguageService.headers},
+        // "auto" or a country code chosen in the location picker
+        body: await LocationService.connectBody(),
       );
 
       // ✅ NEW: Handle different status codes with proper error messages
@@ -119,6 +124,12 @@ class AndroidVpnService extends VpnService {
         throw Exception(errorData['message'] ?? 'Maximum active devices reached. Please disconnect another device first.');
       }
 
+      if (response.statusCode == 409) {
+        // The chosen country can't take the connection (coming soon, full...)
+        final errorData = json.decode(response.body);
+        throw Exception('${LocationService.unavailableErrorPrefix}${errorData['message'] ?? 'This location is not available right now.'}');
+      }
+
       if (response.statusCode == 503) {
         print('❌ Service Unavailable - Technical issue (503)');
         final errorData = json.decode(response.body);
@@ -140,6 +151,8 @@ class AndroidVpnService extends VpnService {
 
       // ✅ Parse credentials from new response format
       final data = json.decode(response.body);
+      LocationService.rememberConnectedServer(Map<String, dynamic>.from(data as Map));
+      TrialNotice.rememberFromConnect(Map<String, dynamic>.from(data));
       final credentials = data['credentials'];
 
       if (credentials == null) {

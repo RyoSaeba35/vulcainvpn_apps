@@ -3,6 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:io';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
+import '../../widgets/location_picker.dart';
 
 class HomeTab extends StatelessWidget {
   final String connectionState;
@@ -12,6 +13,9 @@ class HomeTab extends StatelessWidget {
   final String currentCountryCode;
   final bool isLoadingIp;
   final VoidCallback onToggleConnection;
+  final String selectedLocation;
+  final String? connectedCountry;
+  final VoidCallback onChangeLocation;
   final AppLocalizations loc;
 
   const HomeTab({
@@ -23,6 +27,9 @@ class HomeTab extends StatelessWidget {
     required this.currentCountryCode,
     required this.isLoadingIp,
     required this.onToggleConnection,
+    required this.selectedLocation,
+    required this.connectedCountry,
+    required this.onChangeLocation,
     required this.loc,
   });
 
@@ -44,6 +51,8 @@ class HomeTab extends StatelessWidget {
     int secs = seconds % 60;
     return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
   }
+
+  bool get connectedState => connectionState == 'connected';
 
   @override
   Widget build(BuildContext context) {
@@ -166,9 +175,21 @@ class HomeTab extends StatelessWidget {
           ),
         ),
 
+        // ─── LOCATION PICKER ───────────────────────────────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(40, 12, 40, 0),
+          child: LocationTile(
+            selected: selectedLocation,
+            connectedCountry: connectedState ? connectedCountry : null,
+            enabled: connectionState == 'connected' || connectionState == 'disconnected',
+            onTap: onChangeLocation,
+            loc: loc,
+          ),
+        ),
+
         // ─── BOTTOM SECTION: Button (Fixed Height) ─────────────────────
         Padding(
-          padding: const EdgeInsets.all(40),
+          padding: const EdgeInsets.fromLTRB(40, 20, 40, 40),
           child: SizedBox(
             width: double.infinity,
             child: ElevatedButton(

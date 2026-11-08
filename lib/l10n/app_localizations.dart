@@ -135,6 +135,38 @@ class AppLocalizations {
       // Logout
       'logout': 'Logout',
       'logout_confirmation': 'Are you sure you want to logout?',
+
+      // VPN locations
+      'choose_location_title': 'Choose your VPN location',
+      'choose_location_subtitle': 'Select a country or let Vulcain choose for you.',
+      'location_automatic': 'Automatic',
+      'location_automatic_desc': 'Best server for your connection',
+      'location_recommended': 'Recommended',
+      'location_coming_soon': 'Coming soon',
+      'location_maintenance': 'Temporarily unavailable',
+      'location_full': 'Full right now',
+      'location_unavailable': 'Unavailable',
+      'location_list_error': 'Could not load the latest locations. Showing the last known list.',
+      'location_unavailable_title': 'Location unavailable',
+      'location_use_automatic': 'Use Automatic',
+      'location_choose_another': 'Choose another',
+      'location_switching': 'Switching location...',
+      'location_connected_via': 'Server',
+      'region_europe': 'Europe',
+      'region_americas': 'Americas',
+      'region_asia_pacific': 'Asia-Pacific',
+      'region_middle_east': 'Middle East',
+      'region_africa': 'Africa',
+      'region_oceania': 'Oceania',
+
+      // Free access
+      'free_trial': 'Free trial',
+      'free_gift': 'Free access (gift)',
+      'free_access_until': 'Free access until',
+      'subscribe_to_keep': 'Subscribe to keep VulcainVPN after this date.',
+      'subscribe_now': 'Subscribe',
+      'trial_started_title': 'Your free trial has started 🎁',
+      'trial_started_message': 'Enjoy VulcainVPN free for {days} days, until {date}. No payment needed. We also sent you an email.',
     },
     'fr': {
       // App general
@@ -258,6 +290,38 @@ class AppLocalizations {
       // Logout
       'logout': 'Déconnexion',
       'logout_confirmation': 'Êtes-vous sûr de vouloir vous déconnecter?',
+
+      // VPN locations
+      'choose_location_title': 'Choisissez votre localisation VPN',
+      'choose_location_subtitle': 'Sélectionnez un pays ou laissez Vulcain choisir pour vous.',
+      'location_automatic': 'Automatique',
+      'location_automatic_desc': 'Le meilleur serveur pour votre connexion',
+      'location_recommended': 'Recommandé',
+      'location_coming_soon': 'Bientôt disponible',
+      'location_maintenance': 'Temporairement indisponible',
+      'location_full': 'Complet pour le moment',
+      'location_unavailable': 'Indisponible',
+      'location_list_error': 'Impossible de charger les localisations. Affichage de la dernière liste connue.',
+      'location_unavailable_title': 'Localisation indisponible',
+      'location_use_automatic': 'Utiliser Automatique',
+      'location_choose_another': 'En choisir une autre',
+      'location_switching': 'Changement de localisation...',
+      'location_connected_via': 'Serveur',
+      'region_europe': 'Europe',
+      'region_americas': 'Amériques',
+      'region_asia_pacific': 'Asie-Pacifique',
+      'region_middle_east': 'Moyen-Orient',
+      'region_africa': 'Afrique',
+      'region_oceania': 'Océanie',
+
+      // Free access
+      'free_trial': 'Essai gratuit',
+      'free_gift': 'Accès offert',
+      'free_access_until': 'Accès gratuit jusqu\'au',
+      'subscribe_to_keep': 'Abonnez-vous pour garder VulcainVPN après cette date.',
+      'subscribe_now': 'S\'abonner',
+      'trial_started_title': 'Votre essai gratuit a commencé 🎁',
+      'trial_started_message': 'Profitez de VulcainVPN gratuitement pendant {days} jours, jusqu\'au {date}. Aucun paiement nécessaire. Nous vous avons aussi envoyé un e-mail.',
     },
   };
 
@@ -385,6 +449,60 @@ class AppLocalizations {
   // Logout
   String get logout => translate('logout');
   String get logoutConfirmation => translate('logout_confirmation');
+
+  // VPN locations
+  String get chooseLocationTitle => translate('choose_location_title');
+  String get chooseLocationSubtitle => translate('choose_location_subtitle');
+  String get locationAutomatic => translate('location_automatic');
+  String get locationAutomaticDesc => translate('location_automatic_desc');
+  String get locationRecommended => translate('location_recommended');
+  String get locationListError => translate('location_list_error');
+  String get locationUnavailableTitle => translate('location_unavailable_title');
+  String get locationUseAutomatic => translate('location_use_automatic');
+  String get locationChooseAnother => translate('location_choose_another');
+  String get locationSwitching => translate('location_switching');
+  String get locationConnectedVia => translate('location_connected_via');
+
+  /// Text for an unavailable location (reason sent by the API)
+  String locationReason(String? reason) {
+    switch (reason) {
+      case 'coming_soon':
+        return translate('location_coming_soon');
+      case 'maintenance':
+        return translate('location_maintenance');
+      case 'full':
+        return translate('location_full');
+      default:
+        return translate('location_unavailable');
+    }
+  }
+
+  /// Region label ("europe" -> "Europe"); unknown keys are shown as sent
+  String region(String? key) {
+    if (key == null || key.isEmpty) return '';
+    final value = translate('region_$key');
+    return value == 'region_$key' ? key : value;
+  }
+
+  // Free access
+  String get freeAccessUntil => translate('free_access_until');
+  String get subscribeToKeep => translate('subscribe_to_keep');
+  String get subscribeNow => translate('subscribe_now');
+  String get trialStartedTitle => translate('trial_started_title');
+  String trialStartedMessage(int days, String date) =>
+      translate('trial_started_message').replaceAll('{days}', '$days').replaceAll('{date}', date);
+
+  /// Plan label for free subscriptions (source sent by the API), else null
+  String? freePlanLabel(String? source) {
+    switch (source) {
+      case 'trial':
+        return translate('free_trial');
+      case 'gift':
+        return translate('free_gift');
+      default:
+        return null;
+    }
+  }
 }
 
 class _AppLocalizationsDelegate

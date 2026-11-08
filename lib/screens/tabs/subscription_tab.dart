@@ -264,6 +264,8 @@ class _SubscriptionTabState extends State<SubscriptionTab>
       return Center(child: Text(loc.noSubscriptionData));
     }
     final isGooglePlay = sub['source'] == 'google_play';
+    // Free trial, admin gift or free access for everyone
+    final freeLabel = loc.freePlanLabel(sub['source'] as String?);
 
     final plan = sub['plan'] ?? {};
     final devices = sub['devices'] ?? {};
@@ -325,13 +327,56 @@ class _SubscriptionTabState extends State<SubscriptionTab>
               ),
             ),
 
+          // Free access banner with a way to subscribe before it ends
+          if (freeLabel != null && !isExpired && expiresAt != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                border: Border.all(color: Colors.green, width: 1.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.card_giftcard, color: Colors.green, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '${loc.freeAccessUntil} ${expiresAt.day}/${expiresAt.month}/${expiresAt.year}',
+                          style: TextStyle(color: Colors.green[800], fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(loc.subscribeToKeep, style: TextStyle(color: Colors.green[900], fontSize: 13)),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _openRenewalPage,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: MyColors.myOrange),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      child: Text(loc.subscribeNow, style: const TextStyle(color: MyColors.myOrange)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           InfoCard(
             title: loc.subscription,
             icon: Icons.card_membership,
             children: [
               InfoRow(
                 label: loc.plan,
-                value: '${plan['name'] ?? '-'}',
+                value: freeLabel ?? '${plan['name'] ?? '-'}',
               ),
               InfoRow(
                 label: loc.reference,
