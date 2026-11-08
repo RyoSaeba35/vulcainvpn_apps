@@ -936,6 +936,11 @@ class _SettingsTabState extends State<SettingsTab> {
             const Divider(height: 1),
             _buildLegalRow('Logging Policy', 'https://www.vulcainvpn.com/logging'),
             const Divider(height: 1),
+            _buildLegalRow('Legal Notice', 'https://www.vulcainvpn.com/mentions-legales'),
+            const Divider(height: 1),
+            // GPL-3.0: the app's source code is public
+            _buildLegalRow('Source Code (GPL-3.0)', 'https://github.com/RyoSaeba35/vulcainvpn_apps'),
+            const Divider(height: 1),
             InkWell(
               onTap: () => _openLicences(context),
               borderRadius: BorderRadius.circular(8),

@@ -2,78 +2,35 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class IpService {
-  static Future<Map<String, dynamic>> getPublicIpAndLocation() async {
-    // ✅ SECURITY: Only use HTTPS services to prevent IP leaks
-    final services = [
-      _tryIpInfo,      // Primary: ipinfo.io (HTTPS, includes location)
-      _tryIpApiCo,     // Backup 1: ipapi.co (HTTPS, free tier with location)
-      _tryIpify,       // Backup 2: ipify.org (HTTPS, IP only)
-    ];
+  /// The device's public IP and country, from our own backend
+  /// (GET /api/whoami: the caller's IP and Cloudflare's country).
+  ///
+  /// It used to call ipinfo.io, ipapi.co and ipify.org, which sent every
+  /// user's IP to third parties. When the VPN is on, this request goes
+  /// through the tunnel, so it returns the VPN server's IP and country.
+  static const String _whoamiUrl = 'https://api.vulcainvpn.com/api/whoami';
 
-    for (var service in services) {
+  static Future<Map<String, dynamic>> getPublicIpAndLocation() async {
+    for (var attempt = 1; attempt <= 2; attempt++) {
       try {
-        final result = await service();
-        if (result['ip'] != 'Unknown') {
-          return result;
+        final response = await http
+            .get(Uri.parse(_whoamiUrl), headers: {'Cache-Control': 'no-cache'})
+            .timeout(const Duration(seconds: 5));
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body) as Map<String, dynamic>;
+          final countryCode = (data['country_code'] as String?) ?? 'Unknown';
+          return {
+            'ip': (data['ip'] as String?) ?? 'Unknown',
+            'country': countryCode == 'Unknown' ? 'Unknown' : _countryCodeToName(countryCode),
+            'countryCode': countryCode,
+          };
         }
       } catch (e) {
-        print('Service failed: $e');
-        continue;
+        print('whoami failed (attempt $attempt): $e');
       }
     }
 
-    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
-  }
-
-  // Primary: ipinfo.io (HTTPS)
-  static Future<Map<String, dynamic>> _tryIpInfo() async {
-    final response = await http
-        .get(Uri.parse('https://ipinfo.io/json'))
-        .timeout(const Duration(seconds: 5));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final countryCode = data['country'] ?? 'Unknown';
-      return {
-        'ip': data['ip'] ?? 'Unknown',
-        'country': _countryCodeToName(countryCode),
-        'countryCode': countryCode,
-      };
-    }
-    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
-  }
-
-  // Backup 1: ipapi.co (HTTPS, free tier with location)
-  static Future<Map<String, dynamic>> _tryIpApiCo() async {
-    final response = await http
-        .get(Uri.parse('https://ipapi.co/json/'))
-        .timeout(const Duration(seconds: 5));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      return {
-        'ip': data['ip'] ?? 'Unknown',
-        'country': data['country_name'] ?? 'Unknown',
-        'countryCode': data['country_code'] ?? 'Unknown',
-      };
-    }
-    return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
-  }
-
-  // Backup 2: ipify (IP only, no location)
-  static Future<Map<String, dynamic>> _tryIpify() async {
-    final response = await http
-        .get(Uri.parse('https://api.ipify.org?format=json'))
-        .timeout(const Duration(seconds: 5));
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      return {
-        'ip': data['ip'] ?? 'Unknown',
-        'country': 'Unknown',
-        'countryCode': 'Unknown',
-      };
-    }
     return {'ip': 'Unknown', 'country': 'Unknown', 'countryCode': 'Unknown'};
   }
 

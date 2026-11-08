@@ -44,6 +44,7 @@ Future<void> _main() async {
   LicenseRegistry.addLicense(() async* {
     yield const LicenseEntryWithLineBreaks(['Vulcain VPN'], _appLicense);
     yield const LicenseEntryWithLineBreaks(['sing-box'], _singBoxLicense);
+    yield const LicenseEntryWithLineBreaks(['World map data'], _worldMapLicense);
   });
 
   await AuthService.initialize();
@@ -286,3 +287,14 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 In addition, no derivative work may use the name or imply association with this application without prior consent.
 
 Source code: https://github.com/SagerNet/sing-box''';
+
+// assets/maps/world_map.json is generated from world-atlas (TopoJSON of
+// Natural Earth, public domain).
+const String _worldMapLicense = '''Map data: Made with Natural Earth (public domain), https://www.naturalearthdata.com
+Converted with world-atlas, https://github.com/topojson/world-atlas
+
+Copyright 2013-2019 Michael Bostock
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.''';
