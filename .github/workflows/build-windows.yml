@@ -25,13 +25,41 @@ jobs:
           flutter-version: '3.x'
           channel: 'stable'
 
+      # Keep the sing-box zips between runs: once cached, builds don't depend
+      # on GitHub release downloads (which sometimes answer 504)
+      - name: Cache sing-box binaries
+        id: singbox-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            amd64.zip
+            arm64.zip
+          key: sing-box-1.12.22-windows
+
       - name: Download sing-box binaries
+        if: steps.singbox-cache.outputs.cache-hit != 'true'
         shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-amd64.zip" -OutFile "amd64.zip"
-          Invoke-WebRequest -Uri "https://github.com/SagerNet/sing-box/releases/download/v1.12.22/sing-box-1.12.22-windows-arm64.zip" -OutFile "arm64.zip"
-          Expand-Archive -Path "amd64.zip" -DestinationPath "amd64"
-          Expand-Archive -Path "arm64.zip" -DestinationPath "arm64"
+          $base = "https://github.com/SagerNet/sing-box/releases/download/v1.12.22"
+          foreach ($arch in @("amd64", "arm64")) {
+            $url = "$base/sing-box-1.12.22-windows-$arch.zip"
+            for ($i = 1; $i -le 6; $i++) {
+              try {
+                Invoke-WebRequest -Uri $url -OutFile "$arch.zip" -TimeoutSec 120
+                break
+              } catch {
+                if ($i -eq 6) { throw }
+                Write-Host "Download of $arch failed (attempt $i), retrying in 30 s..."
+                Start-Sleep -Seconds 30
+              }
+            }
+          }
+
+      - name: Extract sing-box binaries
+        shell: powershell
+        run: |
+          Expand-Archive -Path "amd64.zip" -DestinationPath "amd64" -Force
+          Expand-Archive -Path "arm64.zip" -DestinationPath "arm64" -Force
 
       - name: Install dependencies
         run: flutter pub get
