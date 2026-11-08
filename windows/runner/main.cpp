@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <tlhelp32.h>
+#include <algorithm>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -82,8 +83,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
   FlutterWindow window(project);
+
+  RECT work_area;
+  ::SystemParametersInfo(SPI_GETWORKAREA, 0, &work_area, 0);
+  const double scale = ::GetDpiForSystem() / 96.0;
+  const int available = static_cast<int>((work_area.bottom - work_area.top) / scale) - 60;
+  const int height = std::max(600, std::min(820, available));
+
   Win32Window::Point origin(25, 25);
-  Win32Window::Size size(400, 700);
+  Win32Window::Size size(400, static_cast<unsigned int>(height));
+
+
   if (!window.Create(L"Vulcain VPN", origin, size)) {
     return EXIT_FAILURE;
   }
