@@ -1191,6 +1191,8 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
 
     if (_connectionState == 'disconnected') {
       // ✅ Set guard BEFORE async operations
+      // The map shows the chosen country until the backend says which server
+      LocationService.connectedCountry.value = null;
       setState(() {
         _isConnecting = true;
         _connectionState = 'connecting';
@@ -1626,18 +1628,23 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     final loc = AppLocalizations.of(context)!;
 
     final List<Widget> pages = [
-      HomeTab(
-        connectionState: _connectionState,
-        connectionSeconds: _connectionSeconds,
-        currentIp: _displayIp,
-        currentCountry: _displayCountry,
-        currentCountryCode: _displayCountryCode,
-        isLoadingIp: _isAnimatingIp,
-        onToggleConnection: _toggleConnection,
-        selectedLocation: LocationService.selected.value,
-        connectedCountry: LocationService.connectedCountry.value,
-        onChangeLocation: _openLocationPicker,
-        loc: loc,
+      // Rebuilds as soon as the backend says which server (still "connecting"),
+      // so the map zooms on the right country without waiting for the tunnel
+      ValueListenableBuilder<String?>(
+        valueListenable: LocationService.connectedCountry,
+        builder: (context, connectedCountry, _) => HomeTab(
+          connectionState: _connectionState,
+          connectionSeconds: _connectionSeconds,
+          currentIp: _displayIp,
+          currentCountry: _displayCountry,
+          currentCountryCode: _displayCountryCode,
+          isLoadingIp: _isAnimatingIp,
+          onToggleConnection: _toggleConnection,
+          selectedLocation: LocationService.selected.value,
+          connectedCountry: connectedCountry,
+          onChangeLocation: _openLocationPicker,
+          loc: loc,
+        ),
       ),
       const SubscriptionTab(),
       SettingsTab(

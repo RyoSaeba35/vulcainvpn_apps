@@ -69,6 +69,7 @@ class LocationService {
   static const String automatic = 'auto';
   static const String _selectedKey = 'vpn_location_selected';
   static const String _cacheKey = 'vpn_locations_cache';
+  static const String _connectedKey = 'vpn_connected_country';
 
   /// Current choice, for widgets that want to listen to it
   static final ValueNotifier<String> selected = ValueNotifier<String>(automatic);
@@ -91,6 +92,9 @@ class LocationService {
     try {
       final prefs = await SharedPreferences.getInstance();
       selected.value = prefs.getString(_selectedKey) ?? automatic;
+      // Server country of the last connect, so the map is right when the app
+      // reopens while the VPN is still running
+      connectedCountry.value = prefs.getString(_connectedKey);
       final cached = prefs.getString(_cacheKey);
       if (cached != null) {
         final list = json.decode(cached) as List<dynamic>;
@@ -159,7 +163,11 @@ class LocationService {
   static void rememberConnectedServer(Map<String, dynamic> response) {
     final server = response['server'];
     if (server is Map && server['country'] != null) {
-      connectedCountry.value = server['country'].toString().toUpperCase();
+      final country = server['country'].toString().toUpperCase();
+      connectedCountry.value = country;
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setString(_connectedKey, country))
+          .catchError((_) => false);
     }
   }
 

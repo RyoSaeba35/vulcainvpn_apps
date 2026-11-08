@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:io';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
+import '../../services/location_service.dart';
 import '../../widgets/location_picker.dart';
+import '../../widgets/world_map_view.dart';
 
 class HomeTab extends StatelessWidget {
   final String connectionState;
@@ -54,25 +55,28 @@ class HomeTab extends StatelessWidget {
 
   bool get connectedState => connectionState == 'connected';
 
+  /// Country shown on the map: the server's country once known, else the
+  /// country chosen in the picker (null for Automatic before connecting)
+  String? get mapCountry {
+    final chosen = selectedLocation == LocationService.automatic ? null : selectedLocation;
+    if (connectionState == 'disconnected') return null;
+    return connectedCountry ?? chosen;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // ─── TOP SECTION: SVG (Flexible) ───────────────────────────────
+        // ─── TOP SECTION: World map (Flexible) ─────────────────────────
         Expanded(
           flex: 3, // Takes 3 parts of available space
           child: Center(
-            child: SvgPicture.asset(
-              connectionState == 'connected'
-                  ? 'assets/icons/connected.svg'
-                  : 'assets/icons/disconnected.svg',
-              height: 200, // Fixed reasonable height instead of percentage
-              colorFilter: connectionState == 'connecting'
-                  ? const ColorFilter.mode(
-                      MyColors.myOrange,
-                      BlendMode.srcIn,
-                    )
-                  : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: WorldMapView(
+                connectionState: connectionState,
+                countryCode: mapCountry,
+              ),
             ),
           ),
         ),

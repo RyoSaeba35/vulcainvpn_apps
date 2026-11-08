@@ -624,6 +624,23 @@ class AuthService {
 
   // ✅ UPDATED: Logout with Windows cleanup
   static Future<void> logout() async {
+    // Free this device's VPN slot on the backend before the keys are deleted.
+    // The native service also notifies the backend when the VPN stops, but it
+    // reads the keys in a background thread, often after deleteAll() below has
+    // wiped them, so the slot stayed reserved until the stale cleanup.
+    try {
+      final deviceId = await getDeviceId();
+      final apiKey = await getApiKey();
+      if (deviceId != null && apiKey != null) {
+        await http.post(
+          Uri.parse('$_baseUrl/disconnect/$deviceId'),
+          headers: {'X-Api-Key': apiKey},
+        ).timeout(const Duration(seconds: 5));
+      }
+    } catch (e) {
+      print('Logout disconnect call failed: $e');
+    }
+
     try {
       final token = await _readToken(_accessTokenKey);
       if (token != null) {
