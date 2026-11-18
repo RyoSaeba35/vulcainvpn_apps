@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../colors.dart';
 import '../l10n/auth_strings.dart';
+import '../l10n/languages.dart';
 import '../main.dart';
 
 /// Shared look for the account screens (login, sign up, forgot password,
@@ -159,8 +160,11 @@ class GoogleButton extends StatelessWidget {
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF4285F4)),
                   ),
                   const SizedBox(width: 12),
-                  Text(label ?? AuthStrings.of(context).continueWithGoogle,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  Flexible(
+                    child: Text(label ?? AuthStrings.of(context).continueWithGoogle,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  ),
                 ],
               ),
       ),
@@ -191,16 +195,15 @@ class OrDivider extends StatelessWidget {
   }
 }
 
-/// "EN / FR" language switch for the account screens. The choice is saved by
+/// Language switch for the account screens. The choice is saved by
 /// AuthGate (LanguageService) and shared with Settings > Language.
 class LanguagePicker extends StatelessWidget {
   const LanguagePicker({super.key});
 
-  static const Map<String, String> _names = {'en': '🇬🇧  English', 'fr': '🇫🇷  Français'};
 
   @override
   Widget build(BuildContext context) {
-    final code = Localizations.localeOf(context).languageCode == 'fr' ? 'fr' : 'en';
+    final code = appLanguageFor(Localizations.localeOf(context).languageCode).code;
     return PopupMenuButton<String>(
       tooltip: AuthStrings.of(context).languageLabel,
       color: const Color(0xFF4A3530),
@@ -209,13 +212,13 @@ class LanguagePicker extends StatelessWidget {
         if (value != code) MyApp.setLocale(context, Locale(value));
       },
       itemBuilder: (_) => [
-        for (final entry in _names.entries)
+        for (final lang in appLanguages)
           PopupMenuItem<String>(
-            value: entry.key,
+            value: lang.code,
             child: Row(
               children: [
-                Expanded(child: Text(entry.value, style: const TextStyle(color: Colors.white))),
-                if (entry.key == code) const Icon(Icons.check, size: 18, color: MyColors.myOrange),
+                Expanded(child: Text('${lang.flag}  ${lang.name}', style: const TextStyle(color: Colors.white))),
+                if (lang.code == code) const Icon(Icons.check, size: 18, color: MyColors.myOrange),
               ],
             ),
           ),

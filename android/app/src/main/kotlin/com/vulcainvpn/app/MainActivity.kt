@@ -232,28 +232,8 @@ class MainActivity : FlutterActivity() {
                             VpnLogger.error(TAG, "Failed to clear reconnect flag", e)
                         }
 
-                        // ✅ STEP 1: Battery optimization check (MANDATORY)
-                        if (!isBatteryOptimizationExempt()) {
-                            VpnLogger.log(TAG, "⚠️ Battery optimization not exempt - requesting")
-                            requestBatteryOptimizationExemption()
-                            return@setMethodCallHandler
-                        } else {
-                            VpnLogger.log(TAG, "✅ Battery optimization already exempt")
-                        }
-
-                        // ✅ STEP 2: Notification permission (if needed)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                                requestPermissions(
-                                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                                    NOTIFICATION_REQUEST_CODE
-                                )
-                                return@setMethodCallHandler
-                            }
-                        }
-
-                        // ✅ STEP 3: VPN permission
-                        requestVpnPermission()
+                        // ✅ Permission flow, in order: VPN -> battery -> notifications
+                        continuePermissionFlow()
                     }
                     "stopVpn" -> {
                         VpnLogger.log(TAG, "🛑 StopVPN called")
@@ -646,28 +626,61 @@ class MainActivity : FlutterActivity() {
         result.success(packageName)
     }
 
-    private fun requestVpnPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    NOTIFICATION_REQUEST_CODE
-                )
-                return
-            }
+    // Notification permission is optional: the VPN foreground service runs
+    // without it (its notification just stays hidden). We ask only once; after
+    // that the Flutter side shows a small banner pointing to the settings.
+    private fun shouldAskNotificationPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return false
+        return !getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+            .getBoolean("notification_permission_asked", false)
+    }
+
+    private fun askNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        getSharedPreferences("vpn_state", Context.MODE_PRIVATE)
+            .edit().putBoolean("notification_permission_asked", true).apply()
+        requestPermissions(
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_REQUEST_CODE
+        )
+    }
+
+    // Asks for the next missing permission, in this order:
+    //   1. VPN connection request (mandatory)
+    //   2. Battery optimization exemption (mandatory)
+    //   3. Notifications (optional, Android 13+, asked only once)
+    // Each result handler calls this again, so it moves to the next step
+    // and starts the VPN once nothing is left to ask.
+    private fun continuePermissionFlow(delayStartMs: Long = 0) {
+        val vpnIntent = VpnService.prepare(this)
+        if (vpnIntent != null) {
+            VpnLogger.log(TAG, "🔐 STEP 1: Requesting VPN permission from user...")
+            startActivityForResult(vpnIntent, VPN_REQUEST_CODE)
+            return
         }
-        val intent = VpnService.prepare(this)
-        if (intent != null) {
-            VpnLogger.log(TAG, "🔐 Requesting VPN permission from user...")
-            startActivityForResult(intent, VPN_REQUEST_CODE)
-        } else {
-            VpnLogger.log(TAG, "✅ VPN permission already granted")
-            pendingResult?.let {
-                startVpnInternal(it)
+
+        if (!isBatteryOptimizationExempt()) {
+            VpnLogger.log(TAG, "⚠️ STEP 2: Battery optimization not exempt - requesting")
+            requestBatteryOptimizationExemption()
+            return
+        }
+
+        if (shouldAskNotificationPermission()) {
+            VpnLogger.log(TAG, "⚠️ STEP 3: Notification permission not granted - asking once")
+            askNotificationPermission()
+            return
+        }
+
+        VpnLogger.log(TAG, "✅ All permissions handled - starting VPN")
+        pendingResult?.let { result ->
+            val start = Runnable {
+                startVpnInternal(result)
                 pendingResult = null
                 pendingConfig = null
                 pendingAccessToken = null
             }
+            if (delayStartMs > 0) Handler(mainLooper).postDelayed(start, delayStartMs) else start.run()
         }
     }
 
@@ -767,13 +780,9 @@ class MainActivity : FlutterActivity() {
                 pendingResult?.let { result ->
                     if (resultCode == Activity.RESULT_OK) {
                         VpnLogger.log(TAG, "✅ VPN permission granted by user")
-
-                        Handler(mainLooper).postDelayed({
-                            startVpnInternal(result)
-                            pendingResult = null
-                            pendingConfig = null
-                            pendingAccessToken = null
-                        }, 400)
+                        // Next: battery, then notifications. The 400 ms delay
+                        // only applies if the VPN starts right away.
+                        continuePermissionFlow(delayStartMs = 400)
 
                     } else {
                         VpnLogger.log(TAG, "❌ User denied VPN permission")
@@ -794,22 +803,8 @@ class MainActivity : FlutterActivity() {
 
                 if (isExempt) {
                     VpnLogger.log(TAG, "✅ Battery optimization exemption granted")
-
-                    // ✅ Continue to notification permission
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                            VpnLogger.log(TAG, "⚠️ Notification permission needed - requesting")
-                            requestPermissions(
-                                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                                NOTIFICATION_REQUEST_CODE
-                            )
-                            return
-                        }
-                    }
-
-                    // If notification permission already granted (or not needed), proceed to VPN permission
-                    VpnLogger.log(TAG, "✅ Notification permission already granted or not needed")
-                    requestVpnPermission()
+                    // Next: notifications (if not asked yet), then start
+                    continuePermissionFlow()
 
                 } else {
                     // ✅ Battery optimization DENIED - stop connection (like VPN/notification denial)
@@ -838,18 +833,11 @@ class MainActivity : FlutterActivity() {
             if (grantResults.isNotEmpty() &&
                 grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 VpnLogger.log(TAG, "✅ Notification permission granted")
-                requestVpnPermission()
             } else {
-                VpnLogger.log(TAG, "❌ Notification permission denied")
-                pendingResult?.error(
-                    "NOTIFICATION_PERMISSION_DENIED",
-                    "Notification permission is required",
-                    null
-                )
-                pendingResult = null
-                pendingConfig = null
-                pendingAccessToken = null
+                // Optional permission: start the VPN anyway.
+                VpnLogger.log(TAG, "⚠️ Notification permission denied - continuing without it")
             }
+            continuePermissionFlow()
         }
     }
 

@@ -1,4 +1,13 @@
 import 'package:flutter/material.dart';
+import 'languages.dart';
+import 'translations/nl.dart';
+import 'translations/es.dart';
+import 'translations/de.dart';
+import 'translations/it.dart';
+import 'translations/pl.dart';
+import 'translations/ja.dart';
+import 'translations/ko.dart';
+import 'translations/pt.dart';
 
 class AppLocalizations {
   final Locale locale;
@@ -62,6 +71,8 @@ class AppLocalizations {
       'permission_required_title': 'Permission Required',
       'notification_permission_message': 'Notification permission is required for the VPN to stay active.\n\nPlease allow it and try again.',
       'vpn_permission_message': 'VPN permission is required to protect your connection.\n\nPlease allow it and try again.',
+      'notification_denied_banner': 'Notifications are off. Allow them for a better experience.',
+      'allow': 'Allow',
 
       // General buttons
       'ok': 'OK',
@@ -217,6 +228,8 @@ class AppLocalizations {
       'permission_required_title': 'Permission Requise',
       'notification_permission_message': 'La permission de notification est requise pour que le VPN reste actif.\n\nVeuillez l\'autoriser et réessayer.',
       'vpn_permission_message': 'La permission VPN est requise pour protéger votre connexion.\n\nVeuillez l\'autoriser et réessayer.',
+      'notification_denied_banner': 'Les notifications sont désactivées. Autorisez-les pour une meilleure expérience.',
+      'allow': 'Autoriser',
 
       // General buttons
       'ok': 'OK',
@@ -323,10 +336,18 @@ class AppLocalizations {
       'trial_started_title': 'Votre essai gratuit a commencé 🎁',
       'trial_started_message': 'Profitez de VulcainVPN gratuitement pendant {days} jours, jusqu\'au {date}. Aucun paiement nécessaire. Nous vous avons aussi envoyé un e-mail.',
     },
+    'de': appDe,
+    'es': appEs,
+    'it': appIt,
+    'nl': appNl,
+    'pl': appPl,
+    'pt': appPt,
+    'ja': appJa,
+    'ko': appKo,
   };
 
   String translate(String key) {
-    return _localizedValues[locale.languageCode]?[key] ?? key;
+    return _localizedValues[locale.languageCode]?[key] ?? _localizedValues['en']![key] ?? key;
   }
 
   // Convenience getters - General
@@ -377,6 +398,8 @@ class AppLocalizations {
   String get permissionRequiredTitle => translate('permission_required_title');
   String get notificationPermissionMessage => translate('notification_permission_message');
   String get vpnPermissionMessage => translate('vpn_permission_message');
+  String get notificationDeniedBanner => translate('notification_denied_banner');
+  String get allow => translate('allow');
 
   // General buttons
   String get ok => translate('ok');
@@ -511,7 +534,7 @@ class _AppLocalizationsDelegate
 
   @override
   bool isSupported(Locale locale) {
-    return ['en', 'fr'].contains(locale.languageCode);
+    return appLanguageCodes.contains(locale.languageCode);
   }
 
   @override

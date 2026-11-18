@@ -7,6 +7,7 @@ import '../../l10n/auth_strings.dart';
 import '../../main.dart';
 import '../../colors.dart';
 import '../../l10n/app_localizations.dart';
+import '../../l10n/languages.dart';
 import '../../services/auth_service.dart';
 import '../delete_account_screen.dart';
 import '../../services/vpn_service.dart';
@@ -251,26 +252,24 @@ class _SettingsTabState extends State<SettingsTab> {
         final loc = AppLocalizations.of(context)!;
         return AlertDialog(
           title: Text(loc.language),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                title: Text(loc.english),
-                leading: const Text('🇬🇧', style: TextStyle(fontSize: 24)),
-                onTap: () {
-                  MyApp.setLocale(context, const Locale('en'));
-                  Navigator.pop(context);
-                },
-              ),
-              ListTile(
-                title: Text(loc.french),
-                leading: const Text('🇫🇷', style: TextStyle(fontSize: 24)),
-                onTap: () {
-                  MyApp.setLocale(context, const Locale('fr'));
-                  Navigator.pop(context);
-                },
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (final lang in appLanguages)
+                  ListTile(
+                    title: Text(lang.name),
+                    leading: Text(lang.flag, style: const TextStyle(fontSize: 24)),
+                    trailing: Localizations.localeOf(context).languageCode == lang.code
+                        ? const Icon(Icons.check, color: MyColors.myOrange)
+                        : null,
+                    onTap: () {
+                      MyApp.setLocale(context, Locale(lang.code));
+                      Navigator.pop(context);
+                    },
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -676,16 +675,19 @@ class _SettingsTabState extends State<SettingsTab> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      loc.language,
-                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                    Flexible(
+                      child: Text(
+                        loc.language,
+                        style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                      ),
                     ),
                     Row(
                       children: [
                         Text(
-                          Localizations.localeOf(context).languageCode == 'fr'
-                              ? '🇫🇷 ${loc.french}'
-                              : '🇬🇧 ${loc.english}',
+                          () {
+                            final lang = appLanguageFor(Localizations.localeOf(context).languageCode);
+                            return '${lang.flag} ${lang.name}';
+                          }(),
                           style: const TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 14,
@@ -711,11 +713,13 @@ class _SettingsTabState extends State<SettingsTab> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
+                    Expanded(
+                      child: Row(
                       children: [
                         Icon(Icons.swap_horiz, size: 20, color: Colors.grey[700]),
                         const SizedBox(width: 12),
-                        Column(
+                        Expanded(
+                          child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
@@ -735,7 +739,9 @@ class _SettingsTabState extends State<SettingsTab> {
                             ),
                           ],
                         ),
+                        ),
                       ],
+                    ),
                     ),
                     Icon(Icons.chevron_right, color: Colors.grey[400]),
                   ],
@@ -755,12 +761,14 @@ class _SettingsTabState extends State<SettingsTab> {
                     color: Colors.grey[700],
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    loc.autoReconnect,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.grey[800],
+                  Expanded(
+                    child: Text(
+                      loc.autoReconnect,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey[800],
+                      ),
                     ),
                   ),
                 ],
@@ -794,10 +802,12 @@ class _SettingsTabState extends State<SettingsTab> {
                                   size: 20,
                                 ),
                                 const SizedBox(width: 12),
-                                Text(
+                                Expanded(
+                                  child: Text(
                                   value
                                       ? loc.autoReconnectEnabled
                                       : loc.autoReconnectDisabled,
+                                ),
                                 ),
                               ],
                             ),

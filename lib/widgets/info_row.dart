@@ -19,17 +19,23 @@ class InfoRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(color: Colors.grey[600], fontSize: 14),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.grey[600], fontSize: 14),
+            ),
           ),
-          Text(
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
             value,
+            textAlign: TextAlign.end,
             style: TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 14,
               color: valueColor,
             ),
+          ),
           ),
         ],
       ),

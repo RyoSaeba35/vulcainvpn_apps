@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:app_settings/app_settings.dart';
 import 'package:window_manager/window_manager.dart';
 import 'dart:async';
 import 'dart:io';
@@ -872,6 +873,40 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
     );
   }
 
+  // Shown once per app launch, after a successful connect, if the user
+  // denied notifications. The VPN works without them.
+  static bool _notificationBannerShown = false;
+
+  Future<void> _showNotificationDeniedBannerIfNeeded(AppLocalizations loc) async {
+    if (!Platform.isAndroid || _notificationBannerShown) return;
+    bool granted = true;
+    try {
+      granted = await _vpnService.checkNotificationPermission();
+    } catch (_) {}
+    if (granted || !mounted) return;
+    _notificationBannerShown = true;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.notifications_off_outlined, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(child: Text(loc.notificationDeniedBanner)),
+          ],
+        ),
+        action: SnackBarAction(
+          label: loc.allow,
+          textColor: Colors.white,
+          onPressed: () => AppSettings.openAppSettings(type: AppSettingsType.notification),
+        ),
+        backgroundColor: MyColors.myOrange,
+        duration: const Duration(seconds: 6),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   void _showErrorSnackbar(String message) {
     if (!mounted) return;
 
@@ -1210,6 +1245,7 @@ class _VpnHomePageState extends State<VpnHomePage> with WidgetsBindingObserver {
           _startDisplayTimer();
           _showProtectedIp();
           _showTrialStartedIfAny();
+          _showNotificationDeniedBannerIfNeeded(loc);
         } else {
           setState(() => _connectionState = 'disconnected');
           _showGenericError(loc);

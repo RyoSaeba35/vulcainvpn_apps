@@ -1,15 +1,16 @@
 import 'dart:ui';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../l10n/auth_strings.dart';
+import '../l10n/languages.dart';
 
-/// Remembers the app language (English / French) between launches.
+/// Remembers the app language between launches.
 ///
-/// First launch: follows the phone/PC language (French if it is French,
-/// English otherwise). After that, the last choice made on the sign in
+/// First launch: follows the phone/PC language if the app offers it,
+/// English otherwise. After that, the last choice made on the sign in
 /// screen or in Settings > Language.
 class LanguageService {
   static const String _key = 'app_language';
-  static const List<String> supported = ['en', 'fr'];
+  static List<String> get supported => appLanguageCodes;
 
   /// Saved language, or the device language on first launch
   static Future<Locale> load() async {
@@ -21,7 +22,7 @@ class LanguageService {
 
     if (code == null || !supported.contains(code)) {
       final device = PlatformDispatcher.instance.locale.languageCode;
-      code = device == 'fr' ? 'fr' : 'en';
+      code = supported.contains(device) ? device : 'en';
     }
     AuthStrings.code = code;
     return Locale(code);
@@ -38,5 +39,7 @@ class LanguageService {
 
   /// Sent with account API calls so the server answers in the same language
   /// (messages and confirmation / reset emails).
-  static Map<String, String> get headers => {'Accept-Language': AuthStrings.code};
+  /// The server only writes English and French, so other languages get English.
+  static Map<String, String> get headers =>
+      {'Accept-Language': AuthStrings.code == 'fr' ? 'fr' : 'en'};
 }

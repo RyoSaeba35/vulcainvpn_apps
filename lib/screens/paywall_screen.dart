@@ -225,8 +225,9 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     style: const TextStyle(color: Colors.white38, fontSize: 11, height: 1.4),
                   ),
                   const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       TextButton(
                         onPressed: () => _open('https://www.vulcainvpn.com/terms'),
@@ -279,7 +280,9 @@ class _PaywallScreenState extends State<PaywallScreen> {
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: Row(
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                runSpacing: 4,
                 children: [
                   Text(
                     _periodLabel(plan.period),

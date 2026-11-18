@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 import 'dart:io';
 import 'colors.dart';
 import 'l10n/app_localizations.dart';
+import 'l10n/languages.dart';
 import 'screens/auth_gate.dart';
 import 'services/security_checker.dart';
 import 'services/vpn_service_android.dart';
@@ -184,10 +185,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       title: 'Vulcain VPN',
       locale: _locale,
-      supportedLocales: const [
-        Locale('en', ''),
-        Locale('fr', ''),
-      ],
+      supportedLocales: [for (final l in appLanguages) Locale(l.code)],
       localizationsDelegates: const [
         AppLocalizations.delegate,
         GlobalMaterialLocalizations.delegate,
